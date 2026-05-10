@@ -210,7 +210,7 @@ FRAGMENT_EOF
     export KBUILD_BUILD_USER="$BUILD_USER"
     export KBUILD_BUILD_HOST="$BUILD_HOST"
 
-    log "Building kernel using AOSP build system..."
+    log "Building kernel using Bazel (kleaf)..."
     START_TIME=$(date +%s)
 
     (
@@ -225,14 +225,12 @@ FRAGMENT_EOF
     ) &
     HEARTBEAT_PID=$!
 
-    SKIP_VENDOR_BOOT=1 \
-    SKIP_EXT_MODULES=1 \
-    SKIP_CP_KERNEL_HDR=1 \
-    SKIP_MRPROPER=1 \
-    LTO=thin \
-    GKI_DEFCONFIG_FRAGMENT="$FRAGMENT" \
-    BUILD_CONFIG=common/build.config.gki.aarch64 \
-    build/kernel/build.sh -j"$(nproc)" \
+    tools/bazel run \
+        --config=stamp \
+        --config=fast \
+        --lto=thin \
+        //common:kernel_aarch64_dist \
+        -- --dist_dir=out/dist \
         || { kill "$HEARTBEAT_PID" 2>/dev/null; error "Build failed!"; }
 
     kill "$HEARTBEAT_PID" 2>/dev/null || true
@@ -250,7 +248,7 @@ FRAGMENT_EOF
     # ======================================================
     echo "::group::📦 Package AnyKernel3"
 
-    IMAGE_PATH="${KERNEL_DIR}/out/${ANDROID_VERSION}-${KERNEL_VERSION}/dist/Image"
+    IMAGE_PATH="${KERNEL_DIR}/out/dist/Image"
     [ -f "$IMAGE_PATH" ] || error "Kernel Image not found at: ${IMAGE_PATH}"
 
     cp "$IMAGE_PATH" "${AK3_DIR}/Image"
