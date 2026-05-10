@@ -100,14 +100,6 @@ main() {
     python3 "${ROOT_DIR}/fast_parallel_download.py" \
         || error "Kernel source download failed!"
 
-    if [ ! -f "${KERNEL_DIR}/build/build.sh" ]; then
-        log "Cloning kernel/build repo..."
-        git clone --depth=1 \
-            https://android.googlesource.com/kernel/build \
-            "${KERNEL_DIR}/build" \
-            || error "Failed to clone kernel/build!"
-    fi
-
     log "Kernel source ready ✅"
     echo "::endgroup::"
 
