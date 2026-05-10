@@ -104,6 +104,7 @@ main() {
     log "Listing kernel/ contents:"
     ls -la "${KERNEL_DIR}/"
     ls -la "${KERNEL_DIR}/build/" 2>/dev/null || log "kernel/build not found!"
+    ls -la "${KERNEL_DIR}/build/kernel/" 2>/dev/null || log "kernel/build/kernel not found!"
     echo "::endgroup::"
 
     # ======================================================
