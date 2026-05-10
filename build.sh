@@ -101,6 +101,9 @@ main() {
         || error "Kernel source download failed!"
 
     log "Kernel source ready ✅"
+    log "Listing kernel/ contents:"
+    ls -la "${KERNEL_DIR}/"
+    ls -la "${KERNEL_DIR}/build/" 2>/dev/null || log "kernel/build not found!"
     echo "::endgroup::"
 
     # ======================================================
