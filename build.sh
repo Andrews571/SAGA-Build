@@ -105,6 +105,17 @@ main() {
     ls -la "${KERNEL_DIR}/"
     ls -la "${KERNEL_DIR}/build/" 2>/dev/null || log "kernel/build not found!"
     ls -la "${KERNEL_DIR}/build/kernel/" 2>/dev/null || log "kernel/build/kernel not found!"
+
+    # Fallback: jika build/kernel/build.sh tidak ada setelah parallel download
+    if [ ! -f "${KERNEL_DIR}/build/kernel/build.sh" ]; then
+        log "build/kernel/build.sh not found! Falling back to explicit clone..."
+        git clone --depth=1 \
+            https://android.googlesource.com/kernel/build \
+            "${KERNEL_DIR}/build" \
+            || error "Failed to clone kernel/build!"
+        log "kernel/build cloned successfully ✅"
+    fi
+
     echo "::endgroup::"
 
     # ======================================================
