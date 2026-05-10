@@ -212,7 +212,7 @@ FRAGMENT_EOF
     LTO=thin \
     GKI_DEFCONFIG_FRAGMENT="$FRAGMENT" \
     BUILD_CONFIG=common/build.config.gki.aarch64 \
-    build/build.sh -j"$(nproc)" \
+    build/kernel/build.sh -j"$(nproc)" \
         || { kill "$HEARTBEAT_PID" 2>/dev/null; error "Build failed!"; }
 
     kill "$HEARTBEAT_PID" 2>/dev/null || true
