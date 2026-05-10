@@ -11,8 +11,7 @@ set -euo pipefail
 
 ANDROID_VERSION="android14"
 KERNEL_VERSION="6.1"
-OS_PATCH_LEVEL="2025-11"
-FORMATTED_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-${OS_PATCH_LEVEL}"
+FORMATTED_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 ARCH="arm64"
 BUILD_USER="chainonyourdoor"
@@ -85,14 +84,11 @@ main() {
     cd "$KERNEL_DIR"
 
     MAIN_MANIFEST_URL="https://android.googlesource.com/kernel/manifest/+/refs/heads/common-${FORMATTED_BRANCH}/default.xml?format=TEXT"
-    DEPRECATED_MANIFEST_URL="https://android.googlesource.com/kernel/manifest/+/refs/heads/deprecated/common-${FORMATTED_BRANCH}/default.xml?format=TEXT"
 
     if curl -fsSL "$MAIN_MANIFEST_URL" | base64 -d > manifest.xml; then
-        log "Manifest fetched from main branch."
+        log "Manifest fetched from common-${FORMATTED_BRANCH}."
     else
-        log "Main branch not found, trying deprecated..."
-        curl -fsSL "$DEPRECATED_MANIFEST_URL" | base64 -d > manifest.xml \
-            || error "Failed to fetch manifest!"
+        error "Failed to fetch manifest for ${FORMATTED_BRANCH}!"
     fi
 
     log "Downloading kernel source (parallel)..."
