@@ -20,10 +20,12 @@ BUILD_HOST="LuminaireCI"
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 KERNEL_DIR="${ROOT_DIR}/kernel"
 AK3_DIR="${ROOT_DIR}/AnyKernel3"
-KERNEL_PATCHES_DIR="${ROOT_DIR}/kernel_patches"
 FRAGMENT="${ROOT_DIR}/luminaire.fragment"
 LOG_FILE="/tmp/luminaire-$(date +%s).log"
 touch "$LOG_FILE"
+
+BAZEL_CACHE_DIR="${HOME}/.cache/bazel"
+LD_CACHE_DIR="${HOME}/.ld_cache"
 
 # ======================================================
 # 📦 IMPORT FUNCTIONS
@@ -52,13 +54,10 @@ main() {
 
     mkdir -p "$KERNEL_DIR"
 
-    log "Cloning kernel_patches..."
-    git clone --depth=1 https://github.com/WildKernels/kernel_patches.git \
-        "${ROOT_DIR}/kernel_patches_wild"
-
     log "Cloning AnyKernel3..."
-    git clone --depth=1 -b gki-2.0 \
-        https://github.com/WildKernels/AnyKernel3.git "$AK3_DIR"
+    git clone --depth=1 \
+        "https://x-access-token:${PERSONAL_TOKEN}@github.com/chainonyourdoor/AnyKernel3-Luminaire" \
+        "$AK3_DIR"
 
     log "Cloning AOSP build-tools..."
     git clone https://android.googlesource.com/kernel/prebuilts/build-tools \
@@ -97,12 +96,6 @@ main() {
         || error "Kernel source download failed!"
 
     log "Kernel source ready ✅"
-    log "Listing kernel/ contents:"
-    ls -la "${KERNEL_DIR}/"
-    ls -la "${KERNEL_DIR}/build/" 2>/dev/null || log "kernel/build not found!"
-    ls -la "${KERNEL_DIR}/build/kernel/" 2>/dev/null || log "kernel/build/kernel not found!"
-
-
     echo "::endgroup::"
 
     # ======================================================
@@ -189,6 +182,16 @@ FRAGMENT_EOF
     export KBUILD_BUILD_USER="$BUILD_USER"
     export KBUILD_BUILD_HOST="$BUILD_HOST"
 
+    mkdir -p "$BAZEL_CACHE_DIR" "$LD_CACHE_DIR"
+
+    cat > "${KERNEL_DIR}/common/ld-wrapper" << 'LDWRAP_EOF'
+#!/bin/bash
+exec ld.lld "$@" --thinlto-cache-dir="$LD_CACHE_DIR" --thinlto-jobs="$(nproc --all)"
+LDWRAP_EOF
+    chmod +x "${KERNEL_DIR}/common/ld-wrapper"
+    export LD="${KERNEL_DIR}/common/ld-wrapper"
+    export HOSTLD="${KERNEL_DIR}/common/ld-wrapper"
+
     log "Building kernel using Bazel (kleaf)..."
     START_TIME=$(date +%s)
 
@@ -208,6 +211,7 @@ FRAGMENT_EOF
         --config=stamp \
         --config=fast \
         --lto=thin \
+        --disk_cache="${BAZEL_CACHE_DIR}" \
         //common:kernel_aarch64_dist \
         -- --dist_dir=out/dist \
         || { kill "$HEARTBEAT_PID" 2>/dev/null; error "Build failed!"; }

@@ -32,6 +32,20 @@ jobs:
         with:
           swap-size-gb: 10
 
+      - name: "♻️ Restore Bazel cache"
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/bazel
+          key: bazel-cache-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: bazel-cache-${{ github.ref_name }}-
+
+      - name: "♻️ Restore LD cache"
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.ld_cache
+          key: ld-cache-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: ld-cache-${{ github.ref_name }}-
+
       - name: "📦 Install Dependencies"
         run: |
           sudo apt-get update -qq
@@ -50,3 +64,38 @@ jobs:
           name: LuminaireProtocol-AnyKernel3
           path: /tmp/LuminaireProtocol-*.zip
           if-no-files-found: ignore
+
+      - name: "💾 Save Bazel cache"
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/bazel
+          key: bazel-cache-${{ github.ref_name }}-${{ github.run_id }}
+
+      - name: "💾 Save LD cache"
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.ld_cache
+          key: ld-cache-${{ github.ref_name }}-${{ github.run_id }}
+
+      - name: "🧹 Cleanup old caches"
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+        run: |
+          cleanup_cache() {
+            local PREFIX="$1"
+            local CURRENT_KEY="$2"
+            local CACHES
+            CACHES=$(gh api \
+              "/repos/${{ github.repository }}/actions/caches?per_page=100" \
+              --jq ".actions_caches[] | select(.key | startswith(\"${PREFIX}\")) | select(.key != \"${CURRENT_KEY}\") | .id")
+            if [ -n "$CACHES" ]; then
+              for ID in $CACHES; do
+                gh api --method DELETE "/repos/${{ github.repository }}/actions/caches/${ID}" || true
+              done
+            fi
+          }
+          cleanup_cache "bazel-cache-${{ github.ref_name }}-" "bazel-cache-${{ github.ref_name }}-${{ github.run_id }}"
+          cleanup_cache "ld-cache-${{ github.ref_name }}-" "ld-cache-${{ github.ref_name }}-${{ github.run_id }}"
