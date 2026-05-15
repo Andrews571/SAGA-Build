@@ -130,7 +130,7 @@ main() {
     echo "::group::🧹 Clean Dirty Flags"
     cd "${KERNEL_DIR}/common"
 
-    # Legacy build system
+    # Legacy build system dirty flag
     sed -i 's/-dirty//' scripts/setlocalversion
 
     # Kleaf/Bazel dirty flag
@@ -152,7 +152,7 @@ main() {
     echo "::group::🔩 Droidspaces KABI Patches"
     cd "${KERNEL_DIR}/common"
 
-    # For android14-6.1: apply sysvipc KABI fix 6_7_8
+    # For android14-6.1: apply sysvipc KABI fix
     SYSVIPC_PATCH="${ROOT_DIR}/kernel_patches/common/droidspaces/fix_sysvipc_kabi_6_7_8.patch"
     if [ -f "$SYSVIPC_PATCH" ]; then
         log "Applying sysvipc KABI fix..."
@@ -202,7 +202,7 @@ main() {
 
     cd "${KERNEL_DIR}/common"
 
-    # Apply fake patches for android14-6.1 (needed for SUSFS patch to apply)
+    # Apply fake patches for android14-6.1 (required for SUSFS patch to apply cleanly)
     log "Applying fake patches for android14-6.1 (sublevel: ${SUBLEVEL})..."
     if [ "${SUBLEVEL}" -le 25 ]; then
         sed -i '/^#include <trace\/events\/oom.h>$/a #include <trace/hooks/sched.h>' fs/proc/base.c
@@ -214,22 +214,22 @@ main() {
         sed -i '/^#include <trace\/hooks\/blk.h>$/d' fs/namespace.c
     fi
 
-    # Copy SUSFS kernel files
+    # Copy SUSFS kernel files to common
     cp "${ROOT_DIR}/susfs4ksu/kernel_patches/fs/"* "${KERNEL_DIR}/common/fs/"
     cp "${ROOT_DIR}/susfs4ksu/kernel_patches/include/linux/"* "${KERNEL_DIR}/common/include/linux/"
     cp "${ROOT_DIR}/susfs4ksu/kernel_patches/50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch" ./
 
-    # Apply KSU-Next SUSFS patch
+    # Apply KernelSU-Next SUSFS patch
     cd "${KERNEL_DIR}/KernelSU-Next"
     cp "${ROOT_DIR}/kernel_patches/wild/ksun-293ca01-susfs-v2.1.0-a14-6.1-ef16cbce.patch" ./
     patch -p1 < ksun-293ca01-susfs-v2.1.0-a14-6.1-ef16cbce.patch \
         || error "KSU SUSFS patch failed!"
 
-    # Apply SUSFS kernel patch
+    # Apply SUSFS main kernel patch
     cd "${KERNEL_DIR}/common"
     patch -p1 < "50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch" || true
 
-    # Revert fake patches
+    # Revert fake patches after SUSFS applied
     log "Reverting fake patches..."
     if [ "${SUBLEVEL}" -le 25 ]; then
         sed -i '/^#include <trace\/hooks\/sched.h>$/d' fs/proc/base.c
@@ -241,7 +241,7 @@ main() {
         sed -i '/^#include "internal.h"$/a #include <trace\/hooks\/blk.h>' fs/namespace.c
     fi
 
-    # PAD fix for sublevel <= 75
+    # PAD fix for older sublevels
     if [ "${SUBLEVEL}" -le 75 ]; then
         sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
     fi
@@ -255,7 +255,7 @@ main() {
     echo "::group::🔓 Module Version Check Bypass"
     cd "${KERNEL_DIR}"
 
-    # For 6.1: module version check is in kernel/module/version.c
+    # For kernel 6.1: version check lives in kernel/module/version.c
     MODULE_VERSION_FILE="common/kernel/module/version.c"
     if [ -f "$MODULE_VERSION_FILE" ]; then
         sed -i '/bad_version:/{:a;n;/return 0;/{s/return 0;/return 1;/;b};ba}' \
@@ -371,7 +371,7 @@ CONFIG_IP6_NF_NAT=y
 CONFIG_IP6_NF_TARGET_MASQUERADE=y
 FRAGMENT_EOF
 
-    # Copy ke lokasi Kleaf
+    # Copy to Kleaf fragment location
     cp "$FRAGMENT" "${KERNEL_DIR}/common/arch/arm64/configs/luminaire.fragment"
     log "Fragment ready ✅"
     echo "::endgroup::"
@@ -382,17 +382,17 @@ FRAGMENT_EOF
     echo "::group::🏷️ Kernel Branding"
     cd "${KERNEL_DIR}/common"
 
-    # Append -Luminaire ke version string
+    # Append -Luminaire to version string
     tac scripts/setlocalversion | awk '!seen && /^echo / {seen=1; next} 1' \
         | tac > scripts/setlocalversion.tmp
     mv scripts/setlocalversion.tmp scripts/setlocalversion
     echo 'echo "-Luminaire"' >> scripts/setlocalversion
     chmod +x scripts/setlocalversion
 
-    # Clear scmversion
+    # Clear scmversion file
     : > .scmversion
 
-    # Set reproducible timestamp dari last commit
+    # Set reproducible timestamp from last commit
     COMMIT_TIMESTAMP=$(git log -1 --format=%ct 2>/dev/null || echo "$(date +%s)")
     export SOURCE_DATE_EPOCH=$COMMIT_TIMESTAMP
     export KBUILD_BUILD_TIMESTAMP="@${COMMIT_TIMESTAMP}"
@@ -425,7 +425,7 @@ LDWRAP_EOF
     log "Building kernel using Kleaf/Bazel..."
     START_TIME=$(date +%s)
 
-    # Heartbeat agar CI tidak timeout
+    # Heartbeat to prevent CI timeout
     (
         set +eo pipefail
         while true; do
@@ -463,7 +463,7 @@ LDWRAP_EOF
 
     # Kleaf output
     IMAGE_PATH="${KERNEL_DIR}/bazel-bin/common/kernel_aarch64/Image"
-    # Fallback legacy
+    # Fallback to legacy output path
     [ -f "$IMAGE_PATH" ] || IMAGE_PATH="${KERNEL_DIR}/out/${ANDROID_VERSION}-${KERNEL_VERSION}/dist/Image"
     [ -f "$IMAGE_PATH" ] || error "Kernel Image not found!"
 
