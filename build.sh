@@ -220,17 +220,9 @@ main() {
 
     # Apply KernelSU-Next SUSFS patch
     cd "${KERNEL_DIR}/KernelSU-Next"
-    # Dynamically find matching KSU+SUSFS patch based on actual KSU commit
-    KSU_SHORT=$(cd "${KERNEL_DIR}/KernelSU-Next" && git rev-parse --short HEAD)
-    SUSFS_SHORT=$(cd "${ROOT_DIR}/susfs4ksu" && git rev-parse --short HEAD)
-    KSU_PATCH=$(find "${ROOT_DIR}/kernel_patches/wild" -name "ksun-${KSU_SHORT}*a14-6.1*.patch" | head -1)
-
-    if [ -z "$KSU_PATCH" ]; then
-        log "No exact patch found for KSU ${KSU_SHORT}, trying latest available..."
-        KSU_PATCH=$(find "${ROOT_DIR}/kernel_patches/wild" -name "ksun-*a14-6.1*.patch" | sort | tail -1)
-    fi
-
-    [ -n "$KSU_PATCH" ] || error "No KSU SUSFS patch found!"
+    # Apply KSU+SUSFS patch from our own patches directory
+    KSU_PATCH=$(find "${ROOT_DIR}/patches" -name "ksun-*a14-6.1*.patch" | sort | tail -1)
+    [ -n "$KSU_PATCH" ] || error "No KSU SUSFS patch found in patches/!"
     log "Using patch: $(basename $KSU_PATCH)"
     cp "$KSU_PATCH" ./
     patch -p1 < "$(basename $KSU_PATCH)" \
