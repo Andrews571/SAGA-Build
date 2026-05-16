@@ -182,8 +182,8 @@ main() {
     sed -i "s/^KSU_VERSION_TAG_FALLBACK := v0.0.1$/KSU_VERSION_TAG_FALLBACK := ${KSU_GIT_TAG}/" Kbuild
 
     # Patch sucompat: skip UID=0 (root) processes to prevent init panic on MIUI/HyperOS
-    SUCOMPAT_FILE="${KERNEL_DIR}/KernelSU-Next/kernel/sucompat.c"
-    [ -f "$SUCOMPAT_FILE" ] || error "sucompat.c not found!"
+    SUCOMPAT_FILE=$(find "${KERNEL_DIR}/KernelSU-Next" -name "sucompat.c" | head -1)
+    [ -n "$SUCOMPAT_FILE" ] && [ -f "$SUCOMPAT_FILE" ] || error "sucompat.c not found!"
     python3 -c "
 import re, sys
 content = open('${KERNEL_DIR}/KernelSU-Next/kernel/sucompat.c').read()
