@@ -170,7 +170,7 @@ main() {
     cd "${KERNEL_DIR}"
 
     curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" \
-        | bash -s 293ca016cf7196c2e96403a929ea3f464fd3568b \
+        | bash -s 4c9737aed458843e920de95b0bcad56cf790663b \
         || error "Failed to setup KernelSU-Next!"
 
     cd "${KERNEL_DIR}/KernelSU-Next/kernel"
@@ -222,8 +222,8 @@ main() {
 
     # Apply KernelSU-Next SUSFS patch
     cd "${KERNEL_DIR}/KernelSU-Next"
-    cp "${ROOT_DIR}/kernel_patches/wild/ksun-293ca01-susfs-v2.1.0-a14-6.1-ef16cbce.patch" ./
-    patch -p1 < ksun-293ca01-susfs-v2.1.0-a14-6.1-ef16cbce.patch \
+    cp "${ROOT_DIR}/kernel_patches/wild/ksun-4c9737a-susfs-v2.1.0-a14-6.1-ef16cbce.patch" ./
+    patch -p1 < ksun-4c9737a-susfs-v2.1.0-a14-6.1-ef16cbce.patch \
         || error "KSU SUSFS patch failed!"
 
     # Apply SUSFS main kernel patch
