@@ -220,13 +220,9 @@ main() {
 
     # Apply KernelSU-Next SUSFS patch
     cd "${KERNEL_DIR}/KernelSU-Next"
-    # Apply KSU+SUSFS patch from our own patches directory
-    KSU_PATCH=$(find "${ROOT_DIR}/patches" -name "ksun-*a14-6.1*.patch" | sort | tail -1)
-    [ -n "$KSU_PATCH" ] || error "No KSU SUSFS patch found in patches/!"
-    log "Using patch: $(basename $KSU_PATCH)"
-    cp "$KSU_PATCH" ./
-    patch -p1 < "$(basename $KSU_PATCH)" \
-        || error "KSU SUSFS patch failed!"
+    # Apply SUSFS to KernelSU-Next programmatically (commit-agnostic)
+    python3 "${ROOT_DIR}/patches/apply_susfs_to_ksu.py" "${KERNEL_DIR}/KernelSU-Next" \
+        || error "SUSFS apply to KSU-Next failed!"
 
     # Apply SUSFS main kernel patch
     cd "${KERNEL_DIR}/common"
