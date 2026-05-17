@@ -170,7 +170,7 @@ main() {
     cd "${KERNEL_DIR}"
 
     curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" \
-        | bash -s \
+        | bash -s 5a4a71874caaad06aa126f761c93391de1d32361 \
         || error "Failed to setup KernelSU-Next!"
 
     cd "${KERNEL_DIR}/KernelSU-Next/kernel"
@@ -194,10 +194,11 @@ main() {
     cd "${ROOT_DIR}"
 
     SUSFS_BRANCH="gki-${ANDROID_VERSION}-${KERNEL_VERSION}-dev"
+    SUSFS_COMMIT="51e83565"
     log "Cloning SUSFS branch: ${SUSFS_BRANCH}..."
     git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH" susfs4ksu \
         || error "Failed to clone SUSFS!"
-    cd "${ROOT_DIR}"
+    cd susfs4ksu && git checkout "$SUSFS_COMMIT" && cd "${ROOT_DIR}"
 
     cd "${KERNEL_DIR}/common"
 
