@@ -190,16 +190,32 @@ print("[OK] kernel/core/init.c")
 # kernel/policy/allowlist.c — remove manager/webview checks
 # ======================================================
 content = read("kernel/policy/allowlist.c")
-pattern = re.compile(
-    r'    if \(likely\(ksu_is_manager_appid_valid\(\)\).*?return false;\n    \}\n',
+# Remove manager appid check block
+pattern_manager = re.compile(
+    r'	+if \(likely\(ksu_is_manager_appid_valid\(\)\).*?return false;
+	+\}
+',
     re.DOTALL
 )
-if pattern.search(content):
-    content = pattern.sub('', content, count=2)
+# Remove webview zygote check block
+pattern_webview = re.compile(
+    r'	+if \(unlikely\(uid == WEBVIEW_ZYGOTE_UID\)\).*?return false;
+	+\}
+',
+    re.DOTALL
+)
+changed = False
+if pattern_manager.search(content):
+    content = pattern_manager.sub('', content, count=1)
+    changed = True
+if pattern_webview.search(content):
+    content = pattern_webview.sub('', content, count=1)
+    changed = True
+if changed:
     write("kernel/policy/allowlist.c", content)
     print("[OK] kernel/policy/allowlist.c")
 else:
-    print("[WARN] kernel/policy/allowlist.c: pattern not found")
+    print("[WARN] kernel/policy/allowlist.c: patterns not found")
 
 # ======================================================
 # kernel/policy/app_profile.c — remove tp_marker include

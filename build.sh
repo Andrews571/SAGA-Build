@@ -220,9 +220,7 @@ main() {
 
     # Apply KernelSU-Next SUSFS patch
     cd "${KERNEL_DIR}/KernelSU-Next"
-    # Apply SUSFS to KernelSU-Next programmatically (commit-agnostic)
-    python3 "${ROOT_DIR}/patches/apply_susfs_to_ksu.py" "${KERNEL_DIR}/KernelSU-Next" \
-        || error "SUSFS apply to KSU-Next failed!"
+
 
     # Apply SUSFS main kernel patch
     cd "${KERNEL_DIR}/common"
@@ -246,6 +244,11 @@ main() {
     fi
 
     log "SUSFS setup ✅"
+
+    # Apply SUSFS changes to KernelSU-Next (after SUSFS headers are in place)
+    python3 "${ROOT_DIR}/patches/apply_susfs_to_ksu.py" "${KERNEL_DIR}/KernelSU-Next" \
+        || error "SUSFS apply to KSU-Next failed!"
+
     echo "::endgroup::"
 
     # ======================================================
