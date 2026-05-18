@@ -144,10 +144,14 @@ download_kernel_source() {
     else
         log "Downloading manifest for ${KERNEL_BRANCH}..."
         mkdir -p "${WORK_DIR}"
-        curl -fsSL \
-            "https://android.googlesource.com/kernel/manifest/+/refs/heads/${KERNEL_BRANCH}/default.xml?format=TEXT" \
-            | base64 -d > "${WORK_DIR}/manifest.xml" \
-            || error "Failed to download manifest!"
+        git clone -q --depth=1 \
+            -b "${KERNEL_BRANCH}" \
+            https://android.googlesource.com/kernel/manifest \
+            /tmp/kernel-manifest \
+            || error "Failed to clone manifest repo!"
+        cp /tmp/kernel-manifest/default.xml "${WORK_DIR}/manifest.xml" \
+            || error "default.xml not found in manifest repo!"
+        rm -rf /tmp/kernel-manifest
 
         log "Syncing kernel source via fast_parallel_download..."
         cd "${WORK_DIR}"
