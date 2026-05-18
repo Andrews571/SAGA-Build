@@ -19,6 +19,10 @@ jobs:
       TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
       TELEGRAM_THREAD_ID_BUILD: ${{ secrets.TELEGRAM_THREAD_ID_BUILD }}
       TELEGRAM_THREAD_ID_LOG:   ${{ secrets.TELEGRAM_THREAD_ID_LOG }}
+      USE_KERNEL_CACHE:         "true"
+      USE_CLANG_CACHE:          "true"
+      USE_AK3_CACHE:            "true"
+      CCACHE_DIR:               ${{ github.workspace }}/.ccache
 
     steps:
       - name: "🌀 Clone LuminaireProtocol"
@@ -27,32 +31,30 @@ jobs:
             "https://x-access-token:${PERSONAL_TOKEN}@github.com/chainonyourdoor/LuminaireProtocol" \
             .
 
-      - name: "🧰 Setup Swap Space"
-        uses: thejerrybao/setup-swap-space@v1
-        with:
-          swap-size-gb: 10
-
-      - name: "♻️ Restore Bazel cache"
+      - name: "♻️ Restore ccache"
         uses: actions/cache/restore@v5
         with:
-          path: ~/.cache/bazel
-          key: bazel-cache-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: bazel-cache-${{ github.ref_name }}-
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: ccache-${{ github.ref_name }}-
 
-      - name: "♻️ Restore LD cache"
+      - name: "♻️ Restore Greenforce Clang"
         uses: actions/cache/restore@v5
         with:
-          path: ~/.ld_cache
-          key: ld-cache-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: ld-cache-${{ github.ref_name }}-
+          path: ~/clang-cache
+          key: clang-greenforce-${{ github.ref_name }}
 
-      - name: "📦 Install Dependencies"
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            bc bison flex libssl-dev libelf-dev \
-            dwarves cpio git curl wget zip patch rsync \
-            aria2 pigz python3 perl
+      - name: "♻️ Restore kernel source"
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/kernel-cache
+          key: kernel-src-${{ github.ref_name }}
+
+      - name: "♻️ Restore AnyKernel3"
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/ak3-cache
+          key: ak3-${{ github.ref_name }}
 
       - name: "✨ Build"
         run: bash build.sh
@@ -65,19 +67,33 @@ jobs:
           path: /tmp/LuminaireProtocol-*.zip
           if-no-files-found: ignore
 
-      - name: "💾 Save Bazel cache"
+      - name: "💾 Save ccache"
         if: always()
         uses: actions/cache/save@v5
         with:
-          path: ~/.cache/bazel
-          key: bazel-cache-${{ github.ref_name }}-${{ github.run_id }}
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ github.ref_name }}-${{ github.run_id }}
 
-      - name: "💾 Save LD cache"
+      - name: "💾 Save Greenforce Clang"
         if: always()
         uses: actions/cache/save@v5
         with:
-          path: ~/.ld_cache
-          key: ld-cache-${{ github.ref_name }}-${{ github.run_id }}
+          path: ~/clang-cache
+          key: clang-greenforce-${{ github.ref_name }}
+
+      - name: "💾 Save kernel source"
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ~/kernel-cache
+          key: kernel-src-${{ github.ref_name }}
+
+      - name: "💾 Save AnyKernel3"
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ~/ak3-cache
+          key: ak3-${{ github.ref_name }}
 
       - name: "🧹 Cleanup old caches"
         if: always()
@@ -97,5 +113,4 @@ jobs:
               done
             fi
           }
-          cleanup_cache "bazel-cache-${{ github.ref_name }}-" "bazel-cache-${{ github.ref_name }}-${{ github.run_id }}"
-          cleanup_cache "ld-cache-${{ github.ref_name }}-" "ld-cache-${{ github.ref_name }}-${{ github.run_id }}"
+          cleanup_cache "ccache-${{ github.ref_name }}-" "ccache-${{ github.ref_name }}-${{ github.run_id }}"
