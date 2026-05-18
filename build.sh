@@ -203,6 +203,15 @@ main() {
         source "$fix" || error "Fix failed: $(basename "$fix")"
     done
     log "All fixes applied ✅"
+
+    # Apply kernel patches
+    for patch in "${PATCH_REPO}/patches/"*.patch; do
+        [ -f "$patch" ] || continue
+        log "Applying patch: $(basename $patch)..."
+        patch -p1 -d "$KERNEL_SRC" < "$patch"             || error "Patch failed: $(basename $patch)"
+    done
+    log "All patches applied ✅"
+
     echo "::endgroup::"
 
     # ======================================================
