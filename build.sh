@@ -32,7 +32,7 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK_DIR="${ROOT_DIR}/workspace"
 CLANG_DIR="${ROOT_DIR}/greenforce-clang"
 CLANG_BIN="${CLANG_DIR}/bin"
-KERNEL_SRC="${WORK_DIR}/kernel"
+KERNEL_SRC="${WORK_DIR}/common"
 AK3_DIR="${WORK_DIR}/AnyKernel3"
 OUT_DIR="${WORK_DIR}/out"
 PATCH_REPO="${ROOT_DIR}/Luminaire-Patch/${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
@@ -138,16 +138,24 @@ download_kernel_source() {
 
     if [ "${USE_KERNEL_CACHE:-false}" = "true" ] && [ -d "${HOME}/kernel-cache/arch" ]; then
         log "Restoring kernel source from cache..."
+        mkdir -p "${KERNEL_SRC}"
         cp -a "${HOME}/kernel-cache/." "${KERNEL_SRC}/"
         log "Kernel source restored ✅"
     else
-        log "Cloning kernel source..."
-        git clone -q --depth=1 \
-            --filter=blob:limit=10M \
-            -b "$KERNEL_BRANCH" \
-            "$KERNEL_REPO" \
-            "$KERNEL_SRC" || error "Failed to clone kernel!"
-        log "Saving to cache..."
+        log "Downloading manifest for ${KERNEL_BRANCH}..."
+        mkdir -p "${WORK_DIR}"
+        curl -fsSL \
+            "https://android.googlesource.com/kernel/manifest/+/refs/heads/${KERNEL_BRANCH}/default.xml?format=TEXT" \
+            | base64 -d > "${WORK_DIR}/manifest.xml" \
+            || error "Failed to download manifest!"
+
+        log "Syncing kernel source via fast_parallel_download..."
+        cd "${WORK_DIR}"
+        python3 "${ROOT_DIR}/fast_parallel_download.py" \
+            || error "fast_parallel_download failed!"
+        cd "${ROOT_DIR}"
+
+        log "Saving kernel source to cache..."
         mkdir -p "${HOME}/kernel-cache"
         rsync -a --exclude='.git' "${KERNEL_SRC}/" "${HOME}/kernel-cache/"
     fi
