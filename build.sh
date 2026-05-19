@@ -64,6 +64,7 @@ main() {
 
     case "$PHASE" in
         prep)
+            clone_patch_repo
             run_setup
             download_kernel_source
             ;;
