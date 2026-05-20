@@ -13,6 +13,3 @@ error() {
   exit 1
 }
 
-config() {
-  "$KERNEL_SRC/scripts/config" --file "$DEFCONFIG_FILE" "$@"
-}
