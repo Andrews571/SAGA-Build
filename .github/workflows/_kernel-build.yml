@@ -12,6 +12,9 @@ on:
       enable_lto:
         type: string
         default: "NONE"
+      warming_mode:
+        type: string
+        default: "false"
     secrets:
       PERSONAL_TOKEN:
         required: true
@@ -115,6 +118,7 @@ jobs:
       CCACHE_MAXSIZE:           "5G"
       VARIANT:                  ${{ inputs.variant }}
       ENABLE_LTO:               ${{ inputs.enable_lto }}
+      WARMING_MODE:             ${{ inputs.warming_mode }}
 
     steps:
       - name: "🌀 Clone LuminaireProtocol"
