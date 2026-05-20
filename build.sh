@@ -27,6 +27,7 @@ ARCH="arm64"
 VARIANT="${VARIANT:-VANILLA}"
 PREP_MODE="${PREP_MODE:-false}"
 WARMING_MODE="${WARMING_MODE:-false}"
+ENABLE_LTO="${ENABLE_LTO:-NONE}"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK_DIR="${ROOT_DIR}/workspace"
