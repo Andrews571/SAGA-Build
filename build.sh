@@ -67,7 +67,7 @@ MAKE_ARGS=(
 )
 
 DATE=$(date +"%b%d")
-ZIP_NAME="LuminaireProtocol-${DATE}R${GITHUB_RUN_NUMBER:-0}.zip"
+ZIP_NAME="LuminaireAnykernel3-${DATE}R${GITHUB_RUN_NUMBER:-0}.zip"
 
 LOG_FILE="/tmp/luminaire-$(date +%s).log"
 touch "$LOG_FILE"
@@ -310,9 +310,8 @@ send_telegram() {
             -F "chat_id=${TELEGRAM_CHAT_ID}" \
             ${TELEGRAM_THREAD_ID_BUILD:+-F "message_thread_id=${TELEGRAM_THREAD_ID_BUILD}"} \
             -F "document=@${ZIP_PATH};filename=${ZIP_NAME}" \
-            -F "caption=✨ <b>Luminaire Protocol</b>
+            -F "caption=<b>Luminaire ${VARIANT}</b>
 Linux     : ${LINUX_VERSION:-N/A}
-Variant   : ${VARIANT}
 Compiler  : ${COMPILER_STRING:-N/A}
 Date      : $(date +'%d %b %Y')" \
             -F "parse_mode=HTML" || true
