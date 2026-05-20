@@ -55,6 +55,7 @@ MAKE_ARGS=(
     -C "$KERNEL_SRC"
     O="$OUT_DIR"
     ARCH="$ARCH"
+    CC="${CCACHE_BIN} ${CLANG_DIR}/bin/clang"
     CROSS_COMPILE=aarch64-linux-gnu-
     CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
     LLVM=1
