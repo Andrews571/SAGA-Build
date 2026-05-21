@@ -62,7 +62,6 @@ MAKE_ARGS=(
     BRANCH="${KERNEL_BRANCH}"
     KMI_GENERATION="${KMI_GENERATION}"
     LOCALVERSION="-${KERNEL_NAME}"
-    KBUILD_BUILD_VERSION=1
     -j"$(nproc --all)"
 )
 
@@ -203,6 +202,7 @@ run_fixes() {
 run_patches() {
     echo "::group::🩹 Patches"
     export KBUILD_BUILD_TIMESTAMP="$(git -C "$KERNEL_SRC" log -1 --format=%cd --date=format:'%a %b %d %T %Z %Y' 2>/dev/null || date)"
+    export KBUILD_BUILD_VERSION=1
 
     touch "${KERNEL_SRC}/.scmversion"
 
