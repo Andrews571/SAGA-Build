@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   Luminaire:
-    uses: ./.github/workflows/_kernel-build.yml
+    uses: ./.github/workflows/kernel-build.yml
     with:
       variant:        ${{ inputs.variant }}
       update_arsenal: ${{ inputs.update_arsenal }}
