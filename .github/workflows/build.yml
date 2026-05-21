@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  kernel-build:
+  Luminaire:
     uses: ./.github/workflows/_kernel-build.yml
     with:
       variant:        ${{ inputs.variant }}
