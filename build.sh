@@ -252,6 +252,12 @@ build_kernel() {
     echo "::group::📊 Ccache Stats"
     [ -f "$CCACHE_BIN" ] && $CCACHE_BIN --show-stats 2>/dev/null || true
     echo "::endgroup::"
+
+    echo "::group::🔍 Ccache Miss Log"
+    if [ -f "/tmp/ccache.log" ]; then
+        grep "Result: cache_miss" /tmp/ccache.log | awk '{print $NF}' | sort | uniq
+    fi
+    echo "::endgroup::"
 }
 
 # ======================================================
