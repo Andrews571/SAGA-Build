@@ -36,7 +36,7 @@ jobs:
   # 🧰 PREPARATION
   # ======================================================
   prep:
-    name: "Arsenal Preparation"
+    name: "🧰 Arsenal Preparation"
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
