@@ -17,7 +17,7 @@ on:
           - "yes"
           - "no"
       enable_lto:
-        description: "⚠️ Enable LTO"
+        description: "⚠️ LTO"
         type: choice
         default: "NONE"
         options:
