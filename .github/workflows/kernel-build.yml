@@ -49,6 +49,7 @@ jobs:
       USE_CLANG_CACHE:  ${{ inputs.update_arsenal != 'yes' }}
       USE_KERNEL_CACHE: ${{ inputs.update_arsenal != 'yes' }}
       USE_AK3_CACHE:    ${{ inputs.update_arsenal != 'yes' }}
+      KERNEL_VERSION:   ${{ inputs.kernel_version }}
 
     steps:
       - name: "Clone LuminaireProtocol"
@@ -66,8 +67,8 @@ jobs:
             ~/ak3-cache
             ~/kernel-cache
             ~/.apt-cache
-          key: arsenal-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: arsenal-${{ github.ref_name }}-
+          key: arsenal-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: arsenal-${{ inputs.kernel_version }}-${{ github.ref_name }}-
 
       - name: "Run Preparation"
         run: bash build.sh
@@ -82,7 +83,7 @@ jobs:
             ~/ak3-cache
             ~/kernel-cache
             ~/.apt-cache
-          key: arsenal-${{ github.ref_name }}-${{ github.run_id }}
+          key: arsenal-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
 
       - name: "Cleanup Old Arsenal"
         if: always()
@@ -91,7 +92,7 @@ jobs:
         run: |
           CACHES=$(gh api \
             "/repos/${{ github.repository }}/actions/caches?per_page=100" \
-            --jq ".actions_caches[] | select(.key | startswith(\"arsenal-${{ github.ref_name }}-\")) | select(.key != \"arsenal-${{ github.ref_name }}-${{ github.run_id }}\") | .id")
+            --jq ".actions_caches[] | select(.key | startswith(\"arsenal-${{ inputs.kernel_version }}-${{ github.ref_name }}-\")) | select(.key != \"arsenal-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}\") | .id")
           if [ -n "$CACHES" ]; then
             for ID in $CACHES; do
               gh api --method DELETE "/repos/${{ github.repository }}/actions/caches/${ID}" || true
@@ -138,9 +139,9 @@ jobs:
       - name: "Restore ${{ inputs.variant }} Cache"
         uses: ./.github/actions/restore-caches
         with:
-          arsenal-key: arsenal-${{ github.ref_name }}-${{ github.run_id }}
-          ccache-key: ccache-data-${{ inputs.variant }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
-          ccache-restore-keys: ccache-data-${{ inputs.variant }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
+          arsenal-key: arsenal-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
+          ccache-key: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
+          ccache-restore-keys: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
           gh-token: ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Build"
@@ -150,6 +151,6 @@ jobs:
         uses: ./.github/actions/save-caches
         if: always()
         with:
-          ccache-key: ccache-data-${{ inputs.variant }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
-          ccache-prefix: ccache-data-${{ inputs.variant }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
+          ccache-key: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
+          ccache-prefix: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
           gh-token: ${{ secrets.PERSONAL_TOKEN }}
