@@ -33,23 +33,21 @@ DEFCONFIG="gki_defconfig"
 ARCH="arm64"
 
 VARIANT="${VARIANT:-VANILLA}"
-PREP_MODE="${PREP_MODE:-false}"
+PREPARE_ARSENAL="${PREPARE_ARSENAL:-false}"
 WARMING_MODE="${WARMING_MODE:-false}"
 ENABLE_LTO="${ENABLE_LTO:-NONE}"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORK_DIR="${ROOT_DIR}/workspace"
+WORKSPACE_DIR="${ROOT_DIR}/workspace"
 CLANG_DIR="${ROOT_DIR}/greenforce-clang"
-CLANG_BIN="${CLANG_DIR}/bin"
-KERNEL_DIR="${WORK_DIR}/kernel"
+KERNEL_DIR="${WORKSPACE_DIR}/kernel"
 KERNEL_SRC="${KERNEL_DIR}/common"
-AK3_DIR="${WORK_DIR}/AnyKernel3"
-OUT_DIR="${WORK_DIR}/out"
-PATCH_REPO="${ROOT_DIR}/Luminaire-Patch/${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
-COMMON_REPO="${ROOT_DIR}/Luminaire-Patch/common"
+ANYKERNEL_DIR="${WORKSPACE_DIR}/AnyKernel3"
+OUT_DIR="${WORKSPACE_DIR}/out"
+VERSION_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
+COMMON_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"
 
 CCACHE_BIN="${ROOT_DIR}/ccache-bin/ccache"
-CCACHE_WRAPPER_DIR="${ROOT_DIR}/ccache-wrappers"
 export CCACHE_DIR="${CCACHE_DIR:-${ROOT_DIR}/.ccache}"
 export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-5G}"
 export CCACHE_COMPRESS=1
@@ -69,13 +67,9 @@ MAKE_ARGS=(
     LLVM=1
     LLVM_IAS=1
     BRANCH="${KERNEL_BRANCH}"
-    KMI_GENERATION="${KMI_GENERATION}"
     LOCALVERSION="-${KERNEL_NAME}"
     -j"$(nproc --all)"
 )
-
-DATE=$(date +"%b%d")
-ZIP_NAME="LuminaireAk3-placeholder.zip"
 
 # ======================================================
 # 🚀 MAIN
@@ -97,7 +91,7 @@ main() {
     run_setup
     download_kernel_source
 
-    if [ "$PREP_MODE" = "true" ]; then
+    if [ "$PREPARE_ARSENAL" = "true" ]; then
         log "✅ Prep Complete!"
         exit 0
     fi
@@ -140,7 +134,7 @@ clone_patch_repo() {
 
 run_setup() {
     echo "::group::📦 Setup"
-    for script in "${COMMON_REPO}/setup/"*.sh; do
+    for script in "${COMMON_PATCH_DIR}/setup/"*.sh; do
         log "Running: $(basename "$script")..."
         source "$script" || error "Setup failed: $(basename "$script")"
     done
@@ -170,6 +164,7 @@ download_kernel_source() {
     SUBLEVEL="$(grep '^SUBLEVEL = ' "${KERNEL_SRC}/Makefile" | awk '{print $3}')"
     KMI_GENERATION="$(grep '^KMI_GENERATION=' "${KERNEL_SRC}/build.config.common" "${KERNEL_SRC}/build.config.constants" 2>/dev/null | head -1 | cut -d= -f2)"
     [ -z "$KMI_GENERATION" ] && error "KMI_GENERATION not found in kernel source!"
+    MAKE_ARGS+=(KMI_GENERATION="${KMI_GENERATION}")
     ZIP_NAME="LuminaireAk3-${KERNEL_VERSION}.${SUBLEVEL}-R${GITHUB_RUN_NUMBER:-0}.zip"
     export ZIP_NAME
     log "Kernel source ready ✅ (sublevel: ${SUBLEVEL}, KMI: ${KMI_GENERATION})"
@@ -183,11 +178,11 @@ download_kernel_source() {
 
 run_fixes() {
     echo "::group::🔧 Fixes"
-    for fix in "${COMMON_REPO}/fixes/"*.sh; do
+    for fix in "${COMMON_PATCH_DIR}/fixes/"*.sh; do
         log "Applying: $(basename "$fix")..."
         source "$fix" || error "Fix failed: $(basename "$fix")"
     done
-    for patch in "${PATCH_REPO}/patches/"*.patch; do
+    for patch in "${VERSION_PATCH_DIR}/patches/"*.patch; do
         [ -f "$patch" ] || continue
         log "Applying patch: $(basename "$patch")..."
         if patch -p1 --dry-run --forward -d "$KERNEL_SRC" < "$patch" > /dev/null 2>&1; then
@@ -217,7 +212,7 @@ run_patches() {
     make "${MAKE_ARGS[@]}" "$DEFCONFIG" || error "Defconfig failed!"
 
     log "Applying Luminaire configs..."
-    source "${COMMON_REPO}/luminaire_defconfig.sh"
+    source "${COMMON_PATCH_DIR}/luminaire_defconfig.sh"
 
     log "Syncing config..."
     make "${MAKE_ARGS[@]}" olddefconfig || error "olddefconfig failed!"
@@ -269,14 +264,14 @@ build_kernel() {
 package_anykernel3() {
     echo "::group::📦 Package AnyKernel3"
     if [ "${USE_AK3_CACHE:-false}" = "true" ] && [ -d "${HOME}/ak3-cache" ]; then
-        cp -a "${HOME}/ak3-cache/." "${AK3_DIR}/"
+        cp -a "${HOME}/ak3-cache/." "${ANYKERNEL_DIR}/"
         log "AnyKernel3 restored from cache ✅"
     else
         git clone -q --depth=1 \
-            https://github.com/chainonyourdoor/AnyKernel3-Luminaire.git "$AK3_DIR" \
+            https://github.com/chainonyourdoor/AnyKernel3-Luminaire.git "$ANYKERNEL_DIR" \
             || error "Failed to clone AK3!"
         mkdir -p "${HOME}/ak3-cache"
-        cp -a "${AK3_DIR}/." "${HOME}/ak3-cache/"
+        cp -a "${ANYKERNEL_DIR}/." "${HOME}/ak3-cache/"
     fi
 
     KERNEL_IMG=""
@@ -290,12 +285,12 @@ package_anykernel3() {
     done
     [ -z "$KERNEL_IMG" ] && error "Kernel image not found!"
 
-    cp "$KERNEL_IMG" "${AK3_DIR}/"
+    cp "$KERNEL_IMG" "${ANYKERNEL_DIR}/"
 
     ZIP_PATH="/tmp/${ZIP_NAME}"
     export ZIP_PATH
     export ZIP_NAME
-    cd "$AK3_DIR"
+    cd "$ANYKERNEL_DIR"
     zip -r9 "$ZIP_PATH" . -x "*.git*" -x "*.github*" -x "*.md" -x "LICENSE"
     cd "$ROOT_DIR"
 
@@ -325,14 +320,5 @@ Date     : $(date +'%d %b %Y')"
         -F "document=@${ZIP_PATH};filename=${ZIP_NAME}" \
         -F "caption=${CAPTION}" > /dev/null || true
 }
-
-# ======================================================
-# 🧹 CLEANUP
-# ======================================================
-
-cleanup() {
-    true
-}
-trap cleanup EXIT
 
 main "$@"

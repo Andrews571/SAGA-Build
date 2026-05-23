@@ -45,7 +45,7 @@ jobs:
 
     env:
       PERSONAL_TOKEN:   ${{ secrets.PERSONAL_TOKEN }}
-      PREP_MODE:        "true"
+      PREPARE_ARSENAL:        "true"
       USE_CLANG_CACHE:  ${{ inputs.update_arsenal != 'yes' }}
       USE_KERNEL_CACHE: ${{ inputs.update_arsenal != 'yes' }}
       USE_AK3_CACHE:    ${{ inputs.update_arsenal != 'yes' }}
