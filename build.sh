@@ -322,15 +322,20 @@ send_telegram() {
 
     if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ] && [ -f "${ZIP_PATH:-}" ]; then
         log "Sending ZIP to Telegram..."
-        RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-            -F "chat_id=${TELEGRAM_CHAT_ID}" \
-            ${TELEGRAM_THREAD_ID_BUILD:+-F "message_thread_id=${TELEGRAM_THREAD_ID_BUILD}"} \
-            -F "document=@${ZIP_PATH};filename=${ZIP_NAME}" \
+        CURL_ARGS=(
+            -s -X POST
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument"
+            -F "chat_id=${TELEGRAM_CHAT_ID}"
+            -F "document=@${ZIP_PATH};filename=${ZIP_NAME}"
             -F "caption=<b>Luminaire ${VARIANT}</b>
 Linux     : ${LINUX_VERSION:-N/A}
 Compiler  : ${COMPILER_STRING:-N/A}
-Date      : $(date +'%d %b %Y')" \
-            -F "parse_mode=HTML" || true)
+Date      : $(date +'%d %b %Y')"
+            -F "parse_mode=HTML"
+        )
+        [ -n "${TELEGRAM_THREAD_ID_BUILD:-}" ] && \
+            CURL_ARGS+=(-F "message_thread_id=${TELEGRAM_THREAD_ID_BUILD}")
+        RESPONSE=$(curl "${CURL_ARGS[@]}" || true)
         log "Telegram response: ${RESPONSE}"
         echo "${RESPONSE}" | grep -q '"ok":true' \
             && log "ZIP sent to Telegram ✅" \
