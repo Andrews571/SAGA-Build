@@ -28,8 +28,6 @@ KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 DEFCONFIG="gki_defconfig"
 ARCH="arm64"
 
-PREPARE_ARSENAL="${PREPARE_ARSENAL:-false}"
-
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_DIR="${ROOT_DIR}/workspace"
 CLANG_DIR="${ROOT_DIR}/greenforce-clang"
@@ -42,8 +40,6 @@ COMMON_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"
 
 CCACHE_BIN="${ROOT_DIR}/ccache-bin/ccache"
 CCACHE_WRAPPER_DIR="${ROOT_DIR}/ccache-wrappers"
-export CCACHE_DIR="${CCACHE_DIR:-${ROOT_DIR}/.ccache}"
-export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-5G}"
 
 export GIT_CLONE_PROTECTION_ACTIVE=false
 export KCFLAGS="-w"
@@ -147,7 +143,7 @@ run_setup() {
 
 download_kernel_source() {
     echo "::group::📥 Kernel Source"
-    if [ "${USE_KERNEL_CACHE:-false}" = "true" ] && [ -d "${HOME}/kernel-cache/common" ]; then
+    if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -d "${HOME}/kernel-cache/common" ]; then
         log "Restoring from cache..."
         cp -a "${HOME}/kernel-cache/." "${KERNEL_DIR}/"
         log "Kernel source restored ✅"
@@ -263,7 +259,7 @@ build_kernel() {
 
 package_anykernel3() {
     echo "::group::📦 Package AnyKernel3"
-    if [ "${USE_AK3_CACHE:-false}" = "true" ] && [ -d "${HOME}/ak3-cache" ]; then
+    if [ "${USE_AK3_CACHE}" = "true" ] && [ -d "${HOME}/ak3-cache" ]; then
         cp -a "${HOME}/ak3-cache/." "${ANYKERNEL_DIR}/"
         log "AnyKernel3 restored from cache ✅"
     else
