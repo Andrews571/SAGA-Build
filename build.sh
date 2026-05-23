@@ -12,7 +12,7 @@ source "$(cd "$(dirname "$0")" && pwd)/functions.sh"
 # ⚙️ CONFIGURATION
 # ======================================================
 
-KERNEL_VERSION="${KERNEL_VERSION:-6.1}"
+KERNEL_VERSION="${KERNEL_VERSION:?KERNEL_VERSION is not set}"
 
 case "${KERNEL_VERSION}" in
   "5.10") ANDROID_VERSION="android13" ;;
