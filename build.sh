@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ======================================================
 # ✨ LUMINAIRE PROTOCOL
-# GKI Kernel Build System — android14-6.1
+# GKI Kernel Build System
 # ======================================================
 
 set -eo pipefail
@@ -12,10 +12,18 @@ source "$(cd "$(dirname "$0")" && pwd)/functions.sh"
 # ⚙️ CONFIGURATION
 # ======================================================
 
-ANDROID_VERSION="android14"
-KERNEL_VERSION="6.1"
+ANDROID_VERSION="${ANDROID_VERSION:-android14}"
+KERNEL_VERSION="${KERNEL_VERSION:-6.1}"
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
-KMI_GENERATION="11"
+
+case "${ANDROID_VERSION}-${KERNEL_VERSION}" in
+  "android13-5.10") KMI_GENERATION="9"  ;;
+  "android13-5.15") KMI_GENERATION="10" ;;
+  "android14-6.1")  KMI_GENERATION="11" ;;
+  "android15-6.6")  KMI_GENERATION="20" ;;
+  "android16-6.12") KMI_GENERATION="0"  ;;
+  *) error "Unknown kernel version: ${ANDROID_VERSION}-${KERNEL_VERSION}" ;;
+esac
 
 KERNEL_NAME="Luminaire"
 BUILD_USER="chainonyourdoor"
@@ -94,11 +102,6 @@ main() {
     run_setup
     download_kernel_source
 
-    log "🔍 Kernel android/ dir:"
-    ls "${KERNEL_SRC}/android/" 2>/dev/null | head -20 || log "android/ not found"
-    log "🔍 localversion files:"
-    find "${KERNEL_SRC}" -maxdepth 2 -name "localversion*" 2>/dev/null || true
-
     if [ "$PREP_MODE" = "true" ]; then
         log "✅ Prep Complete!"
         exit 0
@@ -163,7 +166,7 @@ download_kernel_source() {
         log "Cloning kernel source..."
         git clone -q --depth=1 \
             -b "$KERNEL_BRANCH" \
-            https://github.com/chainonyourdoor/android_kernel_common-6.1 \
+            https://github.com/chainonyourdoor/android_kernel_common-${KERNEL_VERSION} \
             "${KERNEL_DIR}/common" || error "Failed to clone kernel!"
         log "Saving to cache..."
         mkdir -p "${HOME}/kernel-cache"
