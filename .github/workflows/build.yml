@@ -3,12 +3,6 @@ name: "✨ Luminaire Protocol"
 on:
   workflow_dispatch:
     inputs:
-      variant:
-        description: "Variant"
-        type: choice
-        default: "VANILLA"
-        options:
-          - "VANILLA"
       kernel_version:
         description: "Kernel Version"
         type: choice
@@ -19,6 +13,12 @@ on:
           - "6.1"
           - "6.6"
           - "6.12"
+      variant:
+        description: "Variant"
+        type: choice
+        default: "VANILLA"
+        options:
+          - "VANILLA"
       update_arsenal:
         description: "Update Arsenal"
         type: choice
