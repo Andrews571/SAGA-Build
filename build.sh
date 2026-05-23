@@ -44,8 +44,6 @@ CCACHE_BIN="${ROOT_DIR}/ccache-bin/ccache"
 CCACHE_WRAPPER_DIR="${ROOT_DIR}/ccache-wrappers"
 export CCACHE_DIR="${CCACHE_DIR:-${ROOT_DIR}/.ccache}"
 export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-5G}"
-export CCACHE_COMPRESS=1
-export CCACHE_COMPRESSLEVEL=1
 
 export GIT_CLONE_PROTECTION_ACTIVE=false
 export KCFLAGS="-w"
