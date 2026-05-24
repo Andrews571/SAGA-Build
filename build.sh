@@ -44,11 +44,17 @@ main() {
 
     clone_patch_repo
     run_setup
-    load_branding
 
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
 
     download_kernel_source
+
+    if [ "$PREPARE_ARSENAL" = "true" ]; then
+        log "✅ Prep Complete!"
+        exit 0
+    fi
+
+    run_branding
 
     MAKE_ARGS=(
         -C "$KERNEL_SRC"
@@ -64,12 +70,6 @@ main() {
         -j"$(nproc --all)"
     )
 
-    if [ "$PREPARE_ARSENAL" = "true" ]; then
-        log "✅ Prep Complete!"
-        exit 0
-    fi
-
-    run_branding
     run_fixes
     run_patches
     build_kernel
@@ -151,10 +151,6 @@ download_kernel_source() {
 # ======================================================
 # 🏷️ BRANDING
 # ======================================================
-
-load_branding() {
-    source "${LUMINAIRE_PATCH_DIR}/branding/branding.sh"
-}
 
 run_branding() {
     echo "::group::🏷️ Branding"
