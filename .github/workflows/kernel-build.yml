@@ -45,6 +45,7 @@ jobs:
       USE_KERNEL_CACHE: ${{ inputs.update_arsenal != 'yes' }}
       USE_AK3_CACHE:    ${{ inputs.update_arsenal != 'yes' }}
       KERNEL_VERSION:   ${{ inputs.kernel_version }}
+      VARIANT:          ${{ inputs.variant }}
 
     steps:
       - name: "Clone LuminaireProtocol"
