@@ -25,21 +25,8 @@ esac
 
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
-DEFCONFIG="gki_defconfig"
-ARCH="arm64"
-KERNEL_NAME="Luminaire"
-
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKSPACE_DIR="${ROOT_DIR}/workspace"
-KERNEL_DIR="${WORKSPACE_DIR}/kernel"
-KERNEL_SRC="${KERNEL_DIR}/common"
-ANYKERNEL_DIR="${WORKSPACE_DIR}/AnyKernel3"
-OUT_DIR="${WORKSPACE_DIR}/out"
-VERSION_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 COMMON_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"
-
-export GIT_CLONE_PROTECTION_ACTIVE=false
-export KCFLAGS="-w"
 
 # ======================================================
 # 🚀 MAIN
@@ -55,16 +42,17 @@ main() {
     log "========================================"
     echo ""
 
-    mkdir -p "$KERNEL_DIR" "$OUT_DIR"
-
     clone_patch_repo
+    run_setup
+
+    mkdir -p "$KERNEL_DIR" "$OUT_DIR"
 
     MAKE_ARGS=(
         -C "$KERNEL_SRC"
         O="$OUT_DIR"
         ARCH="$ARCH"
-        CROSS_COMPILE=aarch64-linux-gnu-
-        CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+        CROSS_COMPILE="$TOOL_CROSS_COMPILE"
+        CROSS_COMPILE_COMPAT="$TOOL_CROSS_COMPILE_COMPAT"
         LLVM=1
         LLVM_IAS=1
         BRANCH="${KERNEL_BRANCH}"
@@ -72,7 +60,6 @@ main() {
         -j"$(nproc --all)"
     )
 
-    run_setup
     download_kernel_source
 
     if [ "$PREPARE_ARSENAL" = "true" ]; then
@@ -90,8 +77,7 @@ main() {
         exit 0
     fi
 
-    package_anykernel3
-    send_zip
+    run_release
 
     echo ""
     log "========================================"
@@ -155,7 +141,7 @@ download_kernel_source() {
     [ -z "$KMI_GENERATION" ] && error "KMI_GENERATION not found in kernel source!"
     MAKE_ARGS+=(KMI_GENERATION="${KMI_GENERATION}")
     ZIP_NAME="LuminaireAk3-${KERNEL_VERSION}.${SUBLEVEL}-R${GITHUB_RUN_NUMBER:-0}.zip"
-    export ZIP_NAME
+    export ZIP_NAME SUBLEVEL KMI_GENERATION
     log "Kernel source ready ✅ (sublevel: ${SUBLEVEL}, KMI: ${KMI_GENERATION})"
     echo "SUBLEVEL=${SUBLEVEL}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
     echo "::endgroup::"
@@ -253,72 +239,21 @@ build_kernel() {
     echo "::endgroup::"
 
     echo "::group::📊 Ccache Stats"
-    [ -f "$CCACHE_BIN" ] && $CCACHE_BIN --show-stats 2>/dev/null || true
+    [ -f "$TOOL_CCACHE_BIN" ] && $TOOL_CCACHE_BIN --show-stats 2>/dev/null || true
     echo "::endgroup::"
 }
 
 # ======================================================
-# 📦 PACKAGE ANYKERNEL3
+# 🎁 RELEASE
 # ======================================================
 
-package_anykernel3() {
-    echo "::group::📦 Package AnyKernel3"
-    if [ "${USE_AK3_CACHE}" = "true" ] && [ -d "${HOME}/ak3-cache" ]; then
-        cp -a "${HOME}/ak3-cache/." "${ANYKERNEL_DIR}/"
-        log "AnyKernel3 restored from cache ✅"
-    else
-        git clone -q --depth=1 \
-            https://github.com/chainonyourdoor/AnyKernel3-Luminaire.git "$ANYKERNEL_DIR" \
-            || error "Failed to clone AK3!"
-        mkdir -p "${HOME}/ak3-cache"
-        cp -a "${ANYKERNEL_DIR}/." "${HOME}/ak3-cache/"
-    fi
-
-    KERNEL_IMG=""
-    for img in Image Image.gz Image.gz-dtb Image-dtb; do
-        BOOT_PATH="${OUT_DIR}/arch/${ARCH}/boot/${img}"
-        if [ -f "$BOOT_PATH" ]; then
-            KERNEL_IMG="$BOOT_PATH"
-            log "Kernel image: $img"
-            break
-        fi
+run_release() {
+    echo "::group::🎁 Release"
+    for script in "${COMMON_PATCH_DIR}/release/"*.sh; do
+        log "Running: $(basename "$script")..."
+        source "$script" || error "Release failed: $(basename "$script")"
     done
-    [ -z "$KERNEL_IMG" ] && error "Kernel image not found!"
-
-    cp "$KERNEL_IMG" "${ANYKERNEL_DIR}/"
-
-    ZIP_PATH="/tmp/${ZIP_NAME}"
-    export ZIP_PATH
-    export ZIP_NAME
-    cd "$ANYKERNEL_DIR"
-    zip -r9 "$ZIP_PATH" . -x "*.git*" -x "*.github*" -x "*.md" -x "LICENSE"
-    cd "$ROOT_DIR"
-
-    log "ZIP ready: ${ZIP_NAME} ✅"
-    echo "ZIP_NAME=${ZIP_NAME}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
-    echo "ZIP_PATH=${ZIP_PATH}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
     echo "::endgroup::"
-}
-
-# ======================================================
-# 📲 TELEGRAM
-# ======================================================
-
-send_zip() {
-    [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && return
-    [ -z "${TELEGRAM_CHAT_ID:-}" ] && return
-    [ ! -f "${ZIP_PATH:-}" ] && return
-
-    LINUX_VER="${KERNEL_VERSION}.${SUBLEVEL}-${ANDROID_VERSION}-${KMI_GENERATION}"
-    CAPTION="Luminaire — ${VARIANT}
-Linux    : ${LINUX_VER}
-Compiler : ${COMPILER_STRING:-N/A}
-Date     : $(date +'%d %b %Y')"
-
-    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-        -F "chat_id=${TELEGRAM_CHAT_ID}" \
-        -F "document=@${ZIP_PATH};filename=${ZIP_NAME}" \
-        -F "caption=${CAPTION}" > /dev/null || true
 }
 
 main "$@"
