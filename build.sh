@@ -27,6 +27,7 @@ KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 KLEAF_MANIFEST_BRANCH="common-${ANDROID_VERSION}-${KERNEL_VERSION}"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Bootstrap path — needed before run_setup() sources 00_paths.sh
 LUMINAIRE_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"
 
 # ======================================================
@@ -69,16 +70,10 @@ main() {
         exit 0
     fi
 
-    cat > /tmp/build-info.txt << EOF
-VARIANT=${VARIANT}
-KERNEL_VERSION=${KERNEL_VERSION}
-BUILD_SYSTEM=${BUILD_SYSTEM}
-EOF
-
     run_release
 
     echo "========================================"
-    echo "  Build Complete! — LuminaireAk3-${KERNEL_VERSION}.${SUBLEVEL}-R${GITHUB_RUN_NUMBER:-0}.zip"
+    echo "  Build Complete! — ${ZIP_NAME}"
     echo "========================================"
 }
 
@@ -152,10 +147,10 @@ _download_make() {
 }
 
 _download_kleaf() {
-    if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -d "${HOME}/kernel-cache/common" ]; then
-        log "Restoring from cache..."
+    if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -f "${HOME}/kernel-cache/tools/bazel" ]; then
+        log "Restoring Kleaf workspace from cache..."
         cp -a "${HOME}/kernel-cache/." "${KERNEL_DIR}/"
-        log "Kernel source restored ✅"
+        log "Kleaf workspace restored ✅"
     else
         log "Syncing kernel workspace via repo (Kleaf)..."
         command -v repo &>/dev/null || \
