@@ -101,7 +101,6 @@ clone_patch_repo() {
 run_setup() {
     echo "::group::📦 Setup"
     for script in "${LUMINAIRE_PATCH_DIR}/setup/"*.sh; do
-        log "Running: $(basename "$script")..."
         source "$script" || error "Setup failed: $(basename "$script")"
     done
     echo "::endgroup::"
