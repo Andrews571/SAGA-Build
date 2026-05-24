@@ -1,0 +1,88 @@
+name: 🌀 Sync Kernel Source
+
+on:
+  workflow_dispatch:
+    inputs:
+      sync_510:
+        description: "Sync 5.10"
+        type: boolean
+        default: true
+      sync_515:
+        description: "Sync 5.15"
+        type: boolean
+        default: true
+      sync_61:
+        description: "Sync 6.1"
+        type: boolean
+        default: true
+      sync_66:
+        description: "Sync 6.6"
+        type: boolean
+        default: true
+      sync_612:
+        description: "Sync 6.12"
+        type: boolean
+        default: true
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  sync-510:
+    if: ${{ github.event_name == 'schedule' || inputs.sync_510 }}
+    uses: ./.github/workflows/_sync-kernel-job.yml
+    with:
+      version: "5.10"
+      android: "android13"
+      branch: "android13-5.10-lts"
+      manifest: "common-android13-5.10-lts"
+      repo: "android_kernel_common-5.10"
+    secrets:
+      SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+
+  sync-515:
+    if: ${{ github.event_name == 'schedule' || inputs.sync_515 }}
+    uses: ./.github/workflows/_sync-kernel-job.yml
+    with:
+      version: "5.15"
+      android: "android13"
+      branch: "android13-5.15-lts"
+      manifest: "common-android13-5.15-lts"
+      repo: "android_kernel_common-5.15"
+    secrets:
+      SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+
+  sync-61:
+    if: ${{ github.event_name == 'schedule' || inputs.sync_61 }}
+    uses: ./.github/workflows/_sync-kernel-job.yml
+    with:
+      version: "6.1"
+      android: "android14"
+      branch: "android14-6.1-lts"
+      manifest: "common-android14-6.1-lts"
+      repo: "android_kernel_common-6.1"
+    secrets:
+      SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+
+  sync-66:
+    if: ${{ github.event_name == 'schedule' || inputs.sync_66 }}
+    uses: ./.github/workflows/_sync-kernel-job.yml
+    with:
+      version: "6.6"
+      android: "android15"
+      branch: "android15-6.6-lts"
+      manifest: "common-android15-6.6-lts"
+      repo: "android_kernel_common-6.6"
+    secrets:
+      SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+
+  sync-612:
+    if: ${{ github.event_name == 'schedule' || inputs.sync_612 }}
+    uses: ./.github/workflows/_sync-kernel-job.yml
+    with:
+      version: "6.12"
+      android: "android16"
+      branch: "android16-6.12-lts"
+      manifest: "common-android16-6.12-lts"
+      repo: "android_kernel_common-6.12"
+    secrets:
+      SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
