@@ -269,6 +269,7 @@ build_kernel_kleaf() {
         --lto="${ENABLE_LTO,,}"
         --action_env=KBUILD_BUILD_USER="${BUILD_USER}"
         --action_env=KBUILD_BUILD_HOST="${BUILD_HOST}"
+        --action_env=LOCALVERSION="-${ANDROID_VERSION}-${KMI_GENERATION}-${KERNEL_NAME}"
     )
 
     (
