@@ -1,4 +1,5 @@
 name: "✨ Luminaire Protocol"
+run-name: "✨ ${{ inputs.variant }} | ${{ inputs.kernel_version }} | ${{ inputs.build_system }}"
 
 on:
   workflow_dispatch:
