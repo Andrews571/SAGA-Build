@@ -48,6 +48,8 @@ main() {
 
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
 
+    download_kernel_source
+
     MAKE_ARGS=(
         -C "$KERNEL_SRC"
         O="$OUT_DIR"
@@ -57,13 +59,10 @@ main() {
         LLVM=1
         LLVM_IAS=1
         BRANCH="${KERNEL_BRANCH}"
+        KMI_GENERATION="${KMI_GENERATION}"
+        LOCALVERSION="-${ANDROID_VERSION}-${KMI_GENERATION}-${KERNEL_NAME}"
         -j"$(nproc --all)"
     )
-
-    download_kernel_source
-
-    # LOCALVERSION needs KMI_GENERATION — only available after download_kernel_source
-    MAKE_ARGS+=(LOCALVERSION="-${ANDROID_VERSION}-${KMI_GENERATION}-${KERNEL_NAME}")
 
     if [ "$PREPARE_ARSENAL" = "true" ]; then
         log "✅ Prep Complete!"
@@ -142,7 +141,6 @@ download_kernel_source() {
     SUBLEVEL="$(grep '^SUBLEVEL = ' "${KERNEL_SRC}/Makefile" | awk '{print $3}')"
     KMI_GENERATION="$(grep '^KMI_GENERATION=' "${KERNEL_SRC}/build.config.common" "${KERNEL_SRC}/build.config.constants" 2>/dev/null | head -1 | cut -d= -f2)"
     [ -z "$KMI_GENERATION" ] && error "KMI_GENERATION not found in kernel source!"
-    MAKE_ARGS+=(KMI_GENERATION="${KMI_GENERATION}")
     ZIP_NAME="LuminaireAk3-${KERNEL_VERSION}.${SUBLEVEL}-R${GITHUB_RUN_NUMBER:-0}.zip"
     export ZIP_NAME SUBLEVEL KMI_GENERATION
     log "Kernel source ready ✅ (sublevel: ${SUBLEVEL}, KMI: ${KMI_GENERATION})"
