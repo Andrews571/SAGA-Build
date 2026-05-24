@@ -111,6 +111,23 @@ run_setup() {
 
 download_kernel_source() {
     echo "::group::📥 Kernel Source"
+
+    if [ "$BUILD_SYSTEM" = "KLEAF" ]; then
+        _download_kleaf
+    else
+        _download_make
+    fi
+
+    SUBLEVEL="$(grep '^SUBLEVEL = ' "${KERNEL_SRC}/Makefile" | awk '{print $3}')"
+    KMI_GENERATION="$(grep '^KMI_GENERATION=' "${KERNEL_SRC}/build.config.common" "${KERNEL_SRC}/build.config.constants" 2>/dev/null | head -1 | cut -d= -f2)"
+    [ -z "$KMI_GENERATION" ] && error "KMI_GENERATION not found in kernel source!"
+    export SUBLEVEL KMI_GENERATION
+    log "Kernel source ready ✅ (sublevel: ${SUBLEVEL}, KMI: ${KMI_GENERATION})"
+    echo "SUBLEVEL=${SUBLEVEL}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+    echo "::endgroup::"
+}
+
+_download_make() {
     if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -d "${HOME}/kernel-cache/common" ]; then
         log "Restoring from cache..."
         cp -a "${HOME}/kernel-cache/." "${KERNEL_DIR}/"
@@ -125,13 +142,28 @@ download_kernel_source() {
         mkdir -p "${HOME}/kernel-cache"
         rsync -a "${KERNEL_DIR}/" "${HOME}/kernel-cache/"
     fi
-    SUBLEVEL="$(grep '^SUBLEVEL = ' "${KERNEL_SRC}/Makefile" | awk '{print $3}')"
-    KMI_GENERATION="$(grep '^KMI_GENERATION=' "${KERNEL_SRC}/build.config.common" "${KERNEL_SRC}/build.config.constants" 2>/dev/null | head -1 | cut -d= -f2)"
-    [ -z "$KMI_GENERATION" ] && error "KMI_GENERATION not found in kernel source!"
-    export SUBLEVEL KMI_GENERATION
-    log "Kernel source ready ✅ (sublevel: ${SUBLEVEL}, KMI: ${KMI_GENERATION})"
-    echo "SUBLEVEL=${SUBLEVEL}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
-    echo "::endgroup::"
+}
+
+_download_kleaf() {
+    if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -d "${HOME}/kernel-cache/common" ]; then
+        log "Restoring from cache..."
+        cp -a "${HOME}/kernel-cache/." "${KERNEL_DIR}/"
+        log "Kernel source restored ✅"
+    else
+        log "Syncing kernel workspace via repo (Kleaf)..."
+        command -v repo &>/dev/null || \
+            curl -s https://storage.googleapis.com/git-repo-downloads/repo \
+                -o /usr/local/bin/repo && chmod +x /usr/local/bin/repo
+        mkdir -p "$KERNEL_DIR" && cd "$KERNEL_DIR"
+        repo init -u https://android.googlesource.com/kernel/manifest \
+            -b "${KERNEL_BRANCH}" --depth=1 -q || error "repo init failed!"
+        repo sync -c -j"$(nproc --all)" --no-tags --no-clone-bundle -q \
+            || error "repo sync failed!"
+        cd "$ROOT_DIR"
+        log "Saving to cache..."
+        mkdir -p "${HOME}/kernel-cache"
+        rsync -a "${KERNEL_DIR}/" "${HOME}/kernel-cache/"
+    fi
 }
 
 # ======================================================
@@ -243,7 +275,7 @@ build_kernel_kleaf() {
     ) &
     HEARTBEAT_PID=$!
 
-    cd "$KERNEL_SRC"
+    cd "$KERNEL_DIR"
     tools/bazel build "${KLEAF_ARGS[@]}" //common:kernel_aarch64 \
         || { kill "$HEARTBEAT_PID" 2>/dev/null; error "Kleaf build failed!"; }
     cd "$ROOT_DIR"
