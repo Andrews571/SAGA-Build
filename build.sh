@@ -33,14 +33,12 @@ LUMINAIRE_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"
 # ======================================================
 
 main() {
-    echo ""
-    log "========================================"
-    log "  ✨ Luminaire Protocol — ${VARIANT}"
-    log "  🖥️ CPU: $(nproc --all) cores"
-    log "  💾 RAM: $(free -h | grep Mem | awk '{print $2}')"
-    log "  📅 $(date)"
-    log "========================================"
-    echo ""
+    echo "========================================"
+    echo "  ✨ Luminaire Protocol — ${VARIANT}"
+    echo "  🖥️ CPU: $(nproc --all) cores"
+    echo "  💾 RAM: $(free -h | grep Mem | awk '{print $2}')"
+    echo "  📅 $(date)"
+    echo "========================================"
 
     clone_patch_repo
     run_setup
@@ -68,11 +66,9 @@ main() {
 
     run_release
 
-    echo ""
-    log "========================================"
-    log "  Build Complete! — LuminaireAk3-${KERNEL_VERSION}.${SUBLEVEL}-R${GITHUB_RUN_NUMBER:-0}.zip"
-    log "========================================"
-    echo ""
+    echo "========================================"
+    echo "  Build Complete! — LuminaireAk3-${KERNEL_VERSION}.${SUBLEVEL}-R${GITHUB_RUN_NUMBER:-0}.zip"
+    echo "========================================"
 }
 
 # ======================================================
