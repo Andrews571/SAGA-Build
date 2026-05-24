@@ -141,7 +141,7 @@ jobs:
         run: bash build.sh
         
       - name: "📊 Ccache Stats"
-        if: always ()
+        if: always()
         run: ~/ccache-bin/ccache --show-stats
         
       - name: "Save ${{ inputs.variant }} Cache"

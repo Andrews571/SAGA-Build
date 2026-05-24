@@ -240,10 +240,6 @@ build_kernel() {
     log "Build completed in ${BUILD_SECONDS}s ✅"
     echo "BUILD_SECONDS=${BUILD_SECONDS}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
     echo "::endgroup::"
-
-    echo "::group::📊 Ccache Stats"
-    [ -f "$TOOL_CCACHE_BIN" ] && $TOOL_CCACHE_BIN --show-stats 2>/dev/null || true
-    echo "::endgroup::"
 }
 
 # ======================================================
