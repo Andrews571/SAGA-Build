@@ -83,7 +83,7 @@ main() {
 
     echo ""
     log "========================================"
-    log "  Build Complete! — ${ZIP_NAME}"
+    log "  Build Complete! — LuminaireAk3-${KERNEL_VERSION}.${SUBLEVEL}-R${GITHUB_RUN_NUMBER:-0}.zip"
     log "========================================"
     echo ""
 }
@@ -141,8 +141,7 @@ download_kernel_source() {
     SUBLEVEL="$(grep '^SUBLEVEL = ' "${KERNEL_SRC}/Makefile" | awk '{print $3}')"
     KMI_GENERATION="$(grep '^KMI_GENERATION=' "${KERNEL_SRC}/build.config.common" "${KERNEL_SRC}/build.config.constants" 2>/dev/null | head -1 | cut -d= -f2)"
     [ -z "$KMI_GENERATION" ] && error "KMI_GENERATION not found in kernel source!"
-    ZIP_NAME="LuminaireAk3-${KERNEL_VERSION}.${SUBLEVEL}-R${GITHUB_RUN_NUMBER:-0}.zip"
-    export ZIP_NAME SUBLEVEL KMI_GENERATION
+    export SUBLEVEL KMI_GENERATION
     log "Kernel source ready ✅ (sublevel: ${SUBLEVEL}, KMI: ${KMI_GENERATION})"
     echo "SUBLEVEL=${SUBLEVEL}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
     echo "::endgroup::"
@@ -169,6 +168,28 @@ run_fixes() {
         log "Applying: $(basename "$fix")..."
         source "$fix" || error "Fix failed: $(basename "$fix")"
     done
+    log "All fixes applied ✅"
+    echo "::endgroup::"
+}
+
+# ======================================================
+# 🩹 PATCHES
+# ======================================================
+
+run_patches() {
+    echo "::group::🩹 Patches"
+    touch "${KERNEL_SRC}/.scmversion"
+
+    log "Generating defconfig..."
+    make "${MAKE_ARGS[@]}" "$DEFCONFIG" || error "Defconfig failed!"
+
+    log "Applying Luminaire configs..."
+    source "${LUMINAIRE_PATCH_DIR}/luminaire_defconfig.sh"
+
+    log "Syncing config..."
+    make "${MAKE_ARGS[@]}" olddefconfig || error "olddefconfig failed!"
+
+    log "Applying version patches..."
     for patch in "${VERSION_PATCH_DIR}/patches/"*.patch; do
         [ -f "$patch" ] || continue
         log "Applying patch: $(basename "$patch")..."
@@ -181,28 +202,6 @@ run_fixes() {
             error "$(basename "$patch") failed — conflict!"
         fi
     done
-    log "All fixes applied ✅"
-    echo "::endgroup::"
-}
-
-# ======================================================
-# 🩹 PATCHES
-# ======================================================
-
-run_patches() {
-    echo "::group::🩹 Patches"
-    export KBUILD_BUILD_TIMESTAMP="$(git -C "$KERNEL_SRC" log -1 --format=%cd --date=format:'%a %b %d %T %Z %Y' 2>/dev/null || date)"
-
-    touch "${KERNEL_SRC}/.scmversion"
-
-    log "Generating defconfig..."
-    make "${MAKE_ARGS[@]}" "$DEFCONFIG" || error "Defconfig failed!"
-
-    log "Applying Luminaire configs..."
-    source "${LUMINAIRE_PATCH_DIR}/luminaire_defconfig.sh"
-
-    log "Syncing config..."
-    make "${MAKE_ARGS[@]}" olddefconfig || error "olddefconfig failed!"
 
     log "Patches applied ✅"
     echo "::endgroup::"
