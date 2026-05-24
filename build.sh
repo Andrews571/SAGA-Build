@@ -62,7 +62,7 @@ main() {
 
     download_kernel_source
 
-    # LOCALVERSION needs KMI_GENERATION from download_kernel_source
+    # LOCALVERSION needs KMI_GENERATION — only available after download_kernel_source
     MAKE_ARGS+=(LOCALVERSION="-${ANDROID_VERSION}-${KMI_GENERATION}-${KERNEL_NAME}")
 
     if [ "$PREPARE_ARSENAL" = "true" ]; then
