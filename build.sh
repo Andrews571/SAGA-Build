@@ -44,6 +44,7 @@ main() {
 
     clone_patch_repo
     run_setup
+    load_branding
 
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
 
@@ -148,7 +149,15 @@ download_kernel_source() {
 }
 
 # ======================================================
-# 🏷️ BRANDING
+# 🏷️ BRANDING — LOAD VARS
+# ======================================================
+
+load_branding() {
+    source "${COMMON_PATCH_DIR}/branding/branding.sh"
+}
+
+# ======================================================
+# 🏷️ BRANDING — APPLY PATCH
 # ======================================================
 
 run_branding() {
