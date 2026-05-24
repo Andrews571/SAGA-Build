@@ -53,11 +53,15 @@ main() {
     fi
 
     run_branding
-    setup_make_args
-
     run_fixes
-    run_patches
-    build_kernel
+
+    if [ "$BUILD_SYSTEM" = "KLEAF" ]; then
+        build_kernel_kleaf
+    else
+        setup_make_args
+        run_patches
+        build_kernel
+    fi
 
     if [ "$WARMING_MODE" = "true" ]; then
         log "🔥 Warming Complete — skipping packaging"
@@ -213,7 +217,48 @@ run_patches() {
 }
 
 # ======================================================
-# 🏗️ BUILD KERNEL
+# 🏗️ BUILD KERNEL — KLEAF
+# ======================================================
+
+build_kernel_kleaf() {
+    echo "::group::🏗️ Build Kernel (Kleaf)"
+    log "Building kernel with Kleaf (Bazel)..."
+    START_TIME=$(date +%s)
+
+    KLEAF_ARGS=(
+        --config=fast
+        --lto="${ENABLE_LTO,,}"
+        --action_env=KBUILD_BUILD_USER="${BUILD_USER}"
+        --action_env=KBUILD_BUILD_HOST="${BUILD_HOST}"
+    )
+
+    (
+        set +eo pipefail
+        while true; do
+            sleep 30
+            ELAPSED=$(( $(date +%s) - START_TIME ))
+            printf "[LOG] Still building... ⏱️ %02d:%02d:%02d elapsed\n" \
+                $((ELAPSED/3600)) $((ELAPSED%3600/60)) $((ELAPSED%60))
+        done
+    ) &
+    HEARTBEAT_PID=$!
+
+    cd "$KERNEL_SRC"
+    tools/bazel build "${KLEAF_ARGS[@]}" //common:kernel_aarch64 \
+        || { kill "$HEARTBEAT_PID" 2>/dev/null; error "Kleaf build failed!"; }
+    cd "$ROOT_DIR"
+
+    kill "$HEARTBEAT_PID" 2>/dev/null || true
+    wait "$HEARTBEAT_PID" 2>/dev/null || true
+
+    BUILD_SECONDS=$(( $(date +%s) - START_TIME ))
+    log "Kleaf build completed in ${BUILD_SECONDS}s ✅"
+    echo "BUILD_SECONDS=${BUILD_SECONDS}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+    echo "::endgroup::"
+}
+
+# ======================================================
+# 🏗️ BUILD KERNEL — MAKE
 # ======================================================
 
 build_kernel() {

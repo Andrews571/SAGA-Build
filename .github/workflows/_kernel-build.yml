@@ -3,6 +3,9 @@ name: "Kernel Build"
 on:
   workflow_call:
     inputs:
+      build_system:
+        type: string
+        default: "MAKE"
       variant:
         type: string
         default: "VANILLA"
@@ -123,6 +126,7 @@ jobs:
       KERNEL_VERSION:           ${{ inputs.kernel_version }}
       ENABLE_LTO:               ${{ inputs.enable_lto }}
       WARMING_MODE:             ${{ inputs.warming_mode }}
+      BUILD_SYSTEM:             ${{ inputs.build_system }}
 
     steps:
       - name: "Clone LuminaireProtocol"

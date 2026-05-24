@@ -3,6 +3,13 @@ name: "✨ Luminaire Protocol"
 on:
   workflow_dispatch:
     inputs:
+      build_system:
+        description: "Build System"
+        type: choice
+        default: "MAKE"
+        options:
+          - "MAKE"
+          - "KLEAF"
       kernel_version:
         description: "Kernel Version"
         type: choice
@@ -42,6 +49,7 @@ jobs:
   Luminaire:
     uses: ./.github/workflows/_kernel-build.yml
     with:
+      build_system:    ${{ inputs.build_system }}
       variant:         ${{ inputs.variant }}
       kernel_version:  ${{ inputs.kernel_version }}
       update_arsenal:  ${{ inputs.update_arsenal }}
