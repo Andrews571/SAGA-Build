@@ -23,7 +23,6 @@ case "${KERNEL_VERSION}" in
 esac
 
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
-KLEAF_MANIFEST_BRANCH="common-${ANDROID_VERSION}-${KERNEL_VERSION}"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LUMINAIRE_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"

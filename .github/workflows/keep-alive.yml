@@ -20,12 +20,12 @@ jobs:
             ~/ak3-cache
             ~/kernel-cache
             ~/.apt-cache
-          key: arsenal-${{ github.ref_name }}-__keepalive__
-          restore-keys: arsenal-${{ github.ref_name }}-
+          key: arsenal-__keepalive__
+          restore-keys: arsenal-
 
       - name: "♻️ Touch ccache VANILLA"
         uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-data-VANILLA-${{ github.ref_name }}-__keepalive__
-          restore-keys: ccache-data-VANILLA-${{ github.ref_name }}-
+          key: ccache-data-VANILLA-__keepalive__
+          restore-keys: ccache-data-VANILLA-

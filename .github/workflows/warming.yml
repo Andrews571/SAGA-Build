@@ -43,6 +43,11 @@ on:
         options:
           - "NONE"
           - "THIN"
+          - "FULL"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   Luminaire:

@@ -155,7 +155,6 @@ jobs:
       ENABLE_LTO:                  ${{ inputs.enable_lto }}
       WARMING_MODE:                ${{ inputs.warming_mode }}
       BUILD_SYSTEM:                ${{ inputs.build_system }}
-      PREPARE_ARSENAL:             "false"
 
     steps:
       - name: "Clone LuminaireProtocol"
@@ -196,8 +195,8 @@ jobs:
         if: inputs.build_system != 'KLEAF'
         uses: ./.github/actions/restore-caches
         with:
-          ccache-key: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
-          ccache-restore-keys: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
+          ccache-key: ccache-data-${{ matrix.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
+          ccache-restore-keys: ccache-data-${{ matrix.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
           gh-token: ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Disk Usage"
@@ -214,8 +213,8 @@ jobs:
         if: always() && inputs.build_system != 'KLEAF'
         uses: ./.github/actions/save-caches
         with:
-          ccache-key: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
-          ccache-prefix: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
+          ccache-key: ccache-data-${{ matrix.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
+          ccache-prefix: ccache-data-${{ matrix.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
           gh-token: ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Upload Build Info"
