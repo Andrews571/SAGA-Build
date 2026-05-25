@@ -1,5 +1,5 @@
 name: "✨ Luminaire Protocol"
-run-name: "✨ ${{ inputs.variant }} | ${{ inputs.kernel_version }} | ${{ inputs.build_system }}"
+run-name: "✨ ${{ inputs.kernel_version }} | ${{ inputs.build_system }}"
 
 on:
   workflow_dispatch:
@@ -21,12 +21,18 @@ on:
           - "6.1"
           - "6.6"
           - "6.12"
-      variant:
-        description: "Variant"
-        type: choice
-        default: "VANILLA"
-        options:
-          - "VANILLA"
+      vanilla:
+        description: "VANILLA"
+        type: boolean
+        default: true
+      ksu:
+        description: "KSU"
+        type: boolean
+        default: false
+      ksu_vfs:
+        description: "KSU VFS"
+        type: boolean
+        default: false
       update_arsenal:
         description: "Update Arsenal"
         type: choice
@@ -47,17 +53,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  Luminaire:
+
+  # ======================================================
+  # 🧮 PREPARE MATRIX
+  # ======================================================
+  prepare-matrix:
+    name: "Prepare Matrix"
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+
+    steps:
+      - name: "🧮 Build Variant Matrix"
+        id: set
+        run: |
+          variants=()
+          ${{ inputs.vanilla }} && variants+=("VANILLA")
+          ${{ inputs.ksu }}     && variants+=("KSU")
+          ${{ inputs.ksu_vfs }} && variants+=("KSU_VFS")
+
+          if [ ${#variants[@]} -eq 0 ]; then
+            echo "No variants selected!"
+            exit 1
+          fi
+
+          echo "matrix=$(jq -cn '$ARGS.positional' --args "${variants[@]}")" >> $GITHUB_OUTPUT
+
+  # ======================================================
+  # 🏗️ BUILD
+  # ======================================================
+  build:
+    name: "Luminaire"
+    needs: prepare-matrix
+    strategy:
+      matrix:
+        variant: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+      fail-fast: false
     uses: ./.github/workflows/_kernel-build.yml
     with:
-      build_system:    ${{ inputs.build_system }}
-      variant:         ${{ inputs.variant }}
-      kernel_version:  ${{ inputs.kernel_version }}
-      update_arsenal:  ${{ inputs.update_arsenal }}
-      enable_lto:      ${{ inputs.enable_lto }}
+      build_system:   ${{ inputs.build_system }}
+      variant:        ${{ matrix.variant }}
+      kernel_version: ${{ inputs.kernel_version }}
+      update_arsenal: ${{ inputs.update_arsenal }}
+      enable_lto:     ${{ inputs.enable_lto }}
     secrets:
-      PERSONAL_TOKEN:           ${{ secrets.PERSONAL_TOKEN }}
-      TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
+      PERSONAL_TOKEN:              ${{ secrets.PERSONAL_TOKEN }}
+      TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:            ${{ secrets.TELEGRAM_CHAT_ID }}
       TELEGRAM_THREAD_ID_ARTIFACT: ${{ secrets.TELEGRAM_THREAD_ID_ARTIFACT }}
       TELEGRAM_THREAD_ID_LOG:      ${{ secrets.TELEGRAM_THREAD_ID_LOG }}

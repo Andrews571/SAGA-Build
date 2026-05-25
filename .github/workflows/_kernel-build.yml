@@ -39,27 +39,40 @@ env:
 jobs:
 
   # ======================================================
-  # 🧰 PREPARATION
+  # 🏗️ BUILD
   # ======================================================
-  prep:
-    name: "Arsenal Preparation"
+  Start-Build:
+    name: "${{ inputs.variant }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     env:
-      PERSONAL_TOKEN:   ${{ secrets.PERSONAL_TOKEN }}
-      PREPARE_ARSENAL:  "true"
-      USE_KERNEL_CACHE: ${{ inputs.update_arsenal != 'yes' }}
-      USE_AK3_CACHE:    ${{ inputs.update_arsenal != 'yes' }}
-      KERNEL_VERSION:   ${{ inputs.kernel_version }}
-      VARIANT:          ${{ inputs.variant }}
-      BUILD_SYSTEM:     ${{ inputs.build_system }}
+      PERSONAL_TOKEN:              ${{ secrets.PERSONAL_TOKEN }}
+      TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:            ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_THREAD_ID_ARTIFACT: ${{ secrets.TELEGRAM_THREAD_ID_ARTIFACT }}
+      TELEGRAM_THREAD_ID_LOG:      ${{ secrets.TELEGRAM_THREAD_ID_LOG }}
+      USE_KERNEL_CACHE:            ${{ inputs.update_arsenal != 'yes' }}
+      USE_AK3_CACHE:               ${{ inputs.update_arsenal != 'yes' }}
+      CCACHE_DIR:                  ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE:              "5G"
+      VARIANT:                     ${{ inputs.variant }}
+      KERNEL_VERSION:              ${{ inputs.kernel_version }}
+      ENABLE_LTO:                  ${{ inputs.enable_lto }}
+      WARMING_MODE:                ${{ inputs.warming_mode }}
+      BUILD_SYSTEM:                ${{ inputs.build_system }}
+      PREPARE_ARSENAL:             "false"
 
     steps:
       - name: "Clone LuminaireProtocol"
         run: |
           git clone --filter=blob:none \
             "https://x-access-token:${PERSONAL_TOKEN}@github.com/chainonyourdoor/LuminaireProtocol" .
+
+      - name: "Setup Swap Space"
+        uses: thejerrybao/setup-swap-space@v1
+        with:
+          swap-size-gb: 12
 
       - name: "Restore Arsenal Cache"
         if: inputs.update_arsenal != 'yes'
@@ -74,11 +87,22 @@ jobs:
           key: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-
 
-      - name: "Run Preparation"
+      - name: "Restore ccache"
+        uses: ./.github/actions/restore-caches
+        with:
+          ccache-key: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
+          ccache-restore-keys: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
+          gh-token: ${{ secrets.PERSONAL_TOKEN }}
+
+      - name: "Build"
         run: bash build.sh
 
+      - name: "📊 Ccache Stats"
+        if: always() && inputs.build_system != 'KLEAF'
+        run: ~/ccache-bin/ccache --show-stats
+
       - name: "Save Arsenal Cache"
-        if: always()
+        if: always() && inputs.variant == 'VANILLA'
         uses: actions/cache/save@v5
         with:
           path: |
@@ -90,7 +114,7 @@ jobs:
           key: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
 
       - name: "Cleanup Old Arsenal"
-        if: always()
+        if: always() && inputs.variant == 'VANILLA'
         env:
           GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
@@ -103,61 +127,9 @@ jobs:
             done
           fi
 
-  # ======================================================
-  # 🏗️ BUILD
-  # ======================================================
-  Start-Build:
-    name: "${{ inputs.variant }}"
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: prep
-
-    env:
-      PERSONAL_TOKEN:           ${{ secrets.PERSONAL_TOKEN }}
-      TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
-      TELEGRAM_THREAD_ID_ARTIFACT: ${{ secrets.TELEGRAM_THREAD_ID_ARTIFACT }}
-      TELEGRAM_THREAD_ID_LOG:      ${{ secrets.TELEGRAM_THREAD_ID_LOG }}
-      USE_KERNEL_CACHE:         "true"
-      USE_AK3_CACHE:            "true"
-      PREPARE_ARSENAL:          "false"
-      CCACHE_DIR:               ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE:           "5G"
-      VARIANT:                  ${{ inputs.variant }}
-      KERNEL_VERSION:           ${{ inputs.kernel_version }}
-      ENABLE_LTO:               ${{ inputs.enable_lto }}
-      WARMING_MODE:             ${{ inputs.warming_mode }}
-      BUILD_SYSTEM:             ${{ inputs.build_system }}
-
-    steps:
-      - name: "Clone LuminaireProtocol"
-        run: |
-          git clone --filter=blob:none \
-            "https://x-access-token:${PERSONAL_TOKEN}@github.com/chainonyourdoor/LuminaireProtocol" .
-
-      - name: "Setup Swap Space"
-        uses: thejerrybao/setup-swap-space@v1
-        with:
-          swap-size-gb: 12
-
-      - name: "Restore ${{ inputs.variant }} Cache"
-        uses: ./.github/actions/restore-caches
-        with:
-          arsenal-key: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
-          ccache-key: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
-          ccache-restore-keys: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
-          gh-token: ${{ secrets.PERSONAL_TOKEN }}
-
-      - name: "Build"
-        run: bash build.sh
-
-      - name: "📊 Ccache Stats"
-        if: always() && inputs.build_system != 'KLEAF'
-        run: ~/ccache-bin/ccache --show-stats
-        
-      - name: "Save ${{ inputs.variant }} Cache"
-        uses: ./.github/actions/save-caches
+      - name: "Save ccache"
         if: always()
+        uses: ./.github/actions/save-caches
         with:
           ccache-key: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-${{ github.run_id }}
           ccache-prefix: ccache-data-${{ inputs.variant }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto == 'THIN' && 'lto-' || '' }}${{ github.ref_name }}-
@@ -167,7 +139,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-info
+          name: build-info-${{ inputs.variant }}
           path: /tmp/build-info.txt
           retention-days: 1
           if-no-files-found: ignore

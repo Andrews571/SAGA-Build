@@ -47,12 +47,6 @@ main() {
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
 
     run_download
-
-    if [ "$PREPARE_ARSENAL" = "true" ]; then
-        log "✅ Prep Complete!"
-        exit 0
-    fi
-
     run_branding
     run_fixes
     run_build

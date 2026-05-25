@@ -1,9 +1,7 @@
-name: "Restore Caches"
-description: "Restore arsenal from GH Cache, ccache from Release"
+name: "Restore ccache"
+description: "Restore ccache from GitHub Release"
 
 inputs:
-  arsenal-key:
-    required: true
   ccache-key:
     required: true
   ccache-restore-keys:
@@ -14,18 +12,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: "♻️ Restore arsenal"
-      uses: actions/cache/restore@v5
-      with:
-        path: |
-          ~/clang-cache
-          ~/ccache-bin
-          ~/ak3-cache
-          ~/kernel-cache
-          ~/.apt-cache
-        key: ${{ inputs.arsenal-key }}
-        restore-keys: arsenal-${{ github.ref_name }}-
-
     - name: "♻️ Restore ccache from Release"
       shell: bash
       env:
