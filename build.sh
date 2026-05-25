@@ -45,7 +45,7 @@ main() {
 
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
 
-    run_download
+    restore_kernel_source
     run_branding
     run_variant
     run_fixes
@@ -93,10 +93,10 @@ run_setup() {
 }
 
 # ======================================================
-# 📥 DOWNLOAD
+# 📥 KERNEL SOURCE
 # ======================================================
 
-run_download() {
+restore_kernel_source() {
     echo "::group::📥 Kernel Source"
     if [ "$BUILD_SYSTEM" = "KLEAF" ]; then
         source "${LUMINAIRE_PATCH_DIR}/download/kleaf.sh"
