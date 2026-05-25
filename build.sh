@@ -46,6 +46,7 @@ main() {
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
 
     run_branding
+    run_variant
     run_fixes
     run_build
 
@@ -104,6 +105,18 @@ run_branding() {
     export SUBLEVEL KMI_GENERATION
     echo "SUBLEVEL=${SUBLEVEL}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
     source "${LUMINAIRE_PATCH_DIR}/branding/branding.sh" || error "Branding failed!"
+    echo "::endgroup::"
+}
+
+# ======================================================
+# 🔑 VARIANT
+# ======================================================
+
+run_variant() {
+    local script="${VERSION_PATCH_DIR}/ksu/${VARIANT,,}.sh"
+    [ -f "$script" ] || return 0
+    echo "::group::🔑 Variant (${VARIANT})"
+    source "$script" || error "Variant script failed: $(basename "$script")"
     echo "::endgroup::"
 }
 

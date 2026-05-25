@@ -12,6 +12,9 @@ on:
       vanilla:
         type: boolean
         default: true
+      resukisu_susfs:
+        type: boolean
+        default: false
       kernel_version:
         type: string
         default: "6.1"
@@ -67,7 +70,8 @@ jobs:
         id: set
         run: |
           variants=()
-          ${{ inputs.vanilla }} && variants+=("VANILLA")
+          ${{ inputs.vanilla }}         && variants+=("VANILLA")
+          ${{ inputs.resukisu_susfs }}   && variants+=("RESUKISU_SUSFS")
 
           if [ ${#variants[@]} -eq 0 ]; then
             echo "No variants selected!"

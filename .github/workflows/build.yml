@@ -25,6 +25,10 @@ on:
         description: "VANILLA"
         type: boolean
         default: true
+      resukisu_susfs:
+        description: "ReSukiSU + SuSFS"
+        type: boolean
+        default: false
       update_arsenal:
         description: "Update Arsenal"
         type: choice
@@ -48,12 +52,13 @@ jobs:
   Luminaire:
     uses: ./.github/workflows/_kernel-build.yml
     with:
-      build_system:   ${{ inputs.build_system }}
-      variant:        "VANILLA"
-      vanilla:        ${{ inputs.vanilla }}
-      kernel_version: ${{ inputs.kernel_version }}
-      update_arsenal: ${{ inputs.update_arsenal }}
-      enable_lto:     ${{ inputs.enable_lto }}
+      build_system:    ${{ inputs.build_system }}
+      variant:         "VANILLA"
+      vanilla:         ${{ inputs.vanilla }}
+      resukisu_susfs:  ${{ inputs.resukisu_susfs }}
+      kernel_version:  ${{ inputs.kernel_version }}
+      update_arsenal:  ${{ inputs.update_arsenal }}
+      enable_lto:      ${{ inputs.enable_lto }}
     secrets:
       PERSONAL_TOKEN:              ${{ secrets.PERSONAL_TOKEN }}
       TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
