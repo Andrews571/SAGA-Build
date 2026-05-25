@@ -45,44 +45,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-
-  # ======================================================
-  # 🧮 PREPARE MATRIX
-  # ======================================================
-  prepare-matrix:
-    name: "Prepare Matrix"
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
-
-    steps:
-      - name: "🧮 Build Variant Matrix"
-        id: set
-        run: |
-          variants=()
-          ${{ inputs.vanilla }} && variants+=("VANILLA")
-
-          if [ ${#variants[@]} -eq 0 ]; then
-            echo "No variants selected!"
-            exit 1
-          fi
-
-          echo "matrix=$(jq -cn '$ARGS.positional' --args "${variants[@]}")" >> $GITHUB_OUTPUT
-
-  # ======================================================
-  # 🏗️ BUILD
-  # ======================================================
-  build:
-    name: "Luminaire"
-    needs: prepare-matrix
-    strategy:
-      matrix:
-        variant: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
-      fail-fast: false
+  Luminaire:
     uses: ./.github/workflows/_kernel-build.yml
     with:
       build_system:   ${{ inputs.build_system }}
-      variant:        ${{ matrix.variant }}
+      variant:        "VANILLA"
+      vanilla:        ${{ inputs.vanilla }}
       kernel_version: ${{ inputs.kernel_version }}
       update_arsenal: ${{ inputs.update_arsenal }}
       enable_lto:     ${{ inputs.enable_lto }}

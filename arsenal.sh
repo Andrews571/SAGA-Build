@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ======================================================
-# ✨ LUMINAIRE PROTOCOL — Build Orchestrator
+# ✨ LUMINAIRE PROTOCOL — Arsenal Orchestrator
 # ======================================================
 
 set -eo pipefail
@@ -23,9 +23,9 @@ case "${KERNEL_VERSION}" in
 esac
 
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
+KLEAF_MANIFEST_BRANCH="common-${ANDROID_VERSION}-${KERNEL_VERSION}"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# Bootstrap path — needed before run_setup() sources 00_paths.sh
 LUMINAIRE_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"
 
 # ======================================================
@@ -34,31 +34,17 @@ LUMINAIRE_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"
 
 main() {
     echo "========================================"
-    echo "  ✨ Luminaire Protocol — ${VARIANT}"
+    echo "  ✨ Luminaire Arsenal — ${KERNEL_VERSION}"
     echo "  🖥️ CPU: $(nproc --all) cores"
-    echo "  💾 RAM: $(free -h | grep Mem | awk '{print $2}')"
     echo "  📅 $(date)"
     echo "========================================"
 
     clone_patch_repo
     run_setup
-
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
+    run_download
 
-    run_branding
-    run_fixes
-    run_build
-
-    if [ "$WARMING_MODE" = "true" ]; then
-        log "🔥 Warming Complete — skipping packaging"
-        exit 0
-    fi
-
-    run_release
-
-    echo "========================================"
-    echo "  Build Complete! — ${ZIP_NAME}"
-    echo "========================================"
+    log "✅ Arsenal ready!"
 }
 
 # ======================================================
@@ -91,57 +77,17 @@ run_setup() {
 }
 
 # ======================================================
-# 🏷️ BRANDING
+# 📥 DOWNLOAD
 # ======================================================
 
-run_branding() {
-    echo "::group::🏷️ Branding"
-    SUBLEVEL="$(grep '^SUBLEVEL = ' "${KERNEL_SRC}/Makefile" | awk '{print $3}')"
-    KMI_GENERATION="$(grep '^KMI_GENERATION=' \
-        "${KERNEL_SRC}/build.config.common" \
-        "${KERNEL_SRC}/build.config.constants" 2>/dev/null | head -1 | cut -d= -f2)"
-    [ -z "$KMI_GENERATION" ] && error "KMI_GENERATION not found!"
-    export SUBLEVEL KMI_GENERATION
-    echo "SUBLEVEL=${SUBLEVEL}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
-    source "${LUMINAIRE_PATCH_DIR}/branding/branding.sh" || error "Branding failed!"
-    echo "::endgroup::"
-}
-
-# ======================================================
-# 🔧 FIXES
-# ======================================================
-
-run_fixes() {
-    echo "::group::🔧 Fixes"
-    for fix in "${LUMINAIRE_PATCH_DIR}/fixes/"*.sh; do
-        source "$fix" || error "Fix failed: $(basename "$fix")"
-    done
-    echo "::endgroup::"
-}
-
-# ======================================================
-# 🏗️ BUILD
-# ======================================================
-
-run_build() {
-    echo "::group::🏗️ Build Kernel (${BUILD_SYSTEM})"
+run_download() {
+    echo "::group::📥 Arsenal Download"
     if [ "$BUILD_SYSTEM" = "KLEAF" ]; then
-        source "${LUMINAIRE_PATCH_DIR}/build/kleaf.sh"
+        source "${LUMINAIRE_PATCH_DIR}/download/kleaf.sh"
     else
-        source "${LUMINAIRE_PATCH_DIR}/build/make.sh"
+        source "${LUMINAIRE_PATCH_DIR}/download/make.sh"
     fi
-    echo "::endgroup::"
-}
-
-# ======================================================
-# 🚀 RELEASE
-# ======================================================
-
-run_release() {
-    echo "::group::🚀 Release"
-    for script in "${LUMINAIRE_PATCH_DIR}/release/"*.sh; do
-        source "$script" || error "Release failed: $(basename "$script")"
-    done
+    log "Arsenal downloaded ✅"
     echo "::endgroup::"
 }
 

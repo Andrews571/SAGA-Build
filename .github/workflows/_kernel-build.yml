@@ -9,6 +9,9 @@ on:
       variant:
         type: string
         default: "VANILLA"
+      vanilla:
+        type: boolean
+        default: true
       kernel_version:
         type: string
         default: "6.1"
@@ -39,12 +42,90 @@ env:
 jobs:
 
   # ======================================================
-  # 🏗️ BUILD
+  # 🧮 PREPARE MATRIX + ARSENAL
   # ======================================================
+  prepare-matrix:
+    name: "Prepare Matrix"
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+
+    env:
+      PERSONAL_TOKEN:  ${{ secrets.PERSONAL_TOKEN }}
+      USE_KERNEL_CACHE: ${{ inputs.update_arsenal != 'yes' }}
+      USE_AK3_CACHE:    ${{ inputs.update_arsenal != 'yes' }}
+      KERNEL_VERSION:   ${{ inputs.kernel_version }}
+      BUILD_SYSTEM:     ${{ inputs.build_system }}
+
+    steps:
+      - name: "Clone LuminaireProtocol"
+        run: |
+          git clone --filter=blob:none \
+            "https://x-access-token:${PERSONAL_TOKEN}@github.com/chainonyourdoor/LuminaireProtocol" .
+
+      - name: "🧮 Build Variant Matrix"
+        id: set
+        run: |
+          variants=()
+          ${{ inputs.vanilla }} && variants+=("VANILLA")
+
+          if [ ${#variants[@]} -eq 0 ]; then
+            echo "No variants selected!"
+            exit 1
+          fi
+
+          echo "matrix=$(jq -cn '$ARGS.positional' --args "${variants[@]}")" >> $GITHUB_OUTPUT
+
+      - name: "Restore Arsenal Cache"
+        if: inputs.update_arsenal != 'yes'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/clang-cache
+            ~/ccache-bin
+            ~/ak3-cache
+            ~/kernel-cache
+            ~/.apt-cache
+          key: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-
+
+      - name: "⚙️ Prepare Arsenal"
+        run: bash arsenal.sh
+
+      - name: "Save Arsenal Cache"
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/clang-cache
+            ~/ccache-bin
+            ~/ak3-cache
+            ~/kernel-cache
+            ~/.apt-cache
+          key: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
+
+      - name: "Cleanup Old Arsenal"
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+        run: |
+          CACHES=$(gh api \
+            "/repos/${{ github.repository }}/actions/caches?per_page=100" \
+            --jq ".actions_caches[] | select(.key | startswith(\"arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-\")) | select(.key != \"arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}\") | .id")
+          if [ -n "$CACHES" ]; then
+            for ID in $CACHES; do
+              gh api --method DELETE "/repos/${{ github.repository }}/actions/caches/${ID}" || true
+            done
+          fi
   Start-Build:
-    name: "${{ inputs.variant }}"
+    name: "${{ matrix.variant }}"
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: prepare-matrix
+    strategy:
+      matrix:
+        variant: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+      fail-fast: false
 
     env:
       PERSONAL_TOKEN:              ${{ secrets.PERSONAL_TOKEN }}
@@ -56,7 +137,7 @@ jobs:
       USE_AK3_CACHE:               ${{ inputs.update_arsenal != 'yes' }}
       CCACHE_DIR:                  ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE:              "5G"
-      VARIANT:                     ${{ inputs.variant }}
+      VARIANT:                     ${{ matrix.variant }}
       KERNEL_VERSION:              ${{ inputs.kernel_version }}
       ENABLE_LTO:                  ${{ inputs.enable_lto }}
       WARMING_MODE:                ${{ inputs.warming_mode }}
@@ -100,32 +181,6 @@ jobs:
       - name: "📊 Ccache Stats"
         if: always() && inputs.build_system != 'KLEAF'
         run: ~/ccache-bin/ccache --show-stats
-
-      - name: "Save Arsenal Cache"
-        if: always() && inputs.variant == 'VANILLA'
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ~/clang-cache
-            ~/ccache-bin
-            ~/ak3-cache
-            ~/kernel-cache
-            ~/.apt-cache
-          key: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
-
-      - name: "Cleanup Old Arsenal"
-        if: always() && inputs.variant == 'VANILLA'
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
-        run: |
-          CACHES=$(gh api \
-            "/repos/${{ github.repository }}/actions/caches?per_page=100" \
-            --jq ".actions_caches[] | select(.key | startswith(\"arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-\")) | select(.key != \"arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}\") | .id")
-          if [ -n "$CACHES" ]; then
-            for ID in $CACHES; do
-              gh api --method DELETE "/repos/${{ github.repository }}/actions/caches/${ID}" || true
-            done
-          fi
 
       - name: "Save ccache"
         if: always()
