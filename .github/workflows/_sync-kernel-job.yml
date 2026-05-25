@@ -1,3 +1,5 @@
+name: Kernel Job
+
 on:
   workflow_call:
     inputs:
