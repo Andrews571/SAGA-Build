@@ -45,7 +45,7 @@ env:
 jobs:
 
   # ======================================================
-  # 🧮 PREPARE MATRIX + ARSENAL
+  # PREPARE MATRIX + ARSENAL
   # ======================================================
   prepare-matrix:
     name: "Prepare Arsenal"
@@ -66,7 +66,7 @@ jobs:
           git clone --filter=blob:none \
             "https://x-access-token:${PERSONAL_TOKEN}@github.com/chainonyourdoor/LuminaireProtocol" .
 
-      - name: "🧮 Build Variant Matrix"
+      - name: "Build Variant Matrix"
         id: set
         run: |
           variants=()
@@ -93,7 +93,7 @@ jobs:
           key: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-
 
-      - name: "⚙️ Prepare Arsenal"
+      - name: "Prepare Arsenal"
         run: bash arsenal.sh
 
       - name: "Save Arsenal Cache"
@@ -182,7 +182,7 @@ jobs:
       - name: "Build"
         run: bash build.sh
 
-      - name: "📊 Ccache Stats"
+      - name: "Ccache Stats"
         if: always() && inputs.build_system != 'KLEAF'
         run: ~/ccache-bin/ccache --show-stats
 
