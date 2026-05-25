@@ -45,6 +45,7 @@ main() {
 
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
 
+    run_download
     run_branding
     run_variant
     run_fixes
@@ -88,6 +89,21 @@ run_setup() {
     for script in "${LUMINAIRE_PATCH_DIR}/setup/"*.sh; do
         source "$script" || error "Setup failed: $(basename "$script")"
     done
+    echo "::endgroup::"
+}
+
+# ======================================================
+# 📥 DOWNLOAD
+# ======================================================
+
+run_download() {
+    echo "::group::📥 Kernel Source"
+    if [ "$BUILD_SYSTEM" = "KLEAF" ]; then
+        source "${LUMINAIRE_PATCH_DIR}/download/kleaf.sh"
+    else
+        source "${LUMINAIRE_PATCH_DIR}/download/make.sh"
+    fi
+    log "Kernel source ready ✅"
     echo "::endgroup::"
 }
 
