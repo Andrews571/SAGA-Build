@@ -1,5 +1,5 @@
 name: "✨ Luminaire Protocol"
-run-name: "✨ ${{ inputs.kernel_version }} | ${{ inputs.build_system }}"
+run-name: "✨ ${{ inputs.kernel_version }} | VANILLA${{ inputs.enable_lto == 'THIN' && ' | Thin-LTO' || '' }} | ${{ inputs.build_system }}"
 
 on:
   workflow_dispatch:
