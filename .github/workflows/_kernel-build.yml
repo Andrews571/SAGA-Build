@@ -180,7 +180,6 @@ jobs:
           swap-size-gb: 12
 
       - name: "Restore Arsenal Cache"
-        if: inputs.update_arsenal != 'yes'
         uses: actions/cache/restore@v5
         with:
           path: |
