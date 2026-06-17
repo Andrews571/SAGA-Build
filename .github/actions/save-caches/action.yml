@@ -20,6 +20,12 @@ runs:
         ASSET_NAME="${{ inputs.ccache-prefix }}ccache.tar.zst"
         cd "${{ github.workspace }}"
         tar --zstd -cf "/tmp/${ASSET_NAME}" .ccache/
+        gh release view cache --repo "${{ github.repository }}" > /dev/null 2>&1 || \
+          gh release create cache \
+            --repo "${{ github.repository }}" \
+            --title "Cache Storage" \
+            --notes "Automated cache storage for Luminaire build tools" \
+            --prerelease
         gh release upload cache "/tmp/${ASSET_NAME}" \
           --repo "${{ github.repository }}" \
           --clobber
