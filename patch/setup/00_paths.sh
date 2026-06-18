@@ -16,8 +16,8 @@ OUT_DIR="${WORKSPACE_DIR}/out"
 KLEAF_OUT_DIR="${KERNEL_DIR}/bazel-bin/common/kernel_aarch64"
 
 # Patch repo paths
-LUMINAIRE_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"
-VERSION_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
+LUMINAIRE_PATCH_DIR="${ROOT_DIR}/patch"
+VERSION_PATCH_DIR="${ROOT_DIR}/patch/${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 # Build config
 DEFCONFIG="gki_defconfig"
