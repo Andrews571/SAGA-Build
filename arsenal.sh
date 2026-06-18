@@ -25,7 +25,7 @@ esac
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LUMINAIRE_PATCH_DIR="${ROOT_DIR}/Luminaire-Patch/common"
+LUMINAIRE_PATCH_DIR="${ROOT_DIR}/patch"
 
 # ======================================================
 # 🚀 MAIN
@@ -38,7 +38,6 @@ main() {
     echo "  📅 $(date)"
     echo "========================================"
 
-    clone_patch_repo
     run_setup
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
     run_download
@@ -46,22 +45,6 @@ main() {
     log "✅ Arsenal ready!"
 }
 
-# ======================================================
-# 🌀 CLONE PATCH REPO
-# ======================================================
-
-clone_patch_repo() {
-    echo "::group::🌀 Luminaire-Patch"
-    if [ -d "${ROOT_DIR}/Luminaire-Patch/.git" ]; then
-        log "Luminaire-Patch already exists, skipping clone."
-    else
-        log "Cloning Luminaire-Patch..."
-        git clone --depth=1 \
-            https://x-access-token:${PERSONAL_TOKEN}@github.com/chainonyourdoor/Luminaire-Patch.git \
-            "${ROOT_DIR}/Luminaire-Patch"
-    fi
-    echo "::endgroup::"
-}
 
 # ======================================================
 # 📦 SETUP
