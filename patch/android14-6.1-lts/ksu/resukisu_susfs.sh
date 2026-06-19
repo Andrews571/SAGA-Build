@@ -15,7 +15,11 @@ KSU_DIR="${KERNEL_SRC}/KernelSU"
 
 log "Integrating ReSukiSU..."
 cd "$KERNEL_SRC"
-curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+RESUKISU_SETUP=$(curl -LSs --fail --retry 3 \
+    "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh") \
+    || error "ReSukiSU: failed to download setup.sh!"
+echo "$RESUKISU_SETUP" | bash || error "ReSukiSU: setup.sh failed!"
+[ -d "${KERNEL_SRC}/KernelSU" ] || error "ReSukiSU: KernelSU dir not found after setup!"
 cd "$ROOT_DIR"
 log "ReSukiSU integrated ✅"
 

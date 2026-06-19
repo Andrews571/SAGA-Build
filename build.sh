@@ -138,6 +138,11 @@ run_core() {
 
 run_addons() {
     [ -z "${ADDONS:-}" ] && return 0
+    # Strip leading/trailing commas dan whitespace
+    ADDONS="${ADDONS#,}"
+    ADDONS="${ADDONS%,}"
+    ADDONS="${ADDONS// /}"
+    [ -z "${ADDONS}" ] && return 0
     echo "::group::⚡ Addons"
     IFS=',' read -ra ADDON_LIST <<< "$ADDONS"
     for addon in "${ADDON_LIST[@]}"; do

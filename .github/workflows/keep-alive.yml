@@ -23,16 +23,17 @@ jobs:
           key: arsenal-__keepalive__
           restore-keys: arsenal-
 
-      - name: "♻️ Touch ccache VANILLA"
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-data-VANILLA-__keepalive__
-          restore-keys: ccache-data-VANILLA-
-
-      - name: "♻️ Touch ccache RESUKISU_SUSFS"
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-data-RESUKISU_SUSFS-__keepalive__
-          restore-keys: ccache-data-RESUKISU_SUSFS-
+      - name: "♻️ Touch ccache (GH Release)"
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+        run: |
+          for asset in $(gh release view cache \
+            --repo "${{ github.repository }}" \
+            --json assets --jq '.assets[].name' 2>/dev/null || true); do
+            gh release download cache \
+              --repo "${{ github.repository }}" \
+              --pattern "$asset" \
+              --dir /tmp/ 2>/dev/null || true
+            rm -f "/tmp/${asset}"
+          done
+          echo "ccache assets touched ✅"
