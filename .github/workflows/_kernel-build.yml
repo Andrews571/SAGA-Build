@@ -49,7 +49,7 @@ jobs:
   # ======================================================
   prepare-matrix:
     name: "Prepare Arsenal"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
 
@@ -134,7 +134,7 @@ jobs:
           fi
   Start-Build:
     name: "Build Kernel"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.build_system == 'KLEAF' && 90 || 60 }}
     needs: prepare-matrix
     strategy:
