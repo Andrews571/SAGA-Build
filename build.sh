@@ -26,7 +26,7 @@ KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Bootstrap path — needed before run_setup() sources 00_paths.sh
-LUMINAIRE_PATCH_DIR="${ROOT_DIR}/patch"
+LUMINAIRE_PATCH_DIR="${ROOT_DIR}/luminaire"
 
 # ======================================================
 # 🚀 MAIN
@@ -104,7 +104,7 @@ run_branding() {
     [ -z "$KMI_GENERATION" ] && error "KMI_GENERATION not found!"
     export SUBLEVEL KMI_GENERATION
     echo "SUBLEVEL=${SUBLEVEL}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
-    source "${LUMINAIRE_PATCH_DIR}/branding/branding.sh" || error "Branding failed!"
+    source "${LUMINAIRE_PATCH_DIR}/kernel/branding.sh" || error "Branding failed!"
     echo "::endgroup::"
 }
 
@@ -126,7 +126,7 @@ run_variant() {
 
 run_core() {
     echo "::group::🔧 Core"
-    for script in "${LUMINAIRE_PATCH_DIR}/core/"*.sh; do
+    for script in "${LUMINAIRE_PATCH_DIR}/kernel/core/"*.sh; do
         source "$script" || error "Core script failed: $(basename "$script")"
     done
     echo "::endgroup::"
@@ -148,7 +148,7 @@ run_addons() {
     for addon in "${ADDON_LIST[@]}"; do
         addon="${addon// /}"
         [ -z "$addon" ] && continue
-        local script="${LUMINAIRE_PATCH_DIR}/addons/${addon}.sh"
+        local script="${LUMINAIRE_PATCH_DIR}/kernel/addons/${addon}.sh"
         if [ -f "$script" ]; then
             source "$script" || error "Addon failed: ${addon}"
         else

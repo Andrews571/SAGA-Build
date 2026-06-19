@@ -14,7 +14,7 @@ config() {
 log "Merging luminaire.fragment..."
 "${KERNEL_SRC}/scripts/kconfig/merge_config.sh" -m -O "${OUT_DIR}" \
     "${OUT_DIR}/.config" \
-    "${LUMINAIRE_PATCH_DIR}/config/luminaire.fragment"
+    "${LUMINAIRE_PATCH_DIR}/kernel/config/luminaire.fragment"
 log "Fragment merged ✅"
 
 # LTO

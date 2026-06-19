@@ -20,7 +20,7 @@ while IFS= read -r line; do
     [[ "$line" =~ ^CONFIG_([^=]+)= ]] || continue
     key="CONFIG_${BASH_REMATCH[1]}"
     grep -qE "^${key}[=]|^# ${key} is not set" "$DEFCONFIG" || echo "$line" >> "$DEFCONFIG"
-done < <(grep -E '^CONFIG_' "${LUMINAIRE_PATCH_DIR}/config/luminaire.fragment")
+done < <(grep -E '^CONFIG_' "${LUMINAIRE_PATCH_DIR}/kernel/config/luminaire.fragment")
 log "Fragment appended ✅"
 
 log "Running config pass to canonicalize gki_defconfig..."

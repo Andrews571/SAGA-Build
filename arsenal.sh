@@ -25,7 +25,7 @@ esac
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LUMINAIRE_PATCH_DIR="${ROOT_DIR}/patch"
+LUMINAIRE_PATCH_DIR="${ROOT_DIR}/luminaire"
 
 # ======================================================
 # 🚀 MAIN
