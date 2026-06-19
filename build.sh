@@ -142,6 +142,7 @@ run_addons() {
     IFS=',' read -ra ADDON_LIST <<< "$ADDONS"
     for addon in "${ADDON_LIST[@]}"; do
         addon="${addon// /}"
+        [ -z "$addon" ] && continue
         local script="${LUMINAIRE_PATCH_DIR}/addons/${addon}.sh"
         if [ -f "$script" ]; then
             source "$script" || error "Addon failed: ${addon}"

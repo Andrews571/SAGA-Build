@@ -43,10 +43,23 @@ on:
           - "NONE"
           - "THIN"
           - "FULL"
-      addons:
-        description: "Addons (comma-separated, e.g: bbg,droidspaces)"
+      _addons:
+        description: "Add-ons"
         type: string
-        default: "bbg"
+        default: ""
+        required: false
+      bbg:
+        description: "BBG (Baseband Guard)"
+        type: boolean
+        default: true
+      droidspaces:
+        description: "Droidspaces"
+        type: boolean
+        default: false
+      nomount:
+        description: "NoMount"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -62,7 +75,7 @@ jobs:
       kernel_version:  ${{ inputs.kernel_version }}
       update_arsenal:  ${{ inputs.update_arsenal }}
       enable_lto:      ${{ inputs.enable_lto }}
-      addons:          ${{ inputs.addons }}
+      addons:          "${{ inputs.bbg && 'bbg' || '' }}${{ inputs.droidspaces && ',droidspaces' || '' }}${{ inputs.nomount && ',nomount' || '' }}"
     secrets:
       PERSONAL_TOKEN:              ${{ secrets.PERSONAL_TOKEN }}
       TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
