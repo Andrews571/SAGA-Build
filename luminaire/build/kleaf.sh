@@ -65,7 +65,7 @@ echo "BUILD_SECONDS=${BUILD_SECONDS}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null 
 
 log "Detecting AOSP Clang version used by Kleaf..."
 AOSP_CLANG_BIN=$(find "${KERNEL_DIR}/prebuilts/clang/host/linux-x86" \
-    -maxdepth 2 -name clang -path "*/bin/clang" 2>/dev/null | head -1)
+    -maxdepth 3 -name clang -path "*/bin/clang" 2>/dev/null | head -1)
 if [ -n "$AOSP_CLANG_BIN" ]; then
     set +o pipefail
     COMPILER_STRING=$("$AOSP_CLANG_BIN" -v 2>&1 | head -1 | sed 's/(https.*//' | sed 's/ version//' || true)
