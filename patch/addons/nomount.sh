@@ -25,7 +25,7 @@ fi
 
 log "Copying NoMount source files..."
 cp "${NOMOUNT_DIR}/kernel/src/nomount.c" "${KERNEL_SRC}/fs/nomount.c"
-cp "${NOMOUNT_DIR}/kernel/src/nomount.h" "${KERNEL_SRC}/include/linux/nomount.h"
+cp "${NOMOUNT_DIR}/kernel/src/nomount.h" "${KERNEL_SRC}/fs/nomount.h"
 log "NoMount source files copied ✅"
 
 log "Applying NoMount kernel patch..."
