@@ -47,7 +47,7 @@ fi
 # Build display fields
 # ------------------------------------------------------
 LINUX_VER="${KERNEL_VERSION}.${SUBLEVEL}"
-COMPILER_DISPLAY="$([ "$BUILD_SYSTEM" = "KLEAF" ] && echo "AOSP Clang" || echo "${COMPILER_STRING:-N/A}")"
+COMPILER_DISPLAY="${COMPILER_STRING:-N/A}"
 BUILD_SYSTEM_DISPLAY="${BUILD_SYSTEM,,}"
 BUILD_SYSTEM_DISPLAY="${BUILD_SYSTEM_DISPLAY^}"
 

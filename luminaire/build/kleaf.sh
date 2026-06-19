@@ -62,3 +62,17 @@ cd "$ROOT_DIR"
 BUILD_SECONDS=$(( $(date +%s) - START_TIME ))
 log "Kleaf build completed in ${BUILD_SECONDS}s ✅"
 echo "BUILD_SECONDS=${BUILD_SECONDS}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+
+log "Detecting AOSP Clang version used by Kleaf..."
+AOSP_CLANG_BIN=$(find "${KERNEL_DIR}/prebuilts/clang/host/linux-x86" \
+    -maxdepth 2 -name clang -path "*/bin/clang" 2>/dev/null | head -1)
+if [ -n "$AOSP_CLANG_BIN" ]; then
+    set +o pipefail
+    COMPILER_STRING=$("$AOSP_CLANG_BIN" -v 2>&1 | head -1 | sed 's/(https.*//' | sed 's/ version//' || true)
+    set -o pipefail
+    export COMPILER_STRING
+    echo "COMPILER_STRING=${COMPILER_STRING}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+    log "Compiler: ${COMPILER_STRING:-N/A} ✅"
+else
+    log "⚠️ AOSP Clang binary not found — COMPILER_STRING will be unset"
+fi
