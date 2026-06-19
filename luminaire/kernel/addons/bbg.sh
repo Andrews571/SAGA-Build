@@ -2,7 +2,7 @@
 
 log "Setting up Baseband Guard (BBG)..."
 cd "${KERNEL_SRC}"
-BBG_SETUP=$(wget -qO- --timeout=30 --tries=3 \
+BBG_SETUP=$(wget --no-verbose -O- --timeout=30 --tries=3 \
     "https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh") \
     || error "BBG: failed to download setup.sh!"
 echo "$BBG_SETUP" | bash || error "BBG: setup.sh failed!"

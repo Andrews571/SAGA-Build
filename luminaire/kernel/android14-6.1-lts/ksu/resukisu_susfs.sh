@@ -245,8 +245,8 @@ log "KSU-Next compat patched ✅"
 
 log "Cloning SuSFS (${SUSFS_BRANCH})..."
 [ -d "$SUSFS_DIR" ] && rm -rf "$SUSFS_DIR"
-git clone -q --depth=1 -b "$SUSFS_BRANCH" "$SUSFS_REPO" "$SUSFS_DIR" \
-    || { log "SuSFS clone failed — skipping"; return 0; }
+retry 3 run_quiet git clone -q --depth=1 -b "$SUSFS_BRANCH" "$SUSFS_REPO" "$SUSFS_DIR" \
+    || { warn "SuSFS clone failed after 3 attempts — skipping (kernel will build WITHOUT SuSFS)"; return 0; }
 
 log "Copying SuSFS source files..."
 cp "${SUSFS_DIR}/kernel_patches/fs/susfs.c"                  "${KERNEL_SRC}/fs/susfs.c"
@@ -261,7 +261,7 @@ if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$KERNEL_PATCH" > /
 else
     patch -p1 --fuzz=3 --forward -d "$KERNEL_SRC" < "$KERNEL_PATCH" \
         && log "SuSFS kernel patch applied ✅" \
-        || log "⚠️ SuSFS kernel patch: some hunks failed — continuing"
+        || warn "SuSFS kernel patch: some hunks failed — continuing"
 fi
 
 log "Fixing namespace.c susfs declarations..."

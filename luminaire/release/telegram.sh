@@ -13,19 +13,19 @@ TELEGRAM_CAPTION_LIMIT=1024                              # Bot API hard limit
 # Guard clauses — every skip is logged, never silent
 # ------------------------------------------------------
 if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
-    log "⚠️ Skipping Telegram: TELEGRAM_BOT_TOKEN not set"
+    warn "Skipping Telegram: TELEGRAM_BOT_TOKEN not set"
     return 0
 fi
 if [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
-    log "⚠️ Skipping Telegram: TELEGRAM_CHAT_ID not set"
+    warn "Skipping Telegram: TELEGRAM_CHAT_ID not set"
     return 0
 fi
 if [ -z "${TELEGRAM_THREAD_ID_ARTIFACT:-}" ]; then
-    log "⚠️ Skipping Telegram: TELEGRAM_THREAD_ID_ARTIFACT not set"
+    warn "Skipping Telegram: TELEGRAM_THREAD_ID_ARTIFACT not set"
     return 0
 fi
 if [ ! -f "${ZIP_PATH:-}" ]; then
-    log "⚠️ Skipping Telegram: ZIP_PATH not set or file missing (ZIP_PATH='${ZIP_PATH:-}')"
+    warn "Skipping Telegram: ZIP_PATH not set or file missing (ZIP_PATH='${ZIP_PATH:-}')"
     return 0
 fi
 
@@ -34,12 +34,12 @@ fi
 # ------------------------------------------------------
 ZIP_SIZE_BYTES=$(stat -c%s "$ZIP_PATH" 2>/dev/null || stat -f%z "$ZIP_PATH" 2>/dev/null || echo 0)
 if [ "$ZIP_SIZE_BYTES" -eq 0 ]; then
-    log "⚠️ Skipping Telegram: could not determine size of ${ZIP_PATH}, or file is empty"
+    warn "Skipping Telegram: could not determine size of ${ZIP_PATH}, or file is empty"
     return 0
 fi
 if [ "$ZIP_SIZE_BYTES" -gt "$TELEGRAM_MAX_FILE_BYTES" ]; then
     ZIP_SIZE_MB=$(( ZIP_SIZE_BYTES / 1024 / 1024 ))
-    log "⚠️ Skipping Telegram: ${ZIP_NAME} is ${ZIP_SIZE_MB}MB, exceeds Telegram's 50MB sendDocument limit"
+    warn "Skipping Telegram: ${ZIP_NAME} is ${ZIP_SIZE_MB}MB, exceeds Telegram's 50MB sendDocument limit"
     return 0
 fi
 
@@ -121,7 +121,7 @@ Date          : $(date +'%d %b %Y')
 # ------------------------------------------------------
 CAPTION_LEN=$(printf '%s' "$CAPTION" | wc -m)
 if [ "$CAPTION_LEN" -gt "$TELEGRAM_CAPTION_LIMIT" ]; then
-    log "⚠️ Caption is ${CAPTION_LEN} chars, exceeds Telegram's ${TELEGRAM_CAPTION_LIMIT}-char limit — truncating"
+    warn "Caption is ${CAPTION_LEN} chars, exceeds Telegram's ${TELEGRAM_CAPTION_LIMIT}-char limit — truncating"
     SUFFIX=$'\n…\n```'
     KEEP=$(( TELEGRAM_CAPTION_LIMIT - ${#SUFFIX} ))
     CAPTION="$(printf '%s' "$CAPTION" | head -c "$KEEP")${SUFFIX}"
@@ -161,13 +161,13 @@ while [ "$ATTEMPT" -le "$TELEGRAM_MAX_RETRIES" ]; do
     # Decide whether this is worth retrying
     case "$HTTP_CODE" in
         000)
-            log "⚠️ Telegram send failed: connection/timeout error (${CURL_ERR:-no details}) — will retry"
+            warn "Telegram send failed: connection/timeout error (${CURL_ERR:-no details}) — will retry"
             ;;
         429|500|502|503|504)
-            log "⚠️ Telegram send failed: HTTP ${HTTP_CODE} (transient) — will retry. Response: ${RESPONSE}"
+            warn "Telegram send failed: HTTP ${HTTP_CODE} (transient) — will retry. Response: ${RESPONSE}"
             ;;
         *)
-            log "⚠️ Telegram send FAILED: HTTP ${HTTP_CODE} (non-retryable). Response: ${RESPONSE}"
+            warn "Telegram send FAILED: HTTP ${HTTP_CODE} (non-retryable). Response: ${RESPONSE}"
             break
             ;;
     esac

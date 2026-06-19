@@ -32,7 +32,7 @@ elif [ "${ENABLE_LTO}" = "NONE" ]; then
     config --disable CONFIG_LTO_CLANG_THIN
     log "LTO: NONE ✅"
 else
-    log "⚠️ Unknown ENABLE_LTO value '${ENABLE_LTO}', defaulting to NONE"
+    warn "Unknown ENABLE_LTO value '${ENABLE_LTO}', defaulting to NONE"
     config --enable  CONFIG_LTO_CLANG_NONE
     config --disable CONFIG_LTO_CLANG_THIN
     log "LTO: NONE ✅"

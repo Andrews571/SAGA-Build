@@ -41,7 +41,7 @@ if [ -n "${ENABLE_LTO}" ] && [ "${ENABLE_LTO}" != "NONE" ]; then
             "${KERNEL_SRC}/scripts/config" --file "${OUT_DIR}/.config" --enable CONFIG_LTO --enable CONFIG_LTO_CLANG --enable CONFIG_LTO_CLANG_FULL
             ;;
         *)
-            log "⚠️ Unknown LTO mode: ${ENABLE_LTO}"
+            warn "Unknown LTO mode: ${ENABLE_LTO}"
             ;;
     esac
 fi

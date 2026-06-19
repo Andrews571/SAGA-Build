@@ -74,11 +74,11 @@ if [ -n "$AOSP_CLANG_BIN" ]; then
         COMPILER_STRING="AOSP Clang ${AOSP_CLANG_VER}"
     else
         COMPILER_STRING="AOSP Clang"
-        log "⚠️ Could not parse AOSP Clang version from -v output"
+        warn "Could not parse AOSP Clang version from -v output"
     fi
     export COMPILER_STRING
     echo "COMPILER_STRING=${COMPILER_STRING}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
     log "Compiler: ${COMPILER_STRING:-N/A} ✅"
 else
-    log "⚠️ AOSP Clang binary not found — COMPILER_STRING will be unset"
+    warn "AOSP Clang binary not found — COMPILER_STRING will be unset"
 fi

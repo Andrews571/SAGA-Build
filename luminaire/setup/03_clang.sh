@@ -16,9 +16,12 @@ if [ -d "${CLANG_CACHE_DIR}/bin" ]; then
     log "Clang restored ✅"
 else
     log "Downloading Greenforce Clang..."
-    wget -qO- https://raw.githubusercontent.com/greenforce-project/greenforce_clang/refs/heads/main/get_clang.sh \
-        | bash > /dev/null 2>&1
-    [ -d "${TOOL_CLANG_DIR}/bin" ] || error "Clang download failed!"
+    download_clang() {
+        wget --no-verbose -O- https://raw.githubusercontent.com/greenforce-project/greenforce_clang/refs/heads/main/get_clang.sh \
+            | bash
+    }
+    retry 3 run_quiet download_clang || error "Clang download failed! (see output above)"
+    [ -d "${TOOL_CLANG_DIR}/bin" ] || error "Clang directory missing after download — get_clang.sh may have failed silently!"
     mkdir -p "$CLANG_CACHE_DIR"
     cp -a "${TOOL_CLANG_DIR}/." "${CLANG_CACHE_DIR}/"
     log "Clang downloaded and cached ✅"
@@ -32,7 +35,7 @@ if [ -n "$CIRRUS_CLANG_VER" ]; then
     COMPILER_STRING="Cirrus Clang ${CIRRUS_CLANG_VER}"
 else
     COMPILER_STRING="Cirrus Clang"
-    log "⚠️ Could not parse Cirrus Clang version from -v output"
+    warn "Could not parse Cirrus Clang version from -v output"
 fi
 
 log "Clang ready: ${CLANG_VER}"

@@ -11,9 +11,9 @@ if [ "${USE_AK3_CACHE}" = "true" ] && [ -d "${HOME}/ak3-cache" ]; then
     cp -a "${HOME}/ak3-cache/." "${TOOL_AK3_DIR}/"
     log "AnyKernel3 restored from cache ✅"
 else
-    git clone -q --depth=1 \
+    retry 3 run_quiet git clone -q --depth=1 \
         https://github.com/chainonyourdoor/AnyKernel3-Luminaire.git "$TOOL_AK3_DIR" \
-        || error "Failed to clone AK3!"
+        || error "Failed to clone AK3! (see output above)"
     mkdir -p "${HOME}/ak3-cache"
     cp -a "${TOOL_AK3_DIR}/." "${HOME}/ak3-cache/"
 fi
@@ -29,7 +29,7 @@ for img in Image Image.gz Image.gz-dtb Image-dtb; do
         break
     fi
 done
-[ -z "$KERNEL_IMG" ] && error "Kernel image not found!"
+[ -z "$KERNEL_IMG" ] && error "Kernel image not found! Searched ${BOOT_SEARCH_DIR}/ for: Image, Image.gz, Image.gz-dtb, Image-dtb"
 
 cp "$KERNEL_IMG" "${TOOL_AK3_DIR}/"
 

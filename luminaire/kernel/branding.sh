@@ -47,7 +47,7 @@ if [ -f "$MKCOMPILE_H" ]; then
     grep -n "LINUX_COMPILE_BY\|LINUX_COMPILE_HOST" "$MKCOMPILE_H" \
         | while IFS= read -r l; do log "  $l"; done || true
 else
-    log "⚠️ mkcompile_h not found at: $MKCOMPILE_H"
+    warn "mkcompile_h not found at: $MKCOMPILE_H"
 fi
 
 # 3. BUILD_TIMESTAMP via stamp.bzl — fix SOURCE_DATE_EPOCH=0 (epoch 1970)
@@ -57,7 +57,7 @@ if [ -f "$STAMP_BZL" ]; then
     sed -i "s/export SOURCE_DATE_EPOCH=0/export SOURCE_DATE_EPOCH=${BUILD_EPOCH}/" "$STAMP_BZL"
     log "stamp.bzl SOURCE_DATE_EPOCH patched ✅"
 else
-    log "⚠️ stamp.bzl not found at: $STAMP_BZL"
+    warn "stamp.bzl not found at: $STAMP_BZL"
 fi
 
 # 4. Kleaf action_env flags (passed to KLEAF_ARGS in kleaf.sh)

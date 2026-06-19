@@ -13,12 +13,12 @@ NOMOUNT_PATCH_NAME="nomount_${KERNEL_VERSION}_kernel_integration.patch"
 log "Integrating NoMount..."
 
 [ -d "$NOMOUNT_DIR" ] && rm -rf "$NOMOUNT_DIR"
-git clone -q --depth=1 "$NOMOUNT_REPO" "$NOMOUNT_DIR" \
-    || { log "⚠️ NoMount clone failed — skipping"; return 0; }
+retry 3 run_quiet git clone -q --depth=1 "$NOMOUNT_REPO" "$NOMOUNT_DIR" \
+    || { warn "NoMount clone failed — skipping"; return 0; }
 
 NOMOUNT_PATCH="${NOMOUNT_DIR}/kernel/patches/${NOMOUNT_PATCH_NAME}"
 if [ ! -f "$NOMOUNT_PATCH" ]; then
-    log "⚠️ NoMount patch not found for kernel ${KERNEL_VERSION} — skipping"
+    warn "NoMount patch not found for kernel ${KERNEL_VERSION} — skipping"
     rm -rf "$NOMOUNT_DIR"
     return 0
 fi
@@ -34,7 +34,7 @@ if patch -p1 --fuzz=10 --dry-run --reverse -d "$KERNEL_SRC" < "$NOMOUNT_PATCH" >
 else
     patch -p1 --fuzz=10 --forward -d "$KERNEL_SRC" < "$NOMOUNT_PATCH" \
         && log "NoMount patch applied ✅" \
-        || log "⚠️ NoMount patch: some hunks failed — continuing"
+        || warn "NoMount patch: some hunks failed — continuing"
 fi
 
 rm -rf "$NOMOUNT_DIR"

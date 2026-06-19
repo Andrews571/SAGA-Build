@@ -10,10 +10,10 @@ if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -d "${HOME}/kernel-cache/common" ]; t
     log "Kernel source restored ✅"
 else
     log "Cloning kernel source..."
-    git clone -q --depth=1 \
+    retry 3 run_quiet git clone -q --depth=1 \
         -b "$KERNEL_BRANCH" \
         https://github.com/chainonyourdoor/android_kernel_common-${KERNEL_VERSION} \
-        "${KERNEL_DIR}/common" || error "Failed to clone kernel!"
+        "${KERNEL_DIR}/common" || error "Failed to clone kernel! (see output above)"
     log "Saving to cache..."
     mkdir -p "${HOME}/kernel-cache"
     rsync -a --delete "${KERNEL_DIR}/" "${HOME}/kernel-cache/"
