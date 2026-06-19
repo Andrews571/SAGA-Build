@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
 # ======================================================
-# ⚡ SETUP — CCACHE-ECS
+# ⚡ SETUP — CCACHE-ECS (MAKE only)
+# ======================================================
+# KLEAF uses Bazel internal caching — this script is skipped
 # ======================================================
 
 # Kleaf handles caching internally via Bazel — skip
@@ -10,11 +12,11 @@
 CCACHE_CACHE_DIR="${HOME}/ccache-bin"
 
 if [ -f "${CCACHE_CACHE_DIR}/ccache" ]; then
-    log "Restoring ccache from cache..."
+    log "Restoring ccache-ECS from cache..."
     mkdir -p "${ROOT_DIR}/ccache-bin"
     cp "${CCACHE_CACHE_DIR}/ccache" "${ROOT_DIR}/ccache-bin/ccache"
     chmod +x "${ROOT_DIR}/ccache-bin/ccache"
-    log "ccache restored ✅"
+    log "ccache-ECS restored ✅"
 else
     log "Building ccache-ECS from source..."
     git clone --depth=1 -b ccache-ECS-v1.0 \
@@ -39,5 +41,6 @@ export CCACHE_IS_KERNEL_COMPILING="true"
 export CCACHE_COMPRESS=1
 export CCACHE_COMPRESSLEVEL=1
 
+# Reset stats (not cache data) for fresh tracking
 ${TOOL_CCACHE_BIN} --zero-stats > /dev/null 2>&1 || true
 log "ccache ready | dir: ${CCACHE_DIR} | max: ${CCACHE_MAXSIZE}"

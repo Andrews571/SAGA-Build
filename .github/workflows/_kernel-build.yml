@@ -127,11 +127,25 @@ jobs:
           CACHES=$(gh api \
             "/repos/${{ github.repository }}/actions/caches?per_page=100" \
             --jq ".actions_caches[] | select(.key | startswith(\"arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-\")) | select(.key != \"arsenal-${{ inputs.build_system }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}\") | .id")
-          if [ -n "$CACHES" ]; then
-            for ID in $CACHES; do
-              gh api --method DELETE "/repos/${{ github.repository }}/actions/caches/${ID}" || true
-            done
+          
+          if [ -z "$CACHES" ]; then
+            echo "No old cache entries found"
+            exit 0
           fi
+          
+          DELETED=0
+          FAILED=0
+          for ID in $CACHES; do
+            if gh api --method DELETE "/repos/${{ github.repository }}/actions/caches/${ID}" > /dev/null 2>&1; then
+              DELETED=$((DELETED + 1))
+            else
+              FAILED=$((FAILED + 1))
+              echo "⚠️ Failed to delete cache ID: $ID"
+            fi
+          done
+          
+          echo "Cache cleanup: ${DELETED} deleted, ${FAILED} failed"
+          [ $FAILED -eq 0 ] || exit 1
   Start-Build:
     name: "Build Kernel"
     runs-on: ubuntu-latest
@@ -150,14 +164,15 @@ jobs:
       TELEGRAM_THREAD_ID_LOG:      ${{ secrets.TELEGRAM_THREAD_ID_LOG }}
       USE_KERNEL_CACHE:            "true"
       USE_AK3_CACHE:               "true"
-      CCACHE_DIR:                  ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE:              "5G"
       VARIANT:                     ${{ matrix.variant }}
       KERNEL_VERSION:              ${{ inputs.kernel_version }}
       ENABLE_LTO:                  ${{ inputs.enable_lto }}
       WARMING_MODE:                ${{ inputs.warming_mode }}
       BUILD_SYSTEM:                ${{ inputs.build_system }}
       ADDONS:                      ${{ inputs.addons }}
+      # MAKE only — KLEAF uses Bazel internal cache
+      CCACHE_DIR:                  ${{ inputs.build_system == 'MAKE' && format('{0}/.ccache', github.workspace) || '' }}
+      CCACHE_MAXSIZE:              ${{ inputs.build_system == 'MAKE' && '5G' || '' }}
 
     steps:
       - name: "Checkout"

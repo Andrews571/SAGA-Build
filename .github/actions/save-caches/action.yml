@@ -17,15 +17,52 @@ runs:
       run: |
         ASSET_NAME="${{ inputs.ccache-prefix }}ccache.tar.zst"
         cd "${{ github.workspace }}"
-        tar --zstd -cf "/tmp/${ASSET_NAME}" .ccache/
+        
+        # Check ccache exists
+        if [ ! -d ".ccache" ]; then
+          echo "⚠️ .ccache directory not found — skipping save"
+          exit 0
+        fi
+        
+        # Compress
+        echo "Compressing ccache..."
+        tar --zstd -cf "/tmp/${ASSET_NAME}" .ccache/ || {
+          echo "❌ Failed to compress ccache"
+          exit 1
+        }
+        
+        # Check size
+        SIZE=$(stat -f%z "/tmp/${ASSET_NAME}" 2>/dev/null || stat -c%s "/tmp/${ASSET_NAME}" 2>/dev/null || echo 0)
+        SIZE_MB=$((SIZE / 1024 / 1024))
+        
+        if [ "$SIZE_MB" -gt 2000 ]; then
+          echo "❌ ccache too large (${SIZE_MB}MB > 2000MB limit) — cleanup needed"
+          rm -f "/tmp/${ASSET_NAME}"
+          exit 1
+        fi
+        echo "✅ ccache size: ${SIZE_MB}MB"
+        
+        # Ensure release exists
         gh release view cache --repo "${{ github.repository }}" > /dev/null 2>&1 || \
           gh release create cache \
             --repo "${{ github.repository }}" \
             --title "Cache Storage" \
             --notes "Automated cache storage for Luminaire build tools" \
-            --prerelease
+            --prerelease || {
+          echo "❌ Failed to create cache release"
+          rm -f "/tmp/${ASSET_NAME}"
+          exit 1
+        }
+        
+        # Upload
+        echo "Uploading ccache asset..."
         gh release upload cache "/tmp/${ASSET_NAME}" \
           --repo "${{ github.repository }}" \
-          --clobber
-        rm -f "/tmp/${ASSET_NAME}"
+          --clobber || {
+          echo "❌ Failed to upload ccache"
+          rm -f "/tmp/${ASSET_NAME}"
+          exit 1
+        }
         
+        rm -f "/tmp/${ASSET_NAME}"
+        echo "ccache saved ✅"

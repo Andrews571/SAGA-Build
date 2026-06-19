@@ -17,11 +17,33 @@ runs:
       run: |
         ASSET_NAME="${{ inputs.ccache-prefix }}ccache.tar.zst"
         cd "${{ github.workspace }}"
-        gh release download cache \
+        
+        # Check if asset exists in release
+        if ! gh release view cache --repo "${{ github.repository }}" > /dev/null 2>&1; then
+          echo "⚠️ Cache release not found — fresh ccache will be used"
+          exit 0
+        fi
+        
+        # Try download
+        echo "Checking for ccache asset: ${ASSET_NAME}"
+        if ! gh release download cache \
           --repo "${{ github.repository }}" \
           --pattern "${ASSET_NAME}" \
-          --dir /tmp/ 2>/dev/null || true
+          --dir /tmp/ 2>&1; then
+          echo "⚠️ ccache asset not found (${ASSET_NAME}) — fresh ccache will be used"
+          exit 0
+        fi
+        
+        # Extract if found
         if [ -f "/tmp/${ASSET_NAME}" ]; then
-          tar --zstd -xf "/tmp/${ASSET_NAME}"
+          echo "Restoring ccache from ${ASSET_NAME}..."
+          tar --zstd -xf "/tmp/${ASSET_NAME}" || {
+            echo "❌ Failed to extract ccache — fresh ccache will be used"
+            rm -f "/tmp/${ASSET_NAME}"
+            exit 0
+          }
           rm -f "/tmp/${ASSET_NAME}"
+          echo "ccache restored ✅"
+        else
+          echo "⚠️ Download completed but file not found — fresh ccache will be used"
         fi
