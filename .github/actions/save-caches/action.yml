@@ -2,8 +2,6 @@ name: "Save Caches"
 description: "Save arsenal to GH Cache, ccache to Release"
 
 inputs:
-  ccache-key:
-    required: true
   ccache-prefix:
     required: true
   gh-token:
@@ -30,3 +28,4 @@ runs:
           --repo "${{ github.repository }}" \
           --clobber
         rm -f "/tmp/${ASSET_NAME}"
+        
