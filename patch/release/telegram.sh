@@ -38,7 +38,7 @@ if [ "$VARIANT" != "VANILLA" ]; then
     fi
 fi
 
-CAPTION="<b>Luminaire</b>
+CAPTION="✨ Luminaire
 <code>Linux         : ${LINUX_VER}
 Root Solution : ${ROOT_SOLUTION}
 Susfs         : ${SUSFS_VER}
