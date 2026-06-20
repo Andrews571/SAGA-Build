@@ -104,7 +104,7 @@ LTO_DISPLAY_ESC="$(mdv2_code_escape "${ENABLE_LTO:-NONE}")"
 # Backtick-fence with a language tag right after the opening
 # fence — this is what makes Telegram show the "Luminaire"
 # label + Copy Code button on the rendered code block.
-CAPTION="\`\`\`Luminaire
+CAPTION="\`\`\`Luminaire Anykernel3
 Linux         : ${LINUX_VER_ESC}
 Root Solution : ${ROOT_SOLUTION_ESC}
 Susfs         : ${SUSFS_VER_ESC}
