@@ -122,6 +122,7 @@ run_variant() {
 
     if [ "$SUSFS_ENABLED" = "true" ] && [ "$ROOT_SOLUTION" != "VANILLA" ]; then
         local susfs_script="${VERSION_PATCH_DIR}/ksu/susfs.sh"
+        [ -f "$susfs_script" ] || error "SuSFS script not found: $(basename "$susfs_script")"
         echo "::group::🧬 SuSFS"
         source "$susfs_script" || error "SuSFS script failed: $(basename "$susfs_script")"
         echo "::endgroup::"

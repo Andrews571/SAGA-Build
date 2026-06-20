@@ -21,6 +21,7 @@ log "SuSFS source files copied ✅"
 
 log "Applying SuSFS kernel patch..."
 KERNEL_PATCH="${SUSFS_DIR}/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch"
+[ -f "$KERNEL_PATCH" ] || { warn "SuSFS kernel patch not found — skipping"; return 0; }
 if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$KERNEL_PATCH" > /dev/null 2>&1; then
     log "SuSFS kernel patch already applied, skipping."
 else
