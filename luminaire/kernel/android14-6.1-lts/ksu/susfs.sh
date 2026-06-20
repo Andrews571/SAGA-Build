@@ -77,6 +77,111 @@ log "namespace.c fixed ✅"
 
 rm -rf "$SUSFS_DIR"
 
+log "Ensuring KSU_SUSFS Kconfig declarations exist..."
+KSU_KCONFIG="${KSU_DIR}/kernel/Kconfig"
+if [ -f "$KSU_KCONFIG" ] && grep -q "^config KSU_SUSFS$" "$KSU_KCONFIG"; then
+    log "KSU_SUSFS already declared by this fork, skipping injection."
+else
+    python3 - "$KSU_KCONFIG" << 'PYEOF'
+import sys
+
+with open(sys.argv[1]) as f:
+    content = f.read()
+
+if "config KSU_SUSFS" in content:
+    print("KSU_SUSFS Kconfig already present, skipping.")
+    sys.exit(0)
+
+block = '''menu "KernelSU - SUSFS"
+config KSU_SUSFS
+\tbool "KernelSU addon - SUSFS"
+\tdepends on KSU
+\tdepends on THREAD_INFO_IN_TASK
+\tdefault y
+\thelp
+\t  Patch and Enable SUSFS to kernel with KernelSU.
+
+config KSU_SUSFS_SUS_PATH
+\tbool "Enable to hide suspicious path"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow hiding the user-defined path and all its sub-paths from various system calls.
+
+config KSU_SUSFS_SUS_MOUNT
+\tbool "Enable to hide suspicious mounts"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow hiding all sus mounts from /proc/self/[mounts|mountinfo|mountstat] for non-su processes.
+
+config KSU_SUSFS_SUS_KSTAT
+\tbool "Enable to spoof suspicious kstat"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow spoofing the kstat of user-defined file/directory.
+
+config KSU_SUSFS_SPOOF_UNAME
+\tbool "Enable to spoof uname"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow spoofing the string returned by uname syscall.
+
+config KSU_SUSFS_ENABLE_LOG
+\tbool "Enable logging susfs log to kernel"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow logging susfs log to kernel.
+
+config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+\tbool "Enable to automatically hide ksu and susfs symbols from /proc/kallsyms"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Automatically hide ksu and susfs symbols from /proc/kallsyms.
+
+config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+\tbool "Enable to spoof /proc/bootconfig or /proc/cmdline"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Spoof the output of /proc/bootconfig (gki) or /proc/cmdline (non-gki).
+
+config KSU_SUSFS_OPEN_REDIRECT
+\tbool "Enable to redirect a path to be opened with another path"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow redirecting a target path to be opened with another user-defined path.
+
+config KSU_SUSFS_SUS_MAP
+\tbool "Enable to hide some mmapped real file from different proc maps interfaces"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow hiding mmapped real file from /proc/<pid>/[maps|smaps|smaps_rollup|map_files|mem|pagemap].
+
+endmenu'''
+
+stripped = content.rstrip()
+if not stripped.endswith("endmenu"):
+    print("ERROR: expected Kconfig to end with endmenu!", file=sys.stderr)
+    sys.exit(1)
+
+idx = stripped.rfind("endmenu")
+new_content = stripped[:idx] + block + "\n"
+
+with open(sys.argv[1], 'w') as f:
+    f.write(new_content)
+
+print("KSU_SUSFS Kconfig block injected.")
+PYEOF
+    log "KSU_SUSFS Kconfig injected ✅"
+fi
+
 log "Enabling SuSFS configs..."
 cat >> "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig" << 'CONFIGS'
 CONFIG_KSU_SUSFS=y
