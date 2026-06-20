@@ -167,17 +167,12 @@ config KSU_SUSFS_SUS_MAP
 endmenu'''
 
 stripped = content.rstrip()
-if not stripped.endswith("endmenu"):
-    print("ERROR: expected Kconfig to end with endmenu!", file=sys.stderr)
-    sys.exit(1)
-
-idx = stripped.rfind("endmenu")
-new_content = stripped[:idx] + block + "\n"
+new_content = stripped + "\n\n" + block + "\n"
 
 with open(sys.argv[1], 'w') as f:
     f.write(new_content)
 
-print("KSU_SUSFS Kconfig block injected.")
+print("KSU_SUSFS Kconfig block appended.")
 PYEOF
     log "KSU_SUSFS Kconfig injected ✅"
 fi
