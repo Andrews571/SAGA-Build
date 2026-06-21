@@ -39,6 +39,22 @@ on:
         options:
           - "enable"
           - "disable"
+      mountless_engine:
+        description: "Mountless Engine"
+        type: choice
+        default: "none"
+        options:
+          - "none"
+          - "nomount"
+          - "zeromount"
+      bbg:
+        description: "BBG (Baseband Guard)"
+        type: boolean
+        default: true
+      droidspaces:
+        description: "Droidspaces"
+        type: boolean
+        default: false
       update_arsenal:
         description: "Update Arsenal"
         type: choice
@@ -54,18 +70,6 @@ on:
           - "NONE"
           - "THIN"
           - "FULL"
-      bbg:
-        description: "BBG (Baseband Guard)"
-        type: boolean
-        default: true
-      droidspaces:
-        description: "Droidspaces"
-        type: boolean
-        default: false
-      nomount:
-        description: "NoMount"
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -83,7 +87,7 @@ jobs:
       kernel_version:  ${{ inputs.kernel_version }}
       update_arsenal:  ${{ inputs.update_arsenal }}
       enable_lto:      ${{ inputs.enable_lto }}
-      addons:          "${{ inputs.bbg && 'bbg' || '' }}${{ inputs.droidspaces && ',droidspaces' || '' }}${{ inputs.nomount && ',nomount' || '' }}"
+      addons:          "${{ inputs.bbg && 'bbg' || '' }}${{ inputs.droidspaces && ',droidspaces' || '' }}${{ inputs.mountless_engine != 'none' && format(',{0}', inputs.mountless_engine) || '' }}"
     secrets:
       PERSONAL_TOKEN:              ${{ secrets.PERSONAL_TOKEN }}
       TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
