@@ -28,4 +28,47 @@ else
 fi
 
 rm -f "$ZEROMOUNT_PATCH"
+
+log "Fixing task_mmu.c scope issue (zeromount call outside inode scope)..."
+python3 - "${KERNEL_SRC}/fs/proc/task_mmu.c" << 'PYEOF'
+import sys
+
+with open(sys.argv[1]) as f:
+    content = f.read()
+
+broken = '''#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+\t\tsusfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+\t}
+
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+#ifdef CONFIG_ZEROMOUNT
+\t\tzeromount_spoof_mmap_metadata(inode, &dev, &ino);
+#endif
+orig_flow:
+#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT'''
+
+fixed = '''#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+\t\tsusfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+#ifdef CONFIG_ZEROMOUNT
+\t\tzeromount_spoof_mmap_metadata(inode, &dev, &ino);
+#endif
+\t}
+
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+orig_flow:
+#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT'''
+
+if broken in content:
+    content = content.replace(broken, fixed)
+    with open(sys.argv[1], 'w') as f:
+        f.write(content)
+    print("task_mmu.c scope fix applied.")
+elif "zeromount_spoof_mmap_metadata" not in content:
+    print("zeromount call not found in task_mmu.c, skipping (patch may have changed).")
+else:
+    print("Pattern already fixed or different, skipping.")
+PYEOF
+
 log "ZeroMount integrated ✅"
