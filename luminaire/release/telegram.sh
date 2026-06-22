@@ -76,6 +76,13 @@ if [ "$SUSFS_ENABLED" = "true" ] && [ "$ROOT_SOLUTION" != "VANILLA" ]; then
     fi
 fi
 
+# Mountless Engine — parse from ADDONS comma-separated list
+MOUNTLESS_ENGINE_DISPLAY="None"
+case ",${ADDONS}," in
+    *,nomount,*)   MOUNTLESS_ENGINE_DISPLAY="NoMount" ;;
+    *,zeromount,*) MOUNTLESS_ENGINE_DISPLAY="ZeroMount" ;;
+esac
+
 # ------------------------------------------------------
 # Escape every dynamic field before it goes inside a
 # MarkdownV2 code fence (```Luminaire ... ```).
@@ -96,6 +103,7 @@ mdv2_code_escape() {
 LINUX_VER_ESC="$(mdv2_code_escape "$LINUX_VER")"
 ROOT_SOLUTION_ESC="$(mdv2_code_escape "$ROOT_SOLUTION_DISPLAY")"
 SUSFS_VER_ESC="$(mdv2_code_escape "$SUSFS_VER")"
+MOUNTLESS_ENGINE_ESC="$(mdv2_code_escape "$MOUNTLESS_ENGINE_DISPLAY")"
 KERNEL_BRANCH_ESC="$(mdv2_code_escape "$KERNEL_BRANCH")"
 BUILD_SYSTEM_DISPLAY_ESC="$(mdv2_code_escape "$BUILD_SYSTEM_DISPLAY")"
 COMPILER_DISPLAY_ESC="$(mdv2_code_escape "$COMPILER_DISPLAY")"
@@ -105,14 +113,15 @@ LTO_DISPLAY_ESC="$(mdv2_code_escape "${ENABLE_LTO:-NONE}")"
 # fence — this is what makes Telegram show the "Luminaire"
 # label + Copy Code button on the rendered code block.
 CAPTION="\`\`\`Luminaire Anykernel3
-Linux         : ${LINUX_VER_ESC}
-Root Solution : ${ROOT_SOLUTION_ESC}
-Susfs         : ${SUSFS_VER_ESC}
-Branch        : ${KERNEL_BRANCH_ESC}
-Build System  : ${BUILD_SYSTEM_DISPLAY_ESC}
-Compiler      : ${COMPILER_DISPLAY_ESC}
-LTO           : ${LTO_DISPLAY_ESC}
-Date          : $(date +'%d %b %Y')
+Linux            : ${LINUX_VER_ESC}
+Root Solution    : ${ROOT_SOLUTION_ESC}
+Susfs            : ${SUSFS_VER_ESC}
+Mountless Engine : ${MOUNTLESS_ENGINE_ESC}
+Branch           : ${KERNEL_BRANCH_ESC}
+Build System     : ${BUILD_SYSTEM_DISPLAY_ESC}
+Compiler         : ${COMPILER_DISPLAY_ESC}
+LTO              : ${LTO_DISPLAY_ESC}
+Date             : $(date +'%d %b %Y')
 \`\`\`"
 
 # ------------------------------------------------------
