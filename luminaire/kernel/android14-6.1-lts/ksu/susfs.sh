@@ -4,6 +4,19 @@
 # 🧬 SuSFS — shared apply logic (any KSU fork, android14-6.1-lts)
 # ======================================================
 
+# SuSFS compatibility guard
+# SukiSU-Ultra uses syscall_hook_manager with restricted symbol
+# visibility — incompatible with susfs4ksu adapter patches without
+# pinning to an older commit. Skip early to avoid wasting build time.
+SUSFS_INCOMPATIBLE_FORKS=("SUKISU")
+for _fork in "${SUSFS_INCOMPATIBLE_FORKS[@]}"; do
+    if [ "$ROOT_SOLUTION" = "$_fork" ]; then
+        warn "SuSFS is not supported for ${ROOT_SOLUTION} (incompatible hook architecture — see wishlist)"
+        warn "Building ${ROOT_SOLUTION} WITHOUT SuSFS."
+        return 0
+    fi
+done
+
 SUSFS_BRANCH="gki-android14-6.1"
 SUSFS_REPO="https://gitlab.com/simonpunk/susfs4ksu.git"
 SUSFS_DIR="/tmp/susfs4ksu"
