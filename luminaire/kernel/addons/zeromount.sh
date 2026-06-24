@@ -19,13 +19,28 @@ retry 3 run_quiet curl -fSL "$ZEROMOUNT_PATCH_URL" -o "$ZEROMOUNT_PATCH" \
     || { warn "ZeroMount patch download failed — skipping"; return 0; }
 
 log "Applying ZeroMount kernel patch..."
+# readdir.c hunks require SuSFS context to apply cleanly.
+# Without SuSFS, failed hunks cause patch to corrupt readdir.c
+# with content from other files (Makefile/Kconfig fragments).
+# Save it before patching and restore after.
+READDIR_BACKUP="/tmp/readdir.c.zeromount.bak"
+cp "${KERNEL_SRC}/fs/readdir.c" "$READDIR_BACKUP"
+
 if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$ZEROMOUNT_PATCH" > /dev/null 2>&1; then
     log "ZeroMount patch already applied, skipping."
 else
     patch -p1 --fuzz=3 --forward -d "$KERNEL_SRC" < "$ZEROMOUNT_PATCH" \
         && log "ZeroMount patch applied ✅" \
-        || warn "ZeroMount patch: some hunks failed — continuing (dir-listing injection may be degraded without SuSFS)"
+        || warn "ZeroMount patch: some hunks failed — continuing"
 fi
+
+# Restore readdir.c if it was corrupted by failed hunks
+if grep -q "obj-\$(CONFIG_ZEROMOUNT)" "${KERNEL_SRC}/fs/readdir.c" 2>/dev/null || \
+   grep -q "config ZEROMOUNT" "${KERNEL_SRC}/fs/readdir.c" 2>/dev/null; then
+    warn "readdir.c corrupted by failed hunks — restoring original"
+    cp "$READDIR_BACKUP" "${KERNEL_SRC}/fs/readdir.c"
+fi
+rm -f "$READDIR_BACKUP"
 
 rm -f "$ZEROMOUNT_PATCH"
 
