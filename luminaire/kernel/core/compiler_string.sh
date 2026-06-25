@@ -21,18 +21,26 @@ with open(path, "r") as f:
 #   LD_VERSION=$(LC_ALL=C $LD -v | head -n1 | sed ...)
 #   #define LINUX_COMPILER "${CC_VERSION}, ${LD_VERSION}"
 #
-# KBUILD_COMPILER_STRING in MAKE_ARGS already controls CC_VERSION correctly.
-# The only remaining problem is LD_VERSION appending the raw LLD URL string.
-# We blank it out so LINUX_COMPILER ends up as just our clean CC_VERSION.
+# KBUILD_COMPILER_STRING in MAKE_ARGS controls CC_VERSION correctly (clean name + version).
+# LD_VERSION reads raw "ld.lld -v" output which includes a full LLVM commit URL.
+# We replace the LD_VERSION command substitution block with a clean extraction:
+#   run the original command, then strip everything except "LLD X.Y.Z".
+#
+# Result: LINUX_COMPILER = "Cirrus Clang 23.0.0, LLD 23.0.0"
 #
 # LD_VERSION uses a multiline command substitution with nested parens inside sed,
-# so we track paren depth line-by-line to find the exact closing ) and replace
-# the entire block with a single empty assignment.
+# so we track paren depth line-by-line to find the exact closing ) cleanly.
 
 lines = content.split('\n')
 out = []
 i = 0
 replaced = False
+
+clean_ld = (
+    'LD_VERSION=$(LC_ALL=C $LD -v 2>/dev/null | head -n1 | '
+    "grep -oP 'LLD\\s+\\K[0-9]+\\.[0-9]+\\.[0-9]+' | "
+    "head -n1 | sed 's/^/LLD /')"
+)
 
 while i < len(lines):
     line = lines[i]
@@ -48,7 +56,7 @@ while i < len(lines):
             if depth <= 0:
                 break
             j += 1
-        out.append('LD_VERSION=""')
+        out.append(clean_ld)
         i = j + 1
         replaced = True
         continue
@@ -62,7 +70,7 @@ if not replaced:
 with open(path, "w") as f:
     f.write('\n'.join(out))
 
-print("[info] mkcompile_h: LD_VERSION blanked, LINUX_COMPILER will use CC_VERSION only ✅", flush=True)
+print("[info] mkcompile_h: LD_VERSION sanitized to 'LLD X.Y.Z' ✅", flush=True)
 PYEOF
 
 log "Compiler string patched in mkcompile_h ✅"
