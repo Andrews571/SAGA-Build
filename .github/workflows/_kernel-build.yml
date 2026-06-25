@@ -71,7 +71,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: "Free Disk Space"
         uses: jlumbroso/free-disk-space@main
@@ -102,7 +102,7 @@ jobs:
 
       - name: "Restore Arsenal Cache"
         if: inputs.update_arsenal != 'yes'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/clang-cache
@@ -118,7 +118,7 @@ jobs:
 
       - name: "Save Arsenal Cache"
         if: always()
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: |
             ~/clang-cache
@@ -185,7 +185,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: "Free Disk Space"
         uses: jlumbroso/free-disk-space@main
@@ -204,7 +204,7 @@ jobs:
           swap-size-gb: 12
 
       - name: "Restore Arsenal Cache"
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/clang-cache
