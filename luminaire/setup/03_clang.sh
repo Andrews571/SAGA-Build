@@ -33,17 +33,14 @@ CIRRUS_CLANG_VER=$(${TOOL_CLANG_DIR}/bin/clang --version 2>&1 | grep -oP 'clang 
 set -o pipefail
 if [ -n "$CIRRUS_CLANG_VER" ]; then
     COMPILER_STRING="Cirrus Clang ${CIRRUS_CLANG_VER}"
-    KBUILD_COMPILER_STRING="Cirrus Clang ${CIRRUS_CLANG_VER}"
 else
     COMPILER_STRING="Cirrus Clang"
-    KBUILD_COMPILER_STRING="Cirrus Clang"
     warn "Could not parse Cirrus Clang version from --version output"
 fi
 
 log "Clang ready: ${CLANG_VER}"
 echo "COMPILER_STRING=${COMPILER_STRING}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
-echo "KBUILD_COMPILER_STRING=${KBUILD_COMPILER_STRING}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
-export KBUILD_COMPILER_STRING
+export COMPILER_STRING
 export PATH="${TOOL_CLANG_DIR}/bin:${PATH}"
 
 log "Setting up ccache wrappers..."

@@ -8,7 +8,7 @@ MKCOMPILE_H="${KERNEL_SRC}/scripts/mkcompile_h"
 
 [ -f "$MKCOMPILE_H" ] || { warn "mkcompile_h not found, skipping compiler string patch"; return 0; }
 
-python3 - "$MKCOMPILE_H" "$KBUILD_COMPILER_STRING" << 'PYEOF'
+python3 - "$MKCOMPILE_H" "$COMPILER_STRING" << 'PYEOF'
 import sys, re
 
 path = sys.argv[1]
