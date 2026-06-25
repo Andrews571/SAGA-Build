@@ -28,19 +28,17 @@ cp "${KERNEL_SRC}/fs/readdir.c" "$READDIR_BACKUP"
 
 if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$ZEROMOUNT_PATCH" > /dev/null 2>&1; then
     log "ZeroMount patch already applied, skipping."
+    rm -f "$READDIR_BACKUP"
 else
-    patch -p1 --fuzz=3 --forward -d "$KERNEL_SRC" < "$ZEROMOUNT_PATCH" \
-        && log "ZeroMount patch applied ✅" \
-        || warn "ZeroMount patch: some hunks failed — continuing"
+    if patch -p1 --fuzz=3 --forward -d "$KERNEL_SRC" < "$ZEROMOUNT_PATCH" > /tmp/zm_patch.log 2>&1; then
+        log "ZeroMount patch applied ✅"
+        rm -f "$READDIR_BACKUP"
+    else
+        warn "ZeroMount patch: some hunks failed — restoring readdir.c to prevent corruption"
+        cp "$READDIR_BACKUP" "${KERNEL_SRC}/fs/readdir.c"
+        rm -f "$READDIR_BACKUP" /tmp/zm_patch.log
+    fi
 fi
-
-# Restore readdir.c if it was corrupted by failed hunks
-if grep -q "obj-\$(CONFIG_ZEROMOUNT)" "${KERNEL_SRC}/fs/readdir.c" 2>/dev/null || \
-   grep -q "config ZEROMOUNT" "${KERNEL_SRC}/fs/readdir.c" 2>/dev/null; then
-    warn "readdir.c corrupted by failed hunks — restoring original"
-    cp "$READDIR_BACKUP" "${KERNEL_SRC}/fs/readdir.c"
-fi
-rm -f "$READDIR_BACKUP"
 
 rm -f "$ZEROMOUNT_PATCH"
 
