@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: "♻️ Touch arsenal"
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/clang-cache
@@ -22,18 +22,3 @@ jobs:
             ~/.apt-cache
           key: arsenal-__keepalive__
           restore-keys: arsenal-
-
-      - name: "♻️ Touch ccache (GH Release)"
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
-        run: |
-          for asset in $(gh release view cache \
-            --repo "${{ github.repository }}" \
-            --json assets --jq '.assets[].name' 2>/dev/null || true); do
-            gh release download cache \
-              --repo "${{ github.repository }}" \
-              --pattern "$asset" \
-              --dir /tmp/ 2>/dev/null || true
-            rm -f "/tmp/${asset}"
-          done
-          echo "ccache assets touched ✅"
