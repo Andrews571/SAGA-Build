@@ -1,0 +1,53 @@
+name: "Setup Arsenal"
+description: "Derive clang key, restore clang cache and arsenal cache for prepare-matrix job"
+
+inputs:
+  build-system:
+    required: true
+  kernel-version:
+    required: true
+  ref-name:
+    required: true
+  run-id:
+    required: true
+  update-arsenal:
+    required: true
+  gh-token:
+    required: true
+
+outputs:
+  clang-variant:
+    description: "Stripped clang variant name (e.g. Cirrus, Neutron)"
+    value: ${{ steps.clang-key.outputs.clang_variant }}
+
+runs:
+  using: composite
+  steps:
+    - name: "Derive Clang Variant"
+      id: clang-key
+      if: startsWith(inputs.build-system, 'Make')
+      shell: bash
+      run: |
+        variant="${{ inputs.build-system }}"
+        variant="${variant#Make - }"
+        echo "clang_variant=${variant}" >> $GITHUB_OUTPUT
+
+    - name: "Restore Clang Cache"
+      id: clang-cache
+      if: startsWith(inputs.build-system, 'Make') && inputs.update-arsenal != 'yes'
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/clang-cache
+        key: clang-${{ steps.clang-key.outputs.clang_variant }}
+
+    - name: "Restore Arsenal Cache"
+      if: inputs.update-arsenal != 'yes'
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/ccache-bin
+          ~/ak3-cache
+          ~/kernel-cache
+          ~/.apt-cache
+        key: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}-${{ inputs.run-id }}
+        restore-keys: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}-

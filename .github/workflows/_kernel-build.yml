@@ -101,33 +101,16 @@ jobs:
           matrix_json=$(printf '%s\n' "${variants[@]}" | jq -cs '{include: .}')
           echo "matrix=${matrix_json}" >> $GITHUB_OUTPUT
 
-      - name: "Set Clang Key"
-        id: clang-key
-        if: startsWith(inputs.build_system, 'Make')
-        run: |
-          variant="${{ inputs.build_system }}"
-          variant="${variant#Make - }"
-          echo "clang_variant=${variant}" >> $GITHUB_OUTPUT
-
-      - name: "Restore Clang Cache"
-        id: clang-cache
-        if: startsWith(inputs.build_system, 'Make') && inputs.update_arsenal != 'yes'
-        uses: actions/cache/restore@v6
+      - name: "Setup Arsenal"
+        id: setup-arsenal
+        uses: ./.github/actions/setup-arsenal
         with:
-          path: ~/clang-cache
-          key: clang-${{ steps.clang-key.outputs.clang_variant }}
-
-      - name: "Restore Arsenal Cache"
-        if: inputs.update_arsenal != 'yes'
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/ccache-bin
-            ~/ak3-cache
-            ~/kernel-cache
-            ~/.apt-cache
-          key: arsenal-${{ startsWith(inputs.build_system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: arsenal-${{ startsWith(inputs.build_system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-
+          build-system:    ${{ inputs.build_system }}
+          kernel-version:  ${{ inputs.kernel_version }}
+          ref-name:        ${{ github.ref_name }}
+          run-id:          ${{ github.run_id }}
+          update-arsenal:  ${{ inputs.update_arsenal }}
+          gh-token:        ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Prepare Arsenal"
         run: bash arsenal.sh
@@ -148,7 +131,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
-          CACHE_KEY="clang-${{ steps.clang-key.outputs.clang_variant }}"
+          CACHE_KEY="clang-${{ steps.setup-arsenal.outputs.clang-variant }}"
           CACHE_ID=$(gh api "/repos/${{ github.repository }}/actions/caches?key=${CACHE_KEY}" \
             --jq '.actions_caches[0].id // empty' 2>/dev/null || true)
           if [ -n "$CACHE_ID" ]; then
@@ -159,11 +142,11 @@ jobs:
           fi
 
       - name: "Save Clang Cache"
-        if: always() && startsWith(inputs.build_system, 'Make') && steps.clang-cache.outputs.cache-hit != 'true'
+        if: always() && startsWith(inputs.build_system, 'Make')
         uses: actions/cache/save@v6
         with:
           path: ~/clang-cache
-          key: clang-${{ steps.clang-key.outputs.clang_variant }}
+          key: clang-${{ steps.setup-arsenal.outputs.clang-variant }}
 
       - name: "Cleanup Old Arsenal"
         if: always()
@@ -241,38 +224,18 @@ jobs:
         with:
           swap-size-gb: 12
 
-      - name: "Set Clang Key"
-        id: clang-key
-        if: startsWith(inputs.build_system, 'Make')
-        run: |
-          variant="${{ inputs.build_system }}"
-          variant="${variant#Make - }"
-          echo "clang_variant=${variant}" >> $GITHUB_OUTPUT
-
-      - name: "Restore Clang Cache"
-        if: startsWith(inputs.build_system, 'Make')
-        uses: actions/cache/restore@v6
+      - name: "Setup Build Environment"
+        id: setup-build-env
+        uses: ./.github/actions/setup-build-env
         with:
-          path: ~/clang-cache
-          key: clang-${{ steps.clang-key.outputs.clang_variant }}
-
-      - name: "Restore Arsenal Cache"
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/ccache-bin
-            ~/ak3-cache
-            ~/kernel-cache
-            ~/.apt-cache
-          key: arsenal-${{ startsWith(inputs.build_system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: arsenal-${{ startsWith(inputs.build_system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-
-
-      - name: "Restore ccache"
-        if: startsWith(inputs.build_system, 'Make')
-        uses: ./.github/actions/restore-caches
-        with:
-          ccache-prefix: ccache-data-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto != 'NONE' && format('lto-{0}-', inputs.enable_lto) || '' }}${{ steps.clang-key.outputs.clang_variant }}-${{ github.ref_name }}-
-          gh-token: ${{ secrets.PERSONAL_TOKEN }}
+          build-system:    ${{ inputs.build_system }}
+          kernel-version:  ${{ inputs.kernel_version }}
+          ref-name:        ${{ github.ref_name }}
+          run-id:          ${{ github.run_id }}
+          root-solution:   ${{ matrix.root_solution }}
+          susfs:           ${{ matrix.susfs }}
+          enable-lto:      ${{ inputs.enable_lto }}
+          gh-token:        ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Disk Usage"
         run: df -h && du -sh ~/kernel-cache/ 2>/dev/null || true
@@ -288,7 +251,7 @@ jobs:
         if: always() && startsWith(inputs.build_system, 'Make')
         uses: ./.github/actions/save-caches
         with:
-          ccache-prefix: ccache-data-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto != 'NONE' && format('lto-{0}-', inputs.enable_lto) || '' }}${{ steps.clang-key.outputs.clang_variant }}-${{ github.ref_name }}-
+          ccache-prefix: ccache-data-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto != 'NONE' && format('lto-{0}-', inputs.enable_lto) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ github.ref_name }}-
           gh-token: ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Upload Build Info"

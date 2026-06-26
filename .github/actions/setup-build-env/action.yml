@@ -1,0 +1,62 @@
+name: "Setup Build Environment"
+description: "Derive clang key, restore clang cache, arsenal cache, and ccache for Start-Build job"
+
+inputs:
+  build-system:
+    required: true
+  kernel-version:
+    required: true
+  ref-name:
+    required: true
+  run-id:
+    required: true
+  root-solution:
+    required: true
+  susfs:
+    required: true
+  enable-lto:
+    required: true
+  gh-token:
+    required: true
+
+outputs:
+  clang-variant:
+    description: "Stripped clang variant name (e.g. Cirrus, Neutron)"
+    value: ${{ steps.clang-key.outputs.clang_variant }}
+
+runs:
+  using: composite
+  steps:
+    - name: "Derive Clang Variant"
+      id: clang-key
+      if: startsWith(inputs.build-system, 'Make')
+      shell: bash
+      run: |
+        variant="${{ inputs.build-system }}"
+        variant="${variant#Make - }"
+        echo "clang_variant=${variant}" >> $GITHUB_OUTPUT
+
+    - name: "Restore Clang Cache"
+      if: startsWith(inputs.build-system, 'Make')
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/clang-cache
+        key: clang-${{ steps.clang-key.outputs.clang_variant }}
+
+    - name: "Restore Arsenal Cache"
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/ccache-bin
+          ~/ak3-cache
+          ~/kernel-cache
+          ~/.apt-cache
+        key: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}-${{ inputs.run-id }}
+        restore-keys: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}-
+
+    - name: "Restore ccache"
+      if: startsWith(inputs.build-system, 'Make')
+      uses: ./.github/actions/restore-caches
+      with:
+        ccache-prefix: ccache-data-${{ inputs.root-solution }}${{ inputs.susfs == 'true' && '-susfs' || '' }}-${{ inputs.kernel-version }}-${{ inputs.enable-lto != 'NONE' && format('lto-{0}-', inputs.enable-lto) || '' }}${{ steps.clang-key.outputs.clang_variant }}-${{ inputs.ref-name }}-
+        gh-token: ${{ inputs.gh-token }}
