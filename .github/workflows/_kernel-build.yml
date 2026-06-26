@@ -101,13 +101,21 @@ jobs:
           matrix_json=$(printf '%s\n' "${variants[@]}" | jq -cs '{include: .}')
           echo "matrix=${matrix_json}" >> $GITHUB_OUTPUT
 
+      - name: "Set Clang Key"
+        id: clang-key
+        if: startsWith(inputs.build_system, 'Make')
+        run: |
+          variant="${{ inputs.build_system }}"
+          variant="${variant#Make - }"
+          echo "clang_variant=${variant}" >> $GITHUB_OUTPUT
+
       - name: "Restore Clang Cache"
         id: clang-cache
         if: startsWith(inputs.build_system, 'Make') && inputs.update_arsenal != 'yes'
         uses: actions/cache/restore@v6
         with:
           path: ~/clang-cache
-          key: clang-${{ replace(inputs.build_system, 'Make - ', '') }}
+          key: clang-${{ steps.clang-key.outputs.clang_variant }}
 
       - name: "Restore Arsenal Cache"
         if: inputs.update_arsenal != 'yes'
@@ -140,7 +148,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
-          CACHE_KEY="clang-${{ replace(inputs.build_system, 'Make - ', '') }}"
+          CACHE_KEY="clang-${{ steps.clang-key.outputs.clang_variant }}"
           CACHE_ID=$(gh api "/repos/${{ github.repository }}/actions/caches?key=${CACHE_KEY}" \
             --jq '.actions_caches[0].id // empty' 2>/dev/null || true)
           if [ -n "$CACHE_ID" ]; then
@@ -155,7 +163,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/clang-cache
-          key: clang-${{ replace(inputs.build_system, 'Make - ', '') }}
+          key: clang-${{ steps.clang-key.outputs.clang_variant }}
 
       - name: "Cleanup Old Arsenal"
         if: always()
@@ -233,12 +241,20 @@ jobs:
         with:
           swap-size-gb: 12
 
+      - name: "Set Clang Key"
+        id: clang-key
+        if: startsWith(inputs.build_system, 'Make')
+        run: |
+          variant="${{ inputs.build_system }}"
+          variant="${variant#Make - }"
+          echo "clang_variant=${variant}" >> $GITHUB_OUTPUT
+
       - name: "Restore Clang Cache"
         if: startsWith(inputs.build_system, 'Make')
         uses: actions/cache/restore@v6
         with:
           path: ~/clang-cache
-          key: clang-${{ replace(inputs.build_system, 'Make - ', '') }}
+          key: clang-${{ steps.clang-key.outputs.clang_variant }}
 
       - name: "Restore Arsenal Cache"
         uses: actions/cache/restore@v6
