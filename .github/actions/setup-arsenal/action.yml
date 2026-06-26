@@ -26,7 +26,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: "Derive Clang Variant"
+    - name: "Derive Clang Variant"  # keep in sync with setup-build-env/setup-arsenal
       id: clang-key
       if: startsWith(inputs.build-system, 'Make')
       shell: bash

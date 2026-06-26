@@ -79,8 +79,11 @@ on:
           - "FULL"
       warming_mode:
         description: "Warming Mode (skip release)"
-        type: boolean
-        default: false
+        type: choice
+        default: "false"
+        options:
+          - "false"
+          - "true"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -98,7 +101,7 @@ jobs:
       kernel_version:  ${{ inputs.kernel_version }}
       update_arsenal:  ${{ inputs.update_arsenal }}
       enable_lto:      ${{ inputs.enable_lto }}
-      warming_mode:    ${{ inputs.warming_mode && 'true' || 'false' }}
+      warming_mode:    ${{ inputs.warming_mode }}
       addons:          "${{ inputs.bbg && 'bbg' || '' }}${{ inputs.rekernel && ',rekernel' || '' }}${{ inputs.droidspaces && ',droidspaces' || '' }}${{ inputs.mountless_engine != 'none' && format(',{0}', inputs.mountless_engine) || '' }}"
     secrets:
       PERSONAL_TOKEN:              ${{ secrets.PERSONAL_TOKEN }}
