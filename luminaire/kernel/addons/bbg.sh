@@ -10,8 +10,11 @@ echo "$BBG_SETUP" | grep -q "^#!" || error "BBG: setup.sh looks invalid (no sheb
 echo "$BBG_SETUP" | bash || error "BBG: setup.sh failed!"
 [ -L "${KERNEL_SRC}/security/baseband-guard" ] \
     || error "BBG: inject failed — security/baseband-guard symlink not found!"
-sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' \
-    "${KERNEL_SRC}/security/Kconfig"
+
+PATCHER="${LUMINAIRE_PATCH_DIR}/kernel/addons/bbg_kconfig_inject.py"
+python3 "$PATCHER" "${KERNEL_SRC}/security/Kconfig" \
+    || error "BBG: Kconfig inject failed!"
+
 cd "${ROOT_DIR}"
 
 log "Enabling CONFIG_BBG..."
