@@ -145,27 +145,25 @@ Droidspaces      : ${DROIDSPACES_ESC}
 
 # MarkdownV2 outside code block requires escaping special chars
 mdv2_escape() {
-    local s="$1"
-    s="${s//\\/\\\\}"
-    s="${s//_/\\_}"
-    s="${s//*/ \\*}"
-    s="${s//[/\\[}"
-    s="${s//]/\\]}"
-    s="${s//(/\\(}"
-    s="${s//)/\\)}"
-    s="${s//~/\\~}"
-    s="${s//\`/\\\`}"
-    s="${s//>/\\>}"
-    s="${s//#/\\#}"
-    s="${s//+/\\+}"
-    s="${s//-/\\-}"
-    s="${s//=/\\=}"
-    s="${s//|/\\|}"
-    s="${s//\{/\\{}"
-    s="${s//\}/\\}}"
-    s="${s//./\\.}"
-    s="${s//!/\\!}"
-    printf '%s' "$s"
+    python3 -c "
+import sys
+s = sys.argv[1]
+special = chr(95)+chr(42)+chr(91)+chr(93)+chr(40)+chr(41)+chr(126)+chr(96)+chr(62)+chr(35)+chr(43)+chr(45)+chr(61)+chr(124)+chr(123)+chr(125)+chr(46)+chr(33)
+for ch in special:
+    s = s.replace(ch, chr(92) + ch)
+sys.stdout.write(s)
+" "$1"
+}
+
+mdv2_escape_url() {
+    python3 -c "
+import sys
+s = sys.argv[1]
+# In MarkdownV2 inline link URL (inside parentheses), only ) and \ need escaping
+s = s.replace(chr(92), chr(92)+chr(92))
+s = s.replace(chr(41), chr(92)+chr(41))
+sys.stdout.write(s)
+" "$1"
 }
 
 COMMIT_SHORT="${GITHUB_SHA:0:7}"
@@ -173,8 +171,8 @@ COMMIT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
 RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
 COMMIT_SHORT_ESC="$(mdv2_escape "$COMMIT_SHORT")"
-COMMIT_URL_ESC="$(mdv2_escape "$COMMIT_URL")"
-RUN_URL_ESC="$(mdv2_escape "$RUN_URL")"
+COMMIT_URL_ESC="$(mdv2_escape_url "$COMMIT_URL")"
+RUN_URL_ESC="$(mdv2_escape_url "$RUN_URL")"
 RUN_ID_ESC="$(mdv2_escape "$GITHUB_RUN_ID")"
 
 FOOTER="[${COMMIT_SHORT_ESC}](${COMMIT_URL_ESC}) \\| [Run \\#${RUN_ID_ESC}](${RUN_URL_ESC})"
