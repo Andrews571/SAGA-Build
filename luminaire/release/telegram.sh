@@ -87,9 +87,9 @@ case ",${ADDONS}," in
 esac
 
 # Addons flags
-REKERNEL_DISPLAY="N/A"
-BBG_DISPLAY="N/A"
-DROIDSPACES_DISPLAY="N/A"
+REKERNEL_DISPLAY="Disable"
+BBG_DISPLAY="Disable"
+DROIDSPACES_DISPLAY="Disable"
 case ",${ADDONS}," in *,rekernel,*)    REKERNEL_DISPLAY="Enable" ;; esac
 case ",${ADDONS}," in *,bbg,*)         BBG_DISPLAY="Enable" ;; esac
 case ",${ADDONS}," in *,droidspaces,*) DROIDSPACES_DISPLAY="Enable" ;; esac
@@ -141,9 +141,9 @@ ${BLOCK_ROOT}"
 
 # Add-ons block — only if at least one addon is active
 if [ "$MOUNTLESS_DISPLAY" != "N/A" ] || \
-   [ "$REKERNEL_DISPLAY" != "N/A" ] || \
-   [ "$BBG_DISPLAY" != "N/A" ] || \
-   [ "$DROIDSPACES_DISPLAY" != "N/A" ]; then
+   [ "$REKERNEL_DISPLAY" = "Enable" ] || \
+   [ "$BBG_DISPLAY" = "Enable" ] || \
+   [ "$DROIDSPACES_DISPLAY" = "Enable" ]; then
     BLOCK_ADDONS="\`\`\`Add-ons
 Mountless Engine : ${MOUNTLESS_ESC}
 Re:Kernel        : ${REKERNEL_ESC}
