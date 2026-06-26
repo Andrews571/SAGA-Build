@@ -136,23 +136,16 @@ KSU   : ${ROOT_SOLUTION_ESC}
 SuSFS : ${SUSFS_VER_ESC}
 \`\`\`"
 
-CAPTION="${BLOCK_LUMINAIRE}
-${BLOCK_ROOT}"
-
-# Add-ons block — only if at least one addon is active
-if [ "$MOUNTLESS_DISPLAY" != "N/A" ] || \
-   [ "$REKERNEL_DISPLAY" = "Enable" ] || \
-   [ "$BBG_DISPLAY" = "Enable" ] || \
-   [ "$DROIDSPACES_DISPLAY" = "Enable" ]; then
-    BLOCK_ADDONS="\`\`\`Add-ons
+BLOCK_ADDONS="\`\`\`Add-ons
 Mountless Engine : ${MOUNTLESS_ESC}
 Re:Kernel        : ${REKERNEL_ESC}
 BBG              : ${BBG_ESC}
 Droidspaces      : ${DROIDSPACES_ESC}
 \`\`\`"
-    CAPTION="${CAPTION}
+
+CAPTION="${BLOCK_LUMINAIRE}
+${BLOCK_ROOT}
 ${BLOCK_ADDONS}"
-fi
 
 # ------------------------------------------------------
 # Enforce Telegram's 1024-char caption hard limit
