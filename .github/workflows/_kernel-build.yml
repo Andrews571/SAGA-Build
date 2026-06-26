@@ -142,7 +142,7 @@ jobs:
           fi
 
       - name: "Save Clang Cache"
-        if: always() && startsWith(inputs.build_system, 'Make')
+        if: always() && startsWith(inputs.build_system, 'Make') && steps.setup-arsenal.outputs.clang-cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: ~/clang-cache
