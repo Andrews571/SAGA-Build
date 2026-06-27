@@ -7,8 +7,7 @@
 **CI/build orchestration for the Luminaire Android GKI kernel**
 
 [![Build](https://img.shields.io/github/actions/workflow/status/chainonyourdoor/LuminaireProtocol/build.yml?branch=main&label=build&logo=github&style=for-the-badge)](https://github.com/chainonyourdoor/LuminaireProtocol/actions/workflows/build.yml)
-[![Kernel](https://img.shields.io/badge/kernel-android14--6.1--lts-blue?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/chainonyourdoor/android_kernel_common-6.1)
-[![KMI](https://img.shields.io/badge/KMI-gen%2011-purple?style=for-the-badge)](https://source.android.com/docs/core/architecture/kernel/gki-versioning)
+[![Telegram](https://img.shields.io/badge/Telegram-LuminaireGKI-blue?style=for-the-badge&logo=telegram)](https://t.me/LuminaireGKI)
 [![License](https://img.shields.io/badge/license-GPL--2.0-green?style=for-the-badge)](LICENSE)
 
 </div>
@@ -103,6 +102,7 @@ LuminaireProtocol/
 
 | Project | Author | Role |
 |---------|--------|------|
+| [ccache-ECS](https://github.com/cctv18/ccache-ECS) | [cctv18](https://github.com/cctv18) | Extended ccache for kernel compilation |
 | [ReSukiSU](https://github.com/ReSukiSU/ReSukiSU) | [ReSukiSU Team](https://github.com/ReSukiSU) | KernelSU fork (RESUKISU variant) |
 | [SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra) | [SukiSU Team](https://github.com/SukiSU-Ultra) | KernelSU fork (SUKISU variant) |
 | [susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu) | [simonpunk](https://gitlab.com/simonpunk) | SuSFS kernel patches |
