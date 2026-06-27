@@ -17,15 +17,26 @@ KLEAF_ARGS=(
 log "Applying Luminaire configs (fragment)..."
 DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
 while IFS= read -r line; do
-    [[ "$line" =~ ^CONFIG_([^=]+)= ]] || continue
-    key="CONFIG_${BASH_REMATCH[1]}"
-    grep -qE "^${key}[=]|^# ${key} is not set" "$DEFCONFIG" || echo "$line" >> "$DEFCONFIG"
-done < <(grep -E '^CONFIG_' "${LUMINAIRE_PATCH_DIR}/kernel/config/luminaire.fragment")
-log "Fragment appended ✅"
+    [[ "$line" =~ ^(CONFIG_[^=]+)=(.*)$ ]] || \
+    [[ "$line" =~ ^(# CONFIG_[^ ]+) is not set$ ]] || continue
+
+    if [[ "$line" =~ ^CONFIG_([^=]+)=(.*)$ ]]; then
+        key="CONFIG_${BASH_REMATCH[1]}"
+        val="${BASH_REMATCH[2]}"
+        # Remove existing entry (set or unset) then append — mirrors merge_config.sh -m
+        sed -i "/^${key}[= ]/d;/^# ${key} is not set/d" "$DEFCONFIG"
+        echo "${key}=${val}" >> "$DEFCONFIG"
+    elif [[ "$line" =~ ^# (CONFIG_[^ ]+) is not set$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        sed -i "/^${key}[= ]/d;/^# ${key} is not set/d" "$DEFCONFIG"
+        echo "# ${key} is not set" >> "$DEFCONFIG"
+    fi
+done < <(grep -E '^CONFIG_|^# CONFIG_' "${LUMINAIRE_PATCH_DIR}/kernel/config/luminaire.fragment")
+log "Fragment applied ✅"
 
 log "Running config pass to canonicalize gki_defconfig..."
 cd "$KERNEL_DIR"
-tools/bazel build "${KLEAF_ARGS[@]}" //common:kernel_aarch64_config 2>/dev/null || true
+tools/bazel build "${KLEAF_ARGS[@]}" //common:kernel_aarch64_config
 
 CANONICAL=$(find "${KERNEL_DIR}/out" -path "*/common/defconfig" 2>/dev/null | head -1)
 if [ -n "$CANONICAL" ]; then

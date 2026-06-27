@@ -31,6 +31,27 @@ config KSU_SUSFS_SUS_KSTAT
 \thelp
 \t  Allow spoofing the kstat of user-defined file/directory.
 
+config KSU_SUSFS_SUS_OVERLAYFS
+\tbool "Enable to hide suspicious overlayfs"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow hiding suspicious overlayfs mounts from various system calls.
+
+config KSU_SUSFS_TRY_UMOUNT
+\tbool "Enable to use umount to hide suspicious mounts"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow using umount to hide suspicious mounts from processes.
+
+config KSU_SUSFS_SUS_SU
+\tbool "Enable to disable kprobe su as sus_su"
+\tdepends on KSU_SUSFS
+\tdefault y
+\thelp
+\t  Allow disabling kprobe based ksu su and using sus_su instead.
+
 config KSU_SUSFS_SPOOF_UNAME
 \tbool "Enable to spoof uname"
 \tdepends on KSU_SUSFS

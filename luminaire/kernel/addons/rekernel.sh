@@ -20,4 +20,15 @@ python3 "$REKERNEL_PATCHER" "$KERNEL_SRC" \
 [ -f "$REKERNEL_HEADER" ] \
     || error "Re:Kernel: rekernel.h not created!"
 
+log "Verifying Re:Kernel hook markers in source files..."
+MARKER="Re:Kernel"
+for _file in \
+    "${KERNEL_SRC}/drivers/android/binder.c" \
+    "${KERNEL_SRC}/drivers/android/binder_alloc.c" \
+    "${KERNEL_SRC}/kernel/signal.c"; do
+    grep -q "$MARKER" "$_file" \
+        || error "Re:Kernel: hook marker missing in ${_file##*/} — injection silently failed!"
+done
+log "Re:Kernel hook markers verified ✅"
+
 log "Re:Kernel integrated ✅"

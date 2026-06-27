@@ -343,13 +343,17 @@ def patch_binder_c(src):
         content, txn_anchors, BINDER_TXN_HOOK, "binder txn hook"
     )
 
+    if not ok_reply and not ok_txn:
+        print("  [ERROR] binder.c: no hooks injected (reply + txn both missed) — aborting!")
+        sys.exit(1)
+
     write(path, content)
     hooks = []
     if ok_reply:
         hooks.append("reply")
     if ok_txn:
         hooks.append("txn")
-    hook_str = "+".join(hooks) if hooks else "no hooks matched"
+    hook_str = "+".join(hooks)
     print(f"  binder.c: patched ✅ (include + {hook_str})")
 
 
@@ -390,8 +394,12 @@ def patch_binder_alloc_c(src):
         content, alloc_anchors, BINDER_ALLOC_HOOK, "binder_alloc hook"
     )
 
+    if not ok_hook:
+        print("  [ERROR] binder_alloc.c: alloc hook not injected — aborting!")
+        sys.exit(1)
+
     write(path, content)
-    print(f"  binder_alloc.c: patched ✅ (include{', hook' if ok_hook else ', hook not matched'})")
+    print("  binder_alloc.c: patched ✅ (include + hook)")
 
 
 def patch_signal_c(src):
@@ -437,8 +445,12 @@ def patch_signal_c(src):
         content, signal_anchors, SIGNAL_HOOK, "signal hook"
     )
 
+    if not ok_hook:
+        print("  [ERROR] signal.c: signal hook not injected — aborting!")
+        sys.exit(1)
+
     write(path, content)
-    print(f"  signal.c: patched ✅ (include{', hook' if ok_hook else ', hook not matched'})")
+    print("  signal.c: patched ✅ (include + hook)")
 
 
 def write_header(src):
