@@ -5,7 +5,7 @@
 # ======================================================
 
 KSU_DIR="${KERNEL_SRC}/KernelSU"
-PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu"
+PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/sukisu"
 
 # ======================================================
 # 1. SukiSU-Ultra
@@ -28,7 +28,7 @@ log "SukiSU-Ultra integrated ✅"
 # ======================================================
 
 log "Applying Luminaire branding..."
-python3 "${PATCHER_DIR}/sukisu_branding.py" "${KSU_DIR}/kernel/Kbuild" \
+python3 "${PATCHER_DIR}/branding.py" "${KSU_DIR}/kernel/Kbuild" \
     || error "SukiSU-Ultra: branding patch failed!"
 log "Branding applied ✅"
 

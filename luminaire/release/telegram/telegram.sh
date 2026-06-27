@@ -7,7 +7,7 @@
 TELEGRAM_API_TIMEOUT="${TELEGRAM_API_TIMEOUT:-60}"
 TELEGRAM_MAX_RETRIES="${TELEGRAM_MAX_RETRIES:-3}"
 TELEGRAM_MAX_FILE_BYTES=$((50 * 1024 * 1024))
-CAPTION_BUILDER="${LUMINAIRE_PATCH_DIR}/release/telegram_caption.py"
+CAPTION_BUILDER="${LUMINAIRE_PATCH_DIR}/release/telegram/caption.py"
 
 # ------------------------------------------------------
 # Guard clauses

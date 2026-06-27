@@ -13,7 +13,7 @@
 
 ZEROMOUNT_PATCH_URL="https://raw.githubusercontent.com/Enginex0/Super-Builders/main/android14-6.1/ReSukiSU/patches/60_zeromount-android14-6.1.patch"
 ZEROMOUNT_PATCH="/tmp/60_zeromount-android14-6.1.patch"
-PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/addons"
+PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/addons/zeromount"
 
 log "Downloading ZeroMount kernel patch..."
 retry 3 run_quiet curl -fSL "$ZEROMOUNT_PATCH_URL" -o "$ZEROMOUNT_PATCH" \
@@ -44,12 +44,12 @@ fi
 rm -f "$ZEROMOUNT_PATCH"
 
 log "Fixing namei.c scope issues (zeromount blocks in wrong positions)..."
-python3 "${PATCHER_DIR}/zeromount_fix_namei.py" "${KERNEL_SRC}/fs/namei.c" \
+python3 "${PATCHER_DIR}/fix_namei.py" "${KERNEL_SRC}/fs/namei.c" \
     || error "ZeroMount: namei.c fix failed!"
 log "namei.c fixed ✅"
 
 log "Fixing task_mmu.c scope issue (zeromount call outside inode scope)..."
-python3 "${PATCHER_DIR}/zeromount_fix_taskmmu.py" "${KERNEL_SRC}/fs/proc/task_mmu.c" \
+python3 "${PATCHER_DIR}/fix_taskmmu.py" "${KERNEL_SRC}/fs/proc/task_mmu.c" \
     || error "ZeroMount: task_mmu.c fix failed!"
 log "task_mmu.c fixed ✅"
 

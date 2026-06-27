@@ -11,7 +11,7 @@
 
 log "Integrating Re:Kernel..."
 
-REKERNEL_PATCHER="${LUMINAIRE_PATCH_DIR}/kernel/addons/rekernel_inject.py"
+REKERNEL_PATCHER="${LUMINAIRE_PATCH_DIR}/kernel/addons/rekernel/inject.py"
 REKERNEL_HEADER="${KERNEL_SRC}/drivers/android/rekernel.h"
 
 python3 "$REKERNEL_PATCHER" "$KERNEL_SRC" \

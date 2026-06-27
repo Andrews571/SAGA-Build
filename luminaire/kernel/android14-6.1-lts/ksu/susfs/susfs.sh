@@ -21,7 +21,7 @@ KSU_DIR="${KSU_DIR:-${KERNEL_SRC}/KernelSU}"
 SUSFS_BRANCH="gki-android14-6.1"
 SUSFS_REPO="https://gitlab.com/simonpunk/susfs4ksu.git"
 SUSFS_DIR="/tmp/susfs4ksu"
-PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu"
+PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/susfs"
 
 log "Cloning SuSFS (${SUSFS_BRANCH})..."
 [ -d "$SUSFS_DIR" ] && rm -rf "$SUSFS_DIR"
@@ -63,7 +63,7 @@ else
 fi
 
 log "Fixing namespace.c susfs declarations (safety fallback)..."
-python3 "${PATCHER_DIR}/susfs_fix_namespace.py" "${KERNEL_SRC}/fs/namespace.c" \
+python3 "${PATCHER_DIR}/fix_namespace.py" "${KERNEL_SRC}/fs/namespace.c" \
     || error "SuSFS: namespace.c fix failed!"
 log "namespace.c fixed ✅"
 
@@ -74,7 +74,7 @@ KSU_KCONFIG="${KSU_DIR}/kernel/Kconfig"
 if [ -f "$KSU_KCONFIG" ] && grep -q "^config KSU_SUSFS$" "$KSU_KCONFIG"; then
     log "KSU_SUSFS already declared by this fork, skipping injection."
 else
-    python3 "${PATCHER_DIR}/susfs_kconfig_inject.py" "$KSU_KCONFIG" \
+    python3 "${PATCHER_DIR}/kconfig_inject.py" "$KSU_KCONFIG" \
         || error "SuSFS: Kconfig inject failed!"
     log "KSU_SUSFS Kconfig injected ✅"
 fi

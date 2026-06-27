@@ -5,7 +5,7 @@
 # ======================================================
 
 KSU_DIR="${KERNEL_SRC}/KernelSU"
-PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu"
+PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/resukisu"
 
 # ======================================================
 # 1. ReSukiSU
@@ -28,7 +28,7 @@ log "ReSukiSU integrated ✅"
 # ======================================================
 
 log "Applying Luminaire branding..."
-python3 "${PATCHER_DIR}/resukisu_branding.py" "${KSU_DIR}/kernel/Kbuild" \
+python3 "${PATCHER_DIR}/branding.py" "${KSU_DIR}/kernel/Kbuild" \
     || error "ReSukiSU: branding patch failed!"
 log "Branding applied ✅"
 
@@ -37,7 +37,7 @@ log "Branding applied ✅"
 # ======================================================
 
 log "Patching multi-manager support..."
-python3 "${PATCHER_DIR}/resukisu_multimanager.py" \
+python3 "${PATCHER_DIR}/multimanager.py" \
     "${KSU_DIR}/kernel/manager/manager_sign.h" \
     "${KSU_DIR}/kernel/manager/apk_sign.c" \
     || error "ReSukiSU: multi-manager patch failed!"
@@ -48,7 +48,7 @@ log "Multi-manager patched ✅"
 # ======================================================
 
 log "Patching KSU-Next manager compat..."
-python3 "${PATCHER_DIR}/resukisu_ksunext_compat.py" \
+python3 "${PATCHER_DIR}/ksunext_compat.py" \
     "${KSU_DIR}/kernel/supercall/dispatch.c" \
     || error "ReSukiSU: KSU-Next compat patch failed!"
 log "KSU-Next compat patched ✅"

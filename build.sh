@@ -113,7 +113,7 @@ run_branding() {
 # ======================================================
 
 run_variant() {
-    local script="${VERSION_PATCH_DIR}/ksu/${ROOT_SOLUTION,,}.sh"
+    local script="${VERSION_PATCH_DIR}/ksu/${ROOT_SOLUTION,,}/${ROOT_SOLUTION,,}.sh"
     if [ -f "$script" ]; then
         echo "::group::🔑 Root Solution (${ROOT_SOLUTION})"
         source "$script" || error "Root solution script failed: $(basename "$script")"
@@ -121,7 +121,7 @@ run_variant() {
     fi
 
     if [ "$SUSFS_ENABLED" = "true" ] && [ "$ROOT_SOLUTION" != "VANILLA" ]; then
-        local susfs_script="${VERSION_PATCH_DIR}/ksu/susfs.sh"
+        local susfs_script="${VERSION_PATCH_DIR}/ksu/susfs/susfs.sh"
         [ -f "$susfs_script" ] || error "SuSFS script not found: $(basename "$susfs_script")"
         echo "::group::🧬 SuSFS"
         source "$susfs_script" || error "SuSFS script failed: $(basename "$susfs_script")"
@@ -135,7 +135,9 @@ run_variant() {
 
 run_core() {
     echo "::group::🔧 Core"
-    for script in "${LUMINAIRE_PATCH_DIR}/kernel/core/"*.sh; do
+    for script in "${LUMINAIRE_PATCH_DIR}/kernel/core/"*.sh \
+                  "${LUMINAIRE_PATCH_DIR}/kernel/core/"*/*.sh; do
+        [ -f "$script" ] || continue
         source "$script" || error "Core script failed: $(basename "$script")"
     done
     echo "::endgroup::"
@@ -156,7 +158,9 @@ run_addons() {
     for addon in "${ADDON_LIST[@]}"; do
         addon="${addon// /}"
         [ -z "$addon" ] && continue
-        local script="${LUMINAIRE_PATCH_DIR}/kernel/addons/${addon}.sh"
+        local script="${LUMINAIRE_PATCH_DIR}/kernel/addons/${addon}/${addon}.sh"
+        # Fallback to flat structure for addons without subfolder (droidspaces, nomount)
+        [ -f "$script" ] || script="${LUMINAIRE_PATCH_DIR}/kernel/addons/${addon}.sh"
         if [ -f "$script" ]; then
             source "$script" || error "Addon failed: ${addon}"
         else
@@ -187,7 +191,7 @@ run_build() {
 run_release() {
     echo "::group::🚀 Release"
     source "${LUMINAIRE_PATCH_DIR}/release/anykernel.sh" || error "Release failed: anykernel.sh"
-    source "${LUMINAIRE_PATCH_DIR}/release/telegram.sh"  || error "Release failed: telegram.sh"
+    source "${LUMINAIRE_PATCH_DIR}/release/telegram/telegram.sh"  || error "Release failed: telegram.sh"
     echo "::endgroup::"
 }
 
