@@ -45,8 +45,6 @@ on:
         required: false
       TELEGRAM_THREAD_ID_ARTIFACT:
         required: false
-      TELEGRAM_THREAD_ID_LOG:
-        required: false
       TELEGRAM_CHANNEL_ID:
         required: false
 
@@ -199,7 +197,6 @@ jobs:
       TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID:            ${{ secrets.TELEGRAM_CHAT_ID }}
       TELEGRAM_THREAD_ID_ARTIFACT: ${{ secrets.TELEGRAM_THREAD_ID_ARTIFACT }}
-      TELEGRAM_THREAD_ID_LOG:      ${{ secrets.TELEGRAM_THREAD_ID_LOG }}
       TELEGRAM_CHANNEL_ID:         ${{ secrets.TELEGRAM_CHANNEL_ID }}
       USE_KERNEL_CACHE:            "true"
       USE_AK3_CACHE:               "true"

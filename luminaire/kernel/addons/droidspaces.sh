@@ -7,7 +7,8 @@
 # Docs: https://github.com/ravindu644/Droidspaces-OSS
 
 log "Enabling Droidspaces support..."
-cat >> "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig" << 'CONFIGS'
+if ! grep -q "^CONFIG_SYSVIPC=y" "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"; then
+    cat >> "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig" << 'CONFIGS'
 # Droidspaces — Mandatory
 CONFIG_SYSVIPC=y
 CONFIG_PID_NS=y
@@ -25,4 +26,5 @@ CONFIG_NETFILTER_XT_MATCH_RECENT=y
 CONFIG_BINFMT_ELF=y
 CONFIG_BINFMT_SCRIPT=y
 CONFIGS
+fi
 log "Droidspaces configs enabled ✅"

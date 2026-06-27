@@ -11,10 +11,12 @@ if [ -f "${KERNEL_DIR}/build/kernel/kleaf/impl/stamp.bzl" ]; then
         "${KERNEL_DIR}/build/kernel/kleaf/impl/stamp.bzl"
 fi
 
-cd "${KERNEL_DIR}/common"
-git config --local user.name "chainonyourdoor"
-git config --local user.email "chainonyourdoor@gmail.com"
-git add . && git commit -m "Luminaire: Clean dirty flags" \
-    || warn "dirty_flag: git commit failed (tree may already be clean or git not initialized — dirty flag may persist in version string)"
-cd "${ROOT_DIR}"
+if [ "$BUILD_SYSTEM" != "KLEAF" ]; then
+    cd "${KERNEL_DIR}/common"
+    git config --local user.name "chainonyourdoor"
+    git config --local user.email "chainonyourdoor@gmail.com"
+    git add . && git commit -m "Luminaire: Clean dirty flags" \
+        || warn "dirty_flag: git commit failed (tree may already be clean or git not initialized — dirty flag may persist in version string)"
+    cd "${ROOT_DIR}"
+fi
 log "Dirty flags cleaned ✅"

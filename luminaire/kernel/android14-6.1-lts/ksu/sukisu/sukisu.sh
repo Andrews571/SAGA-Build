@@ -37,10 +37,12 @@ log "Branding applied ✅"
 # ======================================================
 
 log "Enabling KSU configs..."
-cat >> "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig" << 'CONFIGS'
+if ! grep -q "^CONFIG_KSU=y" "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"; then
+    cat >> "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig" << 'CONFIGS'
 CONFIG_KSU=y
 CONFIG_KPM=y
 CONFIGS
+fi
 log "Configs enabled ✅"
 
 log "SukiSU-Ultra ready ✅"

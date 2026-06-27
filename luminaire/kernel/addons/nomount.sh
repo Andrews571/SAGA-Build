@@ -44,8 +44,10 @@ fi
 rm -rf "$NOMOUNT_DIR"
 
 log "Enabling NoMount config..."
-cat >> "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig" << 'CONFIGS'
+if ! grep -q "^CONFIG_NOMOUNT=y" "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"; then
+    cat >> "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig" << 'CONFIGS'
 CONFIG_NOMOUNT=y
 CONFIGS
+fi
 
 log "NoMount integrated ✅"

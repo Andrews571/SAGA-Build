@@ -14,7 +14,7 @@ if [ "$(printf '%s\n' "2.38" "$GLIBC_VERSION" | sort -V | head -n 1)" = "2.38" ]
     else
         PATTERN='$(Q)$(MAKE) -C $(SUBCMD_SRC) OUTPUT=$(abspath $(dir $@))/ $(abspath $@)'
         if ! grep -qF "$PATTERN" "$BTFIDS_MK"; then
-            if grep -qF 'EXTRA_CFLAGS' "$BTFIDS_MK"; then
+            if grep -qF 'EXTRA_CFLAGS="$(CFLAGS)"' "$BTFIDS_MK"; then
                 log "GLIBC fix already applied, skipping ✅"
             else
                 error "GLIBC fix: pattern not found in resolve_btfids/Makefile — kernel source may have changed upstream. Fix needs update!"
