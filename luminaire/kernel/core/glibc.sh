@@ -10,19 +10,20 @@ if [ "$(printf '%s\n' "2.38" "$GLIBC_VERSION" | sort -V | head -n 1)" = "2.38" ]
     BTFIDS_MK="${KERNEL_DIR}/common/tools/bpf/resolve_btfids/Makefile"
 
     if [ ! -f "$BTFIDS_MK" ]; then
-        warn "GLIBC fix: resolve_btfids/Makefile not found at expected path — upstream may have moved it; skipping"
+        warn "GLIBC fix: resolve_btfids/Makefile not found — skipping"
     else
-        PATTERN='$(Q)$(MAKE) -C $(SUBCMD_SRC) OUTPUT=$(abspath $(dir $@))/ $(abspath $@)'
-        if ! grep -qF "$PATTERN" "$BTFIDS_MK"; then
-            if grep -qF 'EXTRA_CFLAGS="$(CFLAGS)"' "$BTFIDS_MK"; then
-                log "GLIBC fix already applied, skipping ✅"
-            else
-                error "GLIBC fix: pattern not found in resolve_btfids/Makefile — kernel source may have changed upstream. Fix needs update!"
-            fi
-        else
-            sed -i 's/$(Q)$(MAKE) -C $(SUBCMD_SRC) OUTPUT=$(abspath $(dir $@))\/  $(abspath $@)/$(Q)$(MAKE) -C $(SUBCMD_SRC) EXTRA_CFLAGS="$(CFLAGS)" OUTPUT=$(abspath $(dir $@))\/ $(abspath $@)/' \
+        OLD_PATTERN='$(Q)$(MAKE) -C $(SUBCMD_SRC) OUTPUT=$(abspath $(dir $@))/ $(abspath $@)'
+
+        if grep -qF "$OLD_PATTERN" "$BTFIDS_MK"; then
+            sed -i 's/$(Q)$(MAKE) -C $(SUBCMD_SRC) OUTPUT=$(abspath $(dir $@))\/ $(abspath $@)/$(Q)$(MAKE) -C $(SUBCMD_SRC) EXTRA_CFLAGS="$(CFLAGS)" OUTPUT=$(abspath $(dir $@))\/ $(abspath $@)/' \
                 "$BTFIDS_MK"
             log "GLIBC fix applied ✅"
+        elif grep -qF 'EXTRA_CFLAGS="$(CFLAGS)"' "$BTFIDS_MK"; then
+            log "GLIBC fix already applied, skipping ✅"
+        elif grep -qF 'HOST_OVERRIDES' "$BTFIDS_MK" && grep -qF 'EXTRA_CFLAGS=' "$BTFIDS_MK"; then
+            log "GLIBC fix not needed — upstream Makefile already passes EXTRA_CFLAGS via HOST_OVERRIDES ✅"
+        else
+            warn "GLIBC fix: unrecognized resolve_btfids/Makefile structure — skipping (manual review may be needed)"
         fi
     fi
 else
