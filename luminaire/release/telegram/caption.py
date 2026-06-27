@@ -67,11 +67,13 @@ def build_blocks(env):
         f"Date         : {date_str}\n"
         "```"
     )
+    is_vanilla = env.get("ROOT_SOLUTION", "").upper() == "VANILLA"
     block_root = (
         "```Root-Solution\n"
         f"KSU   : {root_solution}\n"
         f"SuSFS : {susfs_ver}\n"
-        "```"
+        + ("Note  : Vanilla build, get your root via KSU LKM or Magisk\n" if is_vanilla else "")
+        + "```"
     )
     block_addons = (
         "```Add-ons\n"
