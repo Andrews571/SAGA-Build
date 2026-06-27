@@ -28,6 +28,7 @@ def main():
         "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
         "extern bool susfs_is_current_ksu_domain(void);\n"
         "extern bool susfs_is_current_zygote_domain(void);\n"
+        "extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n"
         "\n"
         "static DEFINE_IDA(susfs_mnt_id_ida);\n"
         "static DEFINE_IDA(susfs_mnt_group_ida);\n"
