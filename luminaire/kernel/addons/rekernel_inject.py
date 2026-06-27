@@ -380,6 +380,17 @@ def patch_binder_alloc_c(src):
 
     # Hook
     alloc_anchors = [
+        # GKI android14-6.1-lts (newer): "< size" only
+        (
+            "\tif (is_async && alloc->free_async_space < size) {\n"
+            "\t\tbinder_alloc_debug(BINDER_DEBUG_BUFFER_ALLOC,\n"
+            "\t\t\t     \"%d: binder_alloc_buf size %zd failed, no async space left\\n\",\n"
+            "\t\t\t      alloc->pid, size);\n"
+            "\t\tbuffer = ERR_PTR(-ENOSPC);\n"
+            "\t\tgoto out;\n"
+            "\t}\n"
+        ),
+        # Older kernels: "< size + sizeof(struct binder_buffer)"
         (
             "\tif (is_async &&\n"
             "\t    alloc->free_async_space < size + sizeof(struct binder_buffer)) {\n"
