@@ -67,7 +67,15 @@ def main():
         print("[warn] compiler_string_patch: LD_VERSION pattern not matched in mkcompile_h", flush=True)
 
     if not cc_replaced and not ld_replaced:
+        print("[warn] compiler_string_patch: no patterns matched — skipping write", flush=True)
         sys.exit(0)
+
+    if not cc_replaced or not ld_replaced:
+        # Partial match — writing a half-patched file would produce inconsistent
+        # compiler string (e.g. CC patched but LD still raw LLVM URL output).
+        # Treat as fatal so the issue is visible rather than silently wrong.
+        print("[error] compiler_string_patch: partial match — aborting to prevent inconsistent compiler string", flush=True)
+        sys.exit(1)
 
     with open(path, "w") as f:
         f.write("\n".join(out))

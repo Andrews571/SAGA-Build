@@ -8,6 +8,9 @@ def main():
         content = f.read()
 
     if "susfs_is_current_ksu_domain" in content and "susfs_def.h" in content:
+        # Both markers present — either the main patch applied hunk #1 successfully
+        # (after blk.h pre-patch removal in susfs.sh), or a previous run of this
+        # fallback already injected them. Either way, nothing left to do.
         print("namespace.c already patched, skipping.")
         sys.exit(0)
 

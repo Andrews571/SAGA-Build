@@ -11,6 +11,7 @@ case "${ROOT_SOLUTION}" in
     *)        ZIP_VARIANT_TAG="${ROOT_SOLUTION}" ;;
 esac
 [ "$SUSFS_ENABLED" = "true" ] && [ "$ROOT_SOLUTION" != "VANILLA" ] && ZIP_VARIANT_TAG="${ZIP_VARIANT_TAG}+SUSFS"
+[ -n "${SUBLEVEL:-}" ] || error "SUBLEVEL is not set — branding.sh may not have run correctly!"
 ZIP_NAME="Ak3-${KERNEL_VERSION}.${SUBLEVEL}-${ZIP_VARIANT_TAG}-R${GITHUB_RUN_NUMBER:-0}.zip"
 export ZIP_NAME
 

@@ -135,9 +135,18 @@ run_variant() {
 
 run_core() {
     echo "::group::🔧 Core"
-    for script in "${LUMINAIRE_PATCH_DIR}/kernel/core/"*.sh \
-                  "${LUMINAIRE_PATCH_DIR}/kernel/core/"*/*.sh; do
-        [ -f "$script" ] || continue
+    # Flat scripts first, then known subfolder orchestrators
+    # Explicit list prevents accidental sourcing of temp/unrelated .sh files
+    local core_dir="${LUMINAIRE_PATCH_DIR}/kernel/core"
+    local scripts=(
+        "${core_dir}/dirty_flag.sh"
+        "${core_dir}/glibc.sh"
+        "${core_dir}/protected_exports.sh"
+        "${core_dir}/compiler_string/compiler_string.sh"
+        "${core_dir}/module_bypass/module_bypass.sh"
+    )
+    for script in "${scripts[@]}"; do
+        [ -f "$script" ] || { warn "Core script not found: $(basename "$script") — skipping"; continue; }
         source "$script" || error "Core script failed: $(basename "$script")"
     done
     echo "::endgroup::"

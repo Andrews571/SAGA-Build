@@ -13,6 +13,9 @@ NOMOUNT_PATCH_NAME="nomount_${KERNEL_VERSION}_kernel_integration.patch"
 log "Integrating NoMount..."
 
 [ -d "$NOMOUNT_DIR" ] && rm -rf "$NOMOUNT_DIR"
+git config --global http.connectTimeout 30
+git config --global http.lowSpeedLimit 1000
+git config --global http.lowSpeedTime 30
 retry 3 run_quiet git clone -q --depth=1 "$NOMOUNT_REPO" "$NOMOUNT_DIR" \
     || { warn "NoMount clone failed — skipping"; return 0; }
 

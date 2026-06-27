@@ -33,7 +33,7 @@ if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$ZEROMOUNT_PATCH" 
 else
     if patch -p1 --fuzz=3 --forward -d "$KERNEL_SRC" < "$ZEROMOUNT_PATCH" > /tmp/zm_patch.log 2>&1; then
         log "ZeroMount patch applied ✅"
-        rm -f "$READDIR_BACKUP"
+        rm -f "$READDIR_BACKUP" /tmp/zm_patch.log
     else
         warn "ZeroMount patch: some hunks failed — restoring readdir.c to prevent corruption"
         cp "$READDIR_BACKUP" "${KERNEL_SRC}/fs/readdir.c"
