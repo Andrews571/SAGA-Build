@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0
 #
-# fix_readdir.py — inject ZeroMount hooks into fs/readdir.c
+# inject_readdir.py — inject ZeroMount hooks into fs/readdir.c
 #
-# Replaces the readdir.c hunks from the ZeroMount patch that require
-# SuSFS context to apply cleanly. This worker uses anchor-based
-# injection so it is tolerant of sublevel changes in readdir.c.
-#
-# Injects three things into SYSCALL_DEFINE3(getdents, ...):
-#   1. #include <linux/zeromount.h> after #include <asm/unaligned.h>
-#   2. int initial_count + ZEROMOUNT_MAGIC_POS early-exit after fdget_pos
-#   3. zeromount_inject_dents() call + zm_out label after iterate_dir
+# Handles readdir.c injection for all variants (VANILLA, RESUKISU, SUKISU),
+# replacing the readdir.c hunks from the ZeroMount patch which require
+# SuSFS context to apply cleanly. The ZeroMount patch is pre-stripped of
+# its readdir.c hunk (via strip_readdir_hunk.py) before being applied,
+# so this worker is always the sole authority for readdir.c injection.
 
 import sys
 
