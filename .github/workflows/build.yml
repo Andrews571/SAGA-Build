@@ -7,7 +7,7 @@ on:
       build_system:
         description: "Build System"
         type: choice
-        default: "Kleaf - AOSP"
+        default: "Make - Neutron"
         options:
           - "Kleaf - AOSP"
           - "Make - Cirrus"
@@ -25,7 +25,7 @@ on:
           - "6.6"
           - "6.12"
       vanilla:
-        description: "VANILLA"
+        description: "Vanilla"
         type: boolean
         default: true
       resukisu:
@@ -46,32 +46,25 @@ on:
       mountless_engine:
         description: "Mountless Engine"
         type: choice
-        default: "none"
+        default: "zeromount"
         options:
           - "none"
           - "nomount"
           - "zeromount"
       bbg:
-        description: "BBG (Baseband Guard)"
+        description: "BBG"
         type: boolean
         default: true
       rekernel:
-        description: "Re:Kernel (Binder/Signal Netlink)"
+        description: "Re:Kernel"
         type: boolean
-        default: false
+        default: true
       droidspaces:
         description: "Droidspaces"
         type: boolean
-        default: false
-      update_arsenal:
-        description: "Update Arsenal"
-        type: choice
-        default: "no"
-        options:
-          - "yes"
-          - "no"
+        default: true
       enable_lto:
-        description: "⚠️ LTO"
+        description: "LTO"
         type: choice
         default: "NONE"
         options:
@@ -79,16 +72,20 @@ on:
           - "THIN"
           - "FULL"
       warming_mode:
-        description: "Warming Mode (skip release)"
-        type: choice
-        default: "false"
-        options:
-          - "false"
-          - "true"
-      release_channel:
-        description: "Send to release channel"
+        description: "🔥 Warming Mode"
         type: boolean
         default: false
+      release_channel:
+        description: "🚀 Release Telegram Channel"
+        type: boolean
+        default: false
+      update_arsenal:
+        description: "⚠️ Update Arsenal"
+        type: choice
+        default: "no"
+        options:
+          - "yes"
+          - "no"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.kernel_version }}
@@ -313,5 +310,3 @@ jobs:
         with:
           ccache-prefix: ccache-data-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto != 'NONE' && format('lto-{0}-', inputs.enable_lto) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ github.ref_name }}-
           gh-token: ${{ secrets.PERSONAL_TOKEN }}
-
-
