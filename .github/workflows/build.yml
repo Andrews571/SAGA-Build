@@ -120,11 +120,6 @@ jobs:
       - name: "Checkout"
         uses: actions/checkout@v7
 
-      - name: "Setup GPG signing"
-        uses: ./.github/actions/setup-gpg
-        with:
-          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
-
       - name: "Build Variant Matrix"
         id: set
         env:
@@ -258,11 +253,6 @@ jobs:
     steps:
       - name: "Checkout"
         uses: actions/checkout@v7
-
-      - name: "Setup GPG signing"
-        uses: ./.github/actions/setup-gpg
-        with:
-          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
 
       - name: "Free Disk Space"
         uses: jlumbroso/free-disk-space@main
