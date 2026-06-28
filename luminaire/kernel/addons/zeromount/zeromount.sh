@@ -62,4 +62,9 @@ python3 "${PATCHER_DIR}/fix_taskmmu.py" "${KERNEL_SRC}/fs/proc/task_mmu.c" \
     || error "ZeroMount: task_mmu.c fix failed!"
 log "task_mmu.c fixed ✅"
 
+log "Injecting ZeroMount hooks into readdir.c (directory listing support)..."
+python3 "${PATCHER_DIR}/fix_readdir.py" "${KERNEL_SRC}/fs/readdir.c" \
+    || error "ZeroMount: readdir.c injection failed!"
+log "readdir.c fixed ✅"
+
 log "ZeroMount integrated ✅"
