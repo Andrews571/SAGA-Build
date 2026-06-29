@@ -1,10 +1,12 @@
 name: "Restore ccache"
-description: "Restore ccache from GitHub Release"
+description: "Restore ccache from GitHub Release, with public ccache fallback"
 
 inputs:
   ccache-prefix:
     required: true
   gh-token:
+    required: true
+  kernel-version:
     required: true
 
 runs:
@@ -17,33 +19,48 @@ runs:
       run: |
         ASSET_NAME="${{ inputs.ccache-prefix }}ccache.tar.zst"
         cd "${{ github.workspace }}"
-        
-        # Check if asset exists in release
-        if ! gh release view cache --repo "${{ github.repository }}" > /dev/null 2>&1; then
-          echo "⚠️ Cache release not found — fresh ccache will be used"
-          exit 0
-        fi
-        
-        # Try download
-        echo "Checking for ccache asset: ${ASSET_NAME}"
-        if ! gh release download cache \
-          --repo "${{ github.repository }}" \
-          --pattern "${ASSET_NAME}" \
-          --dir /tmp/ 2>&1; then
-          echo "⚠️ ccache asset not found (${ASSET_NAME}) — fresh ccache will be used"
-          exit 0
-        fi
-        
-        # Extract if found
-        if [ -f "/tmp/${ASSET_NAME}" ]; then
-          echo "Restoring ccache from ${ASSET_NAME}..."
-          tar --zstd -xf "/tmp/${ASSET_NAME}" || {
-            echo "❌ Failed to extract ccache — fresh ccache will be used"
-            rm -f "/tmp/${ASSET_NAME}"
-            exit 0
-          }
-          rm -f "/tmp/${ASSET_NAME}"
-          echo "ccache restored ✅"
+
+        # Try own release cache first
+        if gh release view cache --repo "${{ github.repository }}" > /dev/null 2>&1; then
+          echo "Checking for ccache asset: ${ASSET_NAME}"
+          if gh release download cache \
+            --repo "${{ github.repository }}" \
+            --pattern "${ASSET_NAME}" \
+            --dir /tmp/ 2>/dev/null; then
+            if [ -f "/tmp/${ASSET_NAME}" ]; then
+              echo "Restoring ccache from ${ASSET_NAME}..."
+              tar --zstd -xf "/tmp/${ASSET_NAME}" && {
+                rm -f "/tmp/${ASSET_NAME}"
+                echo "ccache restored ✅"
+                exit 0
+              } || {
+                echo "❌ Failed to extract ccache — will try public ccache fallback"
+                rm -f "/tmp/${ASSET_NAME}"
+              }
+            fi
+          fi
+          echo "⚠️ ccache asset not found (${ASSET_NAME}) — will try public ccache fallback"
         else
-          echo "⚠️ Download completed but file not found — fresh ccache will be used"
+          echo "⚠️ Cache release not found — will try public ccache fallback"
+        fi
+
+        # Fallback: pull pre-seeded public ccache from cctv18/public_ccache
+        # Ensures even a first-time build gets a warm cache
+        PUBLIC_ASSET="ccache-${{ inputs.kernel-version }}.tar.zst"
+        echo "Trying public ccache fallback: ${PUBLIC_ASSET}..."
+        if gh release download -p "${PUBLIC_ASSET}" -R cctv18/public_ccache --dir /tmp/ 2>/dev/null; then
+          if [ -f "/tmp/${PUBLIC_ASSET}" ]; then
+            mkdir -p "${{ github.workspace }}/.ccache"
+            echo "Extracting public ccache..."
+            tar --zstd -xf "/tmp/${PUBLIC_ASSET}" -C "${{ github.workspace }}/.ccache" && {
+              rm -f "/tmp/${PUBLIC_ASSET}"
+              echo "Public ccache restored ✅"
+              exit 0
+            } || {
+              echo "⚠️ Failed to extract public ccache — fresh ccache will be used"
+              rm -f "/tmp/${PUBLIC_ASSET}"
+            }
+          fi
+        else
+          echo "⚠️ Public ccache not available for kernel ${{ inputs.kernel-version }} — fresh ccache will be used"
         fi

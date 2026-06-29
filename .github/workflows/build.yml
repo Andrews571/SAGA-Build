@@ -297,5 +297,6 @@ jobs:
         if: always() && startsWith(inputs.build_system, 'Make')
         uses: ./.github/actions/save-caches
         with:
-          ccache-prefix: ccache-data-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto != 'NONE' && format('lto-{0}-', inputs.enable_lto) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ github.ref_name }}-
-          gh-token: ${{ secrets.PERSONAL_TOKEN }}
+          ccache-prefix:   ccache-data-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto != 'NONE' && format('lto-{0}-', inputs.enable_lto) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ github.ref_name }}-
+          gh-token:        ${{ secrets.PERSONAL_TOKEN }}
+          kernel-version:  ${{ inputs.kernel_version }}
