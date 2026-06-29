@@ -183,8 +183,17 @@ jobs:
             echo "No existing clang cache found for ${CACHE_KEY}"
           fi
 
+      - name: "Invalidate Stale Clang Cache"
+        if: always() && startsWith(inputs.build_system, 'Make') && env.CLANG_CACHE_STALE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+        run: |
+          gh cache delete "clang-${{ steps.setup-arsenal.outputs.clang-variant }}" \
+            -R "${{ github.repository }}" 2>/dev/null || true
+          echo "Stale clang cache invalidated"
+
       - name: "Save Clang Cache"
-        if: always() && startsWith(inputs.build_system, 'Make') && steps.setup-arsenal.outputs.clang-cache-hit != 'true'
+        if: always() && startsWith(inputs.build_system, 'Make') && (steps.setup-arsenal.outputs.clang-cache-hit != 'true' || env.CLANG_CACHE_STALE == 'true')
         uses: actions/cache/save@v6
         with:
           path: ~/clang-cache

@@ -28,6 +28,11 @@ if [ "${USE_CLANG_CACHE}" = "true" ] && [ -d "${CLANG_CACHE_DIR}/bin" ]; then
         [ -d "${TOOL_CLANG_DIR}/bin" ] || error "Clang binary missing after re-download!"
         mkdir -p "$CLANG_CACHE_DIR"
         cp -a "${TOOL_CLANG_DIR}/." "${CLANG_CACHE_DIR}/"
+        if [ -d "${HOME}/.neutron-tc" ]; then
+            cp -a "${HOME}/.neutron-tc" "${CLANG_CACHE_DIR}/.neutron-tc-cache"
+        fi
+        # Signal workflow to invalidate and re-save the clang cache
+        echo "CLANG_CACHE_STALE=true" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
         log "Clang re-downloaded and cached ✅"
     else
         log "Clang restored ✅"
