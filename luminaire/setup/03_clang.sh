@@ -61,23 +61,20 @@ export COMPILER_STRING
 echo "COMPILER_STRING=${COMPILER_STRING}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
 export PATH="${TOOL_CLANG_DIR}/bin:${PATH}"
 
-log "Setting up ccache wrappers (with timestamp freezing)..."
+log "Setting up ccache wrappers..."
 mkdir -p "$TOOL_CCACHE_WRAPPERS"
 
-# .so files for timestamp freezing — injected via LD_PRELOAD so ccache-ECS
-# always sees a fixed mtime/ctime on source files, enabling near-100% cache
-# hit rate on ephemeral CI runners even after fresh clones or config changes
-LIB_DIR="${ROOT_DIR}/lib"
-PRELOAD_LIBS="${LIB_DIR}/libfakestat.so ${LIB_DIR}/libfaketimeMT.so"
+# Export lib path so build/make.sh can inject LD_PRELOAD directly into
+# the make CC= argument — this is the only safe place to set it, since
+# setting LD_PRELOAD in the shell environment before make causes it to
+# be inherited by host tools (fixdep, etc) which then segfault.
+export CCACHE_PRELOAD_LIBS="${ROOT_DIR}/lib/libfakestat.so ${ROOT_DIR}/lib/libfaketimeMT.so"
 
 for tool in $(ls "${TOOL_CLANG_DIR}/bin/" | grep -E "^clang(\+\+)?(-[0-9]+)?$"); do
     REAL_BIN="${TOOL_CLANG_DIR}/bin/${tool}"
     WRAPPER="${TOOL_CCACHE_WRAPPERS}/${tool}"
     cat > "$WRAPPER" << WRAPPER_EOF
 #!/usr/bin/env bash
-export LD_PRELOAD="${PRELOAD_LIBS}"
-export FAKESTAT="${FAKESTAT}"
-export FAKETIME="${FAKETIME}"
 exec "${TOOL_CCACHE_BIN}" "${REAL_BIN}" "\$@"
 WRAPPER_EOF
     chmod +x "$WRAPPER"
