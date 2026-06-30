@@ -63,35 +63,6 @@ This repo does **not** contain kernel source — it contains all the scripts and
 
 ---
 
-## 🏗️ Repository Structure
-
-```
-LuminaireProtocol/
-├── build.sh                  # Main build orchestrator
-├── arsenal.sh                # Toolchain & source download orchestrator
-├── functions.sh              # Shared helpers (log/warn/error/retry)
-│
-├── luminaire/
-│   ├── setup/                # Deps, ccache, clang setup
-│   ├── download/             # Kernel source download (make/kleaf)
-│   ├── kernel/
-│   │   ├── branding.sh
-│   │   ├── config/           # Luminaire config fragment
-│   │   ├── android14-6.1-lts/
-│   │   │   ├── ksu/          # Root solution scripts (resukisu/ sukisu/ susfs/)
-│   │   │   └── patches/      # Version-specific patches
-│   │   ├── core/             # Mandatory kernel fixes
-│   │   └── addons/           # Optional feature addons
-│   ├── build/                # make.sh / kleaf.sh
-│   └── release/              # AnyKernel3 packaging + Telegram
-│
-└── .github/
-    ├── workflows/            # CI workflow definitions
-    └── actions/              # Reusable composite actions
-```
-
----
-
 ## 🙏 Credits
 
 - [ccache-ECS](https://github.com/cctv18/ccache-ECS) — cctv18
