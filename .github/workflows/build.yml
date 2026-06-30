@@ -150,7 +150,6 @@ jobs:
           build-system:   ${{ inputs.build_system }}
           kernel-version: ${{ inputs.kernel_version }}
           ref-name:       ${{ github.ref_name }}
-          run-id:         ${{ github.run_id }}
           update-arsenal: ${{ inputs.update_arsenal }}
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
@@ -159,6 +158,15 @@ jobs:
 
       - name: "Save Arsenal Cache"
         if: always()
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+        run: |
+          ARSENAL_KEY="arsenal-${{ startsWith(inputs.build_system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel_version }}-${{ github.ref_name }}"
+          gh cache delete "$ARSENAL_KEY" -R "${{ github.repository }}" 2>/dev/null || true
+          echo "ARSENAL_CACHE_KEY=${ARSENAL_KEY}" >> "$GITHUB_ENV"
+
+      - name: "Save Arsenal Cache (write)"
+        if: always()
         uses: actions/cache/save@v6
         with:
           path: |
@@ -166,7 +174,7 @@ jobs:
             ~/ak3-cache
             ~/kernel-cache
             ~/.apt-cache
-          key: arsenal-${{ startsWith(inputs.build_system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ env.ARSENAL_CACHE_KEY }}
 
       - name: "Invalidate Old Clang Cache"
         if: startsWith(inputs.build_system, 'Make') && inputs.update_arsenal == 'yes'
@@ -198,34 +206,6 @@ jobs:
         with:
           path: ~/clang-cache
           key: clang-${{ steps.setup-arsenal.outputs.clang-variant }}
-
-      - name: "Cleanup Old Arsenal"
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
-        run: |
-          CACHES=$(gh api \
-            "/repos/${{ github.repository }}/actions/caches?per_page=100" \
-            --jq ".actions_caches[] | select(.key | startswith(\"arsenal-${{ startsWith(inputs.build_system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-\")) | select(.key != \"arsenal-${{ startsWith(inputs.build_system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel_version }}-${{ github.ref_name }}-${{ github.run_id }}\") | .id")
-
-          if [ -z "$CACHES" ]; then
-            echo "No old cache entries found"
-            exit 0
-          fi
-
-          DELETED=0
-          FAILED=0
-          for ID in $CACHES; do
-            if gh api --method DELETE "/repos/${{ github.repository }}/actions/caches/${ID}" > /dev/null 2>&1; then
-              DELETED=$((DELETED + 1))
-            else
-              FAILED=$((FAILED + 1))
-              echo "⚠️ Failed to delete cache ID: $ID"
-            fi
-          done
-
-          echo "Cache cleanup: ${DELETED} deleted, ${FAILED} failed"
-          [ $FAILED -eq 0 ] || exit 1
 
   # ======================================================
   # BUILD PER VARIANT (paralel)
@@ -304,10 +284,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: /dev/shm/ldcache
-          key: lto-cache-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.root_solution }}-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            lto-cache-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.root_solution }}-${{ github.ref_name }}-
-            lto-cache-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.root_solution }}-
+          key: lto-cache-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.root_solution }}-${{ github.ref_name }}
 
       - name: "Build"
         run: bash build.sh
@@ -318,10 +295,19 @@ jobs:
 
       - name: "Save LTO Cache"
         if: startsWith(inputs.build_system, 'Make') && inputs.enable_lto == 'THIN'
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+        run: |
+          LTO_KEY="lto-cache-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.root_solution }}-${{ github.ref_name }}"
+          gh cache delete "$LTO_KEY" -R "${{ github.repository }}" 2>/dev/null || true
+          echo "LTO_CACHE_KEY=${LTO_KEY}" >> "$GITHUB_ENV"
+
+      - name: "Save LTO Cache (write)"
+        if: startsWith(inputs.build_system, 'Make') && inputs.enable_lto == 'THIN'
         uses: actions/cache/save@v6
         with:
           path: /dev/shm/ldcache
-          key: lto-cache-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.root_solution }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ env.LTO_CACHE_KEY }}
 
       - name: "Save ccache"
         if: always() && startsWith(inputs.build_system, 'Make')
