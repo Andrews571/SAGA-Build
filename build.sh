@@ -26,7 +26,7 @@ KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Bootstrap path — needed before run_setup() sources 00_paths.sh
-LUMINAIRE_PATCH_DIR="${ROOT_DIR}/luminaire"
+LUMINAIRE_PATCH_DIR="${ROOT_DIR}"
 
 # ======================================================
 # 🚀 MAIN

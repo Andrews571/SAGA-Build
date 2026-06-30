@@ -42,7 +42,7 @@ KLEAF_OUT_DIR="${KERNEL_DIR}/bazel-bin/common/kernel_aarch64"
 LTO_CACHE_DIR="/dev/shm/ldcache"
 
 # Patch repo paths
-LUMINAIRE_PATCH_DIR="${ROOT_DIR}/luminaire"
+LUMINAIRE_PATCH_DIR="${ROOT_DIR}"
 VERSION_PATCH_DIR="${LUMINAIRE_PATCH_DIR}/kernel/${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 # Build config

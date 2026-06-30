@@ -113,7 +113,7 @@ jobs:
       - name: "Download kernel source"
         run: |
           cd kernel
-          cp "$GITHUB_WORKSPACE/luminaire/download/fast_parallel_download.py" .
+          cp "$GITHUB_WORKSPACE/download/fast_parallel_download.py" .
           python3 fast_parallel_download.py
 
       - name: "Get kernel version"
