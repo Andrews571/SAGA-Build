@@ -57,3 +57,8 @@ runs:
           ~/kernel-cache
           ~/.apt-cache
         key: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}
+
+    - name: "Run Arsenal"
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: bash arsenal.sh

@@ -1,0 +1,40 @@
+name: "Save Build Caches"
+description: "Save LTO cache (delete-old + save-new) and ccache (to GH Release) after a build"
+
+inputs:
+  build-system:
+    required: true
+  enable-lto:
+    required: true
+  lto-key:
+    description: "Cache key for the LTO cache (only needed when enable-lto is THIN)"
+    required: false
+  ccache-prefix:
+    required: true
+  gh-token:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: "Save LTO Cache"
+      if: startsWith(inputs.build-system, 'Make') && inputs.enable-lto == 'THIN'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+      run: |
+        gh cache delete "${{ inputs.lto-key }}" -R "${{ github.repository }}" 2>/dev/null || true
+
+    - name: "Save LTO Cache (write)"
+      if: startsWith(inputs.build-system, 'Make') && inputs.enable-lto == 'THIN'
+      uses: actions/cache/save@v6
+      with:
+        path: /dev/shm/ldcache
+        key: ${{ inputs.lto-key }}
+
+    - name: "Save ccache"
+      if: always() && startsWith(inputs.build-system, 'Make')
+      uses: ./.github/actions/save-caches
+      with:
+        ccache-prefix: ${{ inputs.ccache-prefix }}
+        gh-token:      ${{ inputs.gh-token }}

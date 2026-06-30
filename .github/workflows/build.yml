@@ -143,7 +143,7 @@ jobs:
           matrix_json=$(printf '%s\n' "${variants[@]}" | jq -cs '{include: .}')
           echo "matrix=${matrix_json}" >> $GITHUB_OUTPUT
 
-      - name: "Setup Arsenal"  # restores clang+arsenal cache; auto-saves at end of job if missing
+      - name: "Setup Arsenal"  # restores clang+arsenal cache (auto-saved if missing), then runs arsenal.sh
         id: setup-arsenal
         uses: ./.github/actions/setup-arsenal
         with:
@@ -152,9 +152,6 @@ jobs:
           ref-name:       ${{ github.ref_name }}
           update-arsenal: ${{ inputs.update_arsenal }}
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
-
-      - name: "Prepare Arsenal"
-        run: bash arsenal.sh
 
   # ======================================================
   # BUILD PER VARIANT (paralel)
@@ -234,25 +231,12 @@ jobs:
         if: always() && startsWith(inputs.build_system, 'Make')
         run: ~/ccache-bin/ccache --show-stats
 
-      - name: "Save LTO Cache"
-        if: startsWith(inputs.build_system, 'Make') && inputs.enable_lto == 'THIN'
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
-        run: |
-          LTO_KEY="lto-cache-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.root_solution }}-${{ github.ref_name }}"
-          gh cache delete "$LTO_KEY" -R "${{ github.repository }}" 2>/dev/null || true
-          echo "LTO_CACHE_KEY=${LTO_KEY}" >> "$GITHUB_ENV"
-
-      - name: "Save LTO Cache (write)"
-        if: startsWith(inputs.build_system, 'Make') && inputs.enable_lto == 'THIN'
-        uses: actions/cache/save@v6
-        with:
-          path: /dev/shm/ldcache
-          key: ${{ env.LTO_CACHE_KEY }}
-
-      - name: "Save ccache"
+      - name: "Save Build Caches"  # LTO (delete-old + save-new) and ccache, in one step
         if: always() && startsWith(inputs.build_system, 'Make')
-        uses: ./.github/actions/save-caches
+        uses: ./.github/actions/save-build-caches
         with:
-          ccache-prefix:   ccache-data-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto != 'NONE' && format('lto-{0}-', inputs.enable_lto) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ github.ref_name }}-
-          gh-token:        ${{ secrets.PERSONAL_TOKEN }}
+          build-system:  ${{ inputs.build_system }}
+          enable-lto:    ${{ inputs.enable_lto }}
+          lto-key:       lto-cache-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.root_solution }}-${{ github.ref_name }}
+          ccache-prefix: ccache-data-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto != 'NONE' && format('lto-{0}-', inputs.enable_lto) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ github.ref_name }}-
+          gh-token:      ${{ secrets.PERSONAL_TOKEN }}
