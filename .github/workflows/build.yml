@@ -156,7 +156,7 @@ jobs:
       - name: "Prepare Arsenal"
         run: bash arsenal.sh
 
-      - name: "Save Arsenal Cache"
+      - name: "Invalidate Old Caches"
         if: always()
         env:
           GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
@@ -165,7 +165,13 @@ jobs:
           gh cache delete "$ARSENAL_KEY" -R "${{ github.repository }}" 2>/dev/null || true
           echo "ARSENAL_CACHE_KEY=${ARSENAL_KEY}" >> "$GITHUB_ENV"
 
-      - name: "Save Arsenal Cache (write)"
+          if [ "${{ startsWith(inputs.build_system, 'Make') }}" = "true" ]; then
+            CLANG_KEY="clang-${{ steps.setup-arsenal.outputs.clang-variant }}"
+            gh cache delete "$CLANG_KEY" -R "${{ github.repository }}" 2>/dev/null || true
+            echo "CLANG_CACHE_KEY=${CLANG_KEY}" >> "$GITHUB_ENV"
+          fi
+
+      - name: "Save Arsenal Cache"
         if: always()
         uses: actions/cache/save@v6
         with:
@@ -177,15 +183,6 @@ jobs:
           key: ${{ env.ARSENAL_CACHE_KEY }}
 
       - name: "Save Clang Cache"
-        if: always() && startsWith(inputs.build_system, 'Make')
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
-        run: |
-          CLANG_KEY="clang-${{ steps.setup-arsenal.outputs.clang-variant }}"
-          gh cache delete "$CLANG_KEY" -R "${{ github.repository }}" 2>/dev/null || true
-          echo "CLANG_CACHE_KEY=${CLANG_KEY}" >> "$GITHUB_ENV"
-
-      - name: "Save Clang Cache (write)"
         if: always() && startsWith(inputs.build_system, 'Make')
         uses: actions/cache/save@v6
         with:
