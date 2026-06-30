@@ -143,7 +143,7 @@ jobs:
           matrix_json=$(printf '%s\n' "${variants[@]}" | jq -cs '{include: .}')
           echo "matrix=${matrix_json}" >> $GITHUB_OUTPUT
 
-      - name: "Setup Arsenal"
+      - name: "Setup Arsenal"  # restores clang+arsenal cache; auto-saves at end of job if missing
         id: setup-arsenal
         uses: ./.github/actions/setup-arsenal
         with:
@@ -155,39 +155,6 @@ jobs:
 
       - name: "Prepare Arsenal"
         run: bash arsenal.sh
-
-      - name: "Invalidate Old Caches"
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
-        run: |
-          ARSENAL_KEY="arsenal-${{ startsWith(inputs.build_system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel_version }}-${{ github.ref_name }}"
-          gh cache delete "$ARSENAL_KEY" -R "${{ github.repository }}" 2>/dev/null || true
-          echo "ARSENAL_CACHE_KEY=${ARSENAL_KEY}" >> "$GITHUB_ENV"
-
-          if [ "${{ startsWith(inputs.build_system, 'Make') }}" = "true" ]; then
-            CLANG_KEY="clang-${{ steps.setup-arsenal.outputs.clang-variant }}"
-            gh cache delete "$CLANG_KEY" -R "${{ github.repository }}" 2>/dev/null || true
-            echo "CLANG_CACHE_KEY=${CLANG_KEY}" >> "$GITHUB_ENV"
-          fi
-
-      - name: "Save Arsenal Cache"
-        if: always()
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/ccache-bin
-            ~/ak3-cache
-            ~/kernel-cache
-            ~/.apt-cache
-          key: ${{ env.ARSENAL_CACHE_KEY }}
-
-      - name: "Save Clang Cache"
-        if: always() && startsWith(inputs.build_system, 'Make')
-        uses: actions/cache/save@v6
-        with:
-          path: ~/clang-cache
-          key: ${{ env.CLANG_CACHE_KEY }}
 
   # ======================================================
   # BUILD PER VARIANT (paralel)
@@ -245,14 +212,13 @@ jobs:
         with:
           swap-size-gb: 12
 
-      - name: "Setup Build Environment"
+      - name: "Setup Build Environment"  # restore-only: clang, arsenal, ccache, lto
         id: setup-build-env
         uses: ./.github/actions/setup-build-env
         with:
           build-system:   ${{ inputs.build_system }}
           kernel-version: ${{ inputs.kernel_version }}
           ref-name:       ${{ github.ref_name }}
-          run-id:         ${{ github.run_id }}
           root-solution:  ${{ matrix.root_solution }}
           susfs:          ${{ matrix.susfs }}
           enable-lto:     ${{ inputs.enable_lto }}
@@ -260,13 +226,6 @@ jobs:
 
       - name: "Disk Usage"
         run: df -h && du -sh ~/kernel-cache/ 2>/dev/null || true
-
-      - name: "Restore LTO Cache"
-        if: startsWith(inputs.build_system, 'Make') && inputs.enable_lto == 'THIN' && inputs.update_arsenal != 'yes'
-        uses: actions/cache/restore@v6
-        with:
-          path: /dev/shm/ldcache
-          key: lto-cache-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.root_solution }}-${{ github.ref_name }}
 
       - name: "Build"
         run: bash build.sh

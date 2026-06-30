@@ -1,5 +1,5 @@
 name: "Setup Build Environment"
-description: "Derive clang key, restore clang cache, arsenal cache, and ccache for Start-Build job"
+description: "Restore-only: clang, arsenal, ccache, and LTO caches for Start-Build job"
 
 inputs:
   build-system:
@@ -7,8 +7,6 @@ inputs:
   kernel-version:
     required: true
   ref-name:
-    required: true
-  run-id:
     required: true
   root-solution:
     required: true
@@ -27,7 +25,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: "Derive Clang Variant"  # keep in sync with setup-build-env/setup-arsenal
+    - name: "Derive Clang Variant"  # keep in sync with setup-arsenal
       id: clang-key
       if: startsWith(inputs.build-system, 'Make')
       shell: bash
@@ -51,8 +49,7 @@ runs:
           ~/ak3-cache
           ~/kernel-cache
           ~/.apt-cache
-        key: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}-${{ inputs.run-id }}
-        restore-keys: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}-
+        key: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}
 
     - name: "Restore ccache"
       if: startsWith(inputs.build-system, 'Make')
@@ -60,3 +57,10 @@ runs:
       with:
         ccache-prefix: ccache-data-${{ inputs.root-solution }}${{ inputs.susfs == 'true' && '-susfs' || '' }}-${{ inputs.kernel-version }}-${{ inputs.enable-lto != 'NONE' && format('lto-{0}-', inputs.enable-lto) || '' }}${{ steps.clang-key.outputs.clang_variant }}-${{ inputs.ref-name }}-
         gh-token: ${{ inputs.gh-token }}
+
+    - name: "Restore LTO Cache"
+      if: startsWith(inputs.build-system, 'Make') && inputs.enable-lto == 'THIN'
+      uses: actions/cache/restore@v6
+      with:
+        path: /dev/shm/ldcache
+        key: lto-cache-${{ inputs.kernel-version }}-${{ steps.clang-key.outputs.clang_variant }}-${{ inputs.root-solution }}-${{ inputs.ref-name }}

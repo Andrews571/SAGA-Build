@@ -1,5 +1,5 @@
 name: "Setup Arsenal"
-description: "Derive clang key, restore clang cache and arsenal cache for prepare-matrix job"
+description: "Restore clang + arsenal cache (auto-saved at end of job if missing) for prepare-matrix job"
 
 inputs:
   build-system:
@@ -21,7 +21,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: "Derive Clang Variant"  # keep in sync with setup-build-env/setup-arsenal
+    - name: "Derive Clang Variant"  # keep in sync with setup-build-env
       id: clang-key
       if: startsWith(inputs.build-system, 'Make')
       shell: bash
@@ -30,17 +30,26 @@ runs:
         variant="${variant#Make - }"
         echo "clang_variant=${variant}" >> $GITHUB_OUTPUT
 
-    - name: "Restore Clang Cache"
-      id: clang-cache
-      if: startsWith(inputs.build-system, 'Make') && inputs.update-arsenal != 'yes'
-      uses: actions/cache/restore@v6
+    - name: "Force Refresh (delete old caches)"
+      if: inputs.update-arsenal == 'yes'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+      run: |
+        gh cache delete "arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}" -R "${{ github.repository }}" 2>/dev/null || true
+        if [ "${{ startsWith(inputs.build-system, 'Make') }}" = "true" ]; then
+          gh cache delete "clang-${{ steps.clang-key.outputs.clang_variant }}" -R "${{ github.repository }}" 2>/dev/null || true
+        fi
+
+    - name: "Cache Clang"  # restores if present; auto-saves at end of job if it was missing
+      if: startsWith(inputs.build-system, 'Make')
+      uses: actions/cache@v6
       with:
         path: ~/clang-cache
         key: clang-${{ steps.clang-key.outputs.clang_variant }}
 
-    - name: "Restore Arsenal Cache"
-      if: inputs.update-arsenal != 'yes'
-      uses: actions/cache/restore@v6
+    - name: "Cache Arsenal"  # restores if present; auto-saves at end of job if it was missing
+      uses: actions/cache@v6
       with:
         path: |
           ~/ccache-bin
