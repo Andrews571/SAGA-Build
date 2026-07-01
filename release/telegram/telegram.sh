@@ -166,30 +166,15 @@ while [ "$attempt" -le "$TELEGRAM_MAX_RETRIES" ]; do
 done
 
 # ------------------------------------------------------
-# Send to release channel (if enabled) — sendPhoto + download links
+# Save variant link for channel post agregation
+# (channel post itself is handled by notify-channel job)
 # ------------------------------------------------------
 if [ "${RELEASE_CHANNEL:-false}" = "true" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then
-
-    # Find banner image (jpg or png, first match wins)
-    BANNER_PATH=""
-    for ext in jpg jpeg png; do
-        candidate="${BANNER_DIR}/banner.${ext}"
-        if [ -f "$candidate" ]; then
-            BANNER_PATH="$candidate"
-            break
-        fi
-    done
-
-    if [ -z "$BANNER_PATH" ]; then
-        warn "Telegram channel: no banner image found in ${BANNER_DIR} (banner.jpg/jpeg/png) — skipping channel post"
-    elif [ -z "$GROUP_MESSAGE_ID" ]; then
-        warn "Telegram channel: could not get group message_id — skipping channel post"
+    if [ -z "$GROUP_MESSAGE_ID" ]; then
+        warn "Telegram: could not get group message_id — skipping variant link save"
     else
-        # Build t.me link to the group message
-        # TELEGRAM_CHAT_ID format: -100XXXXXXXXXX → strip -100 prefix for t.me/c/ link
         RAW_CHANNEL_ID="${TELEGRAM_CHAT_ID/#-100/}"
 
-        # Determine variant key (VANILLA / RESUKISU_SUSFS / etc.)
         VARIANT_KEY="${ROOT_SOLUTION}"
         if [ "${SUSFS_ENABLED:-false}" = "true" ] && [ "$ROOT_SOLUTION" != "VANILLA" ]; then
             VARIANT_KEY="${ROOT_SOLUTION}_SUSFS"
@@ -197,76 +182,11 @@ if [ "${RELEASE_CHANNEL:-false}" = "true" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]
 
         GROUP_MSG_LINK="https://t.me/c/${RAW_CHANNEL_ID}/${GROUP_MESSAGE_ID}"
 
-        # Build VARIANT_LINKS_JSON — single entry for this job's variant
-        # (multi-variant aggregation would need a separate step; for now one entry per job)
-        VARIANT_LINKS_JSON="{\"${VARIANT_KEY}\": \"${GROUP_MSG_LINK}\"}"
-
-        # Rebuild caption with variant links
-        CAPTION_CHANNEL_FILE="/tmp/telegram_caption_channel2.txt"
-        CAPTION_GROUP_DUMMY="/tmp/telegram_caption_group_dummy.txt"
-
-        LINUX_VER="$LINUX_VER" \
-        KERNEL_VERSION="${KERNEL_VERSION:-}" \
-        BUILD_SYSTEM_DISPLAY="$BUILD_SYSTEM_DISPLAY" \
-        COMPILER_STRING="${COMPILER_STRING:-N/A}" \
-        ENABLE_LTO="${ENABLE_LTO:-NONE}" \
-        ROOT_SOLUTION="${ROOT_SOLUTION:-}" \
-        ROOT_SOLUTION_DISPLAY="$ROOT_SOLUTION_DISPLAY" \
-        SUSFS_VER="$SUSFS_VER" \
-        MOUNTLESS_DISPLAY="$MOUNTLESS_DISPLAY" \
-        REKERNEL_DISPLAY="$REKERNEL_DISPLAY" \
-        BBG_DISPLAY="$BBG_DISPLAY" \
-        DROIDSPACES_DISPLAY="$DROIDSPACES_DISPLAY" \
-        GITHUB_SHA="${GITHUB_SHA:-}" \
-        GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
-        GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
-        GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
-        VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
-        python3 "$CAPTION_BUILDER" "$CAPTION_GROUP_DUMMY" "$CAPTION_CHANNEL_FILE" \
-            || error "Telegram: channel caption builder failed!"
-
-        CAPTION_CHANNEL="$(cat "$CAPTION_CHANNEL_FILE")"
-        rm -f "$CAPTION_CHANNEL_FILE" "$CAPTION_GROUP_DUMMY"
-
-        # Send photo to channel
-        attempt=1
-        while [ "$attempt" -le "$TELEGRAM_MAX_RETRIES" ]; do
-            log "📸 Sending channel post (attempt ${attempt}/${TELEGRAM_MAX_RETRIES})..."
-
-            http_code=$(curl -s -o /tmp/telegram_response.json -w "%{http_code}" \
-                --max-time "$TELEGRAM_API_TIMEOUT" \
-                --retry 0 \
-                -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto" \
-                -F "chat_id=${TELEGRAM_CHANNEL_ID}" \
-                -F "parse_mode=MarkdownV2" \
-                -F "photo=@${BANNER_PATH}" \
-                -F "caption=${CAPTION_CHANNEL}" 2>/tmp/telegram_curl_err.log) || http_code="000"
-
-            response=$(cat /tmp/telegram_response.json 2>/dev/null || echo "")
-
-            if [ "$http_code" = "200" ] && echo "$response" | grep -q '"ok":true'; then
-                log "Channel post sent ✅"
-                break
-            fi
-
-            curl_err=$(cat /tmp/telegram_curl_err.log 2>/dev/null || echo "")
-            case "$http_code" in
-                000|429|500|502|503|504)
-                    warn "Telegram channel send failed: HTTP ${http_code} — will retry. ${curl_err}"
-                    ;;
-                *)
-                    warn "Telegram channel send FAILED: HTTP ${http_code} (non-retryable). Response: ${response}"
-                    break
-                    ;;
-            esac
-
-            if [ "$attempt" -lt "$TELEGRAM_MAX_RETRIES" ]; then
-                sleep_secs=$(( 2 ** attempt ))
-                log "⏳ Retrying in ${sleep_secs}s..."
-                sleep "$sleep_secs"
-            fi
-            attempt=$(( attempt + 1 ))
-        done
+        LINKS_DIR="${GITHUB_WORKSPACE}/variant-links"
+        mkdir -p "$LINKS_DIR"
+        LINK_FILE="${LINKS_DIR}/${VARIANT_KEY}.json"
+        python3 -c "import json,os; f=open('${LINK_FILE}','w'); json.dump({'variant':'${VARIANT_KEY}','link':'${GROUP_MSG_LINK}','linux_ver':os.environ.get('LINUX_VER','N/A'),'kernel_version':os.environ.get('KERNEL_VERSION','')},f); f.close()"
+        log "Variant link saved → ${LINK_FILE} ✅"
     fi
 fi
 

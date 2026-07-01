@@ -132,9 +132,12 @@ def build_channel_caption(env, variant_links):
     linux_ver   = env.get("LINUX_VER", "N/A")
     android_ver = KERNEL_VERSION_TO_ANDROID.get(kernel_ver, "?")
 
+    # e.g. "6.1.174" -> "6.1.x"
+    major_minor = ".".join(linux_ver.split(".")[:2]) + ".x"
+
     header = (
         f"*Luminaire \\| Protocol \\| {mdv2_escape(linux_ver)}*\n"
-        f"*GKI Kernel \\| Android {mdv2_escape(android_ver)} \\| Linux {mdv2_escape(linux_ver)}*"
+        f"*GKI Kernel \\| Android {mdv2_escape(android_ver)} \\| Linux {mdv2_escape(major_minor)}*"
     )
 
     download_lines = ["", "*Download*"]
