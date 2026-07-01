@@ -17,7 +17,7 @@ KERNEL_VERSION_TO_ANDROID = {
 VARIANT_DISPLAY = {
     "VANILLA":        "Vanilla",
     "RESUKISU":       "ReSukiSU",
-    "RESUKISU_SUSFS": "ReSukiSU \\+SUSFS",
+    "RESUKISU_SUSFS": "ReSukiSU\\+SUSFS",
     "SUKISU":         "SukiSU\\-Ultra",
     "SUKISU_SUSFS":   "SukiSU\\-Ultra \\+SUSFS",
 }
