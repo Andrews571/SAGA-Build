@@ -66,6 +66,53 @@ if [ "${KERNEL_VERSION}" = "5.10" ]; then
     fi
 fi
 
+# Some vendor init scripts (common on MediaTek-based ROMs, among others)
+# write directly to /proc/sys/net/ipv4/tcp_congestion_control during late
+# boot, silently overriding our compiled CONFIG_DEFAULT_BBR3 well after
+# tcp_congestion_default() already ran. That happens entirely in
+# userspace, after the kernel has already booted, so no defconfig/Kconfig
+# fix can prevent it — this must be enforced by the kernel itself,
+# repeatedly, so it wins regardless of what userspace does afterward.
+# Doing it kernel-side (rather than a root-manager service.d script) means
+# it also works on VANILLA builds with no root solution installed at all.
+TCP_CONG_FILE="${KERNEL_SRC}/net/ipv4/tcp_cong.c"
+if ! grep -q "luminaire_bbr3_enforce_init" "$TCP_CONG_FILE"; then
+    cat >> "$TCP_CONG_FILE" << 'EOF'
+
+/* ======================================================
+ * Luminaire: BBRv3 default-congestion enforcer
+ *
+ * Re-asserts bbr3 as net.ipv4.tcp_congestion_control on a timer so a
+ * vendor init script writing over it during/after boot doesn't stick.
+ * Runs independently of any root solution (works on VANILLA too).
+ * ====================================================== */
+#ifdef CONFIG_TCP_CONG_BBR3
+#include <linux/workqueue.h>
+
+static struct delayed_work luminaire_bbr3_enforce_work;
+
+static void luminaire_bbr3_enforce_fn(struct work_struct *work)
+{
+	tcp_set_default_congestion_control(&init_net, "bbr3");
+	schedule_delayed_work(&luminaire_bbr3_enforce_work, 30 * HZ);
+}
+
+static int __init luminaire_bbr3_enforce_init(void)
+{
+	INIT_DELAYED_WORK(&luminaire_bbr3_enforce_work, luminaire_bbr3_enforce_fn);
+	/* First shot after 20s — late enough that it lands after typical
+	 * vendor "on boot"/"on property:sys.boot_completed=1" triggers. */
+	schedule_delayed_work(&luminaire_bbr3_enforce_work, 20 * HZ);
+	return 0;
+}
+late_initcall(luminaire_bbr3_enforce_init);
+#endif /* CONFIG_TCP_CONG_BBR3 */
+EOF
+    grep -q "luminaire_bbr3_enforce_init" "$TCP_CONG_FILE" \
+        || error "BBRv3: enforcer injection into tcp_cong.c did not take!"
+    log "BBRv3: default-congestion enforcer injected into tcp_cong.c ✅"
+fi
+
 cd "${ROOT_DIR}"
 
 export BBRV3_ENABLED=true
