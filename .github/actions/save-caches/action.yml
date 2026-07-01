@@ -24,10 +24,6 @@ runs:
           exit 0
         fi
         
-        # Trim stale objects before saving
-        echo "Trimming ccache (evict >7d old objects)..."
-        "${{ github.workspace }}/ccache-bin/ccache" --evict-older-than 7d 2>/dev/null || true
-
         # Compress
         echo "Compressing ccache..."
         tar --zstd -cf "/tmp/${ASSET_NAME}" .ccache/ || {

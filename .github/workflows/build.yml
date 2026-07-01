@@ -114,7 +114,7 @@ jobs:
       KERNEL_VERSION:   ${{ inputs.kernel_version }}
       BUILD_SYSTEM:     ${{ inputs.build_system }}
       CCACHE_DIR:       ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
-      CCACHE_MAXSIZE:   ${{ startsWith(inputs.build_system, 'Make') && '5G' || '' }}
+      CCACHE_MAXSIZE:   ${{ startsWith(inputs.build_system, 'Make') && '1500M' || '' }}
 
     steps:
       - name: "Checkout"
@@ -180,7 +180,7 @@ jobs:
       BUILD_SYSTEM:                ${{ inputs.build_system }}
       ADDONS:                      "${{ inputs.bbg && 'bbg,' || '' }}${{ inputs.rekernel && 'rekernel,' || '' }}${{ inputs.droidspaces && 'droidspaces,' || '' }}${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}"
       CCACHE_DIR:                  ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
-      CCACHE_MAXSIZE:              ${{ startsWith(inputs.build_system, 'Make') && '5G' || '' }}
+      CCACHE_MAXSIZE:              ${{ startsWith(inputs.build_system, 'Make') && '1500M' || '' }}
 
     steps:
       - name: "Checkout"
