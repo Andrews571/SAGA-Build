@@ -30,7 +30,13 @@ CONFIG_TCP_CONG_BIC=y
 CONFIG_TCP_CONG_CUBIC=y
 CONFIG_TCP_CONG_WESTWOOD=y
 CONFIG_TCP_CONG_HTCP=y
-CONFIG_DEFAULT_TCP_CONG="bbr"
+# NOTE: CONFIG_DEFAULT_TCP_CONG is intentionally NOT set here.
+# It has no Kconfig prompt (pure "default X if DEFAULT_Y" string), so any
+# literal value written in a defconfig/fragment is discarded and recomputed
+# from the DEFAULT_BBR/DEFAULT_CUBIC/DEFAULT_BBR3/etc. choice state during
+# `make olddefconfig`. To change the actual default congestion control,
+# set the corresponding CONFIG_DEFAULT_<ALGO>=y choice member instead
+# (see kernel/addons/bbrv3/bbrv3.sh for the working pattern).
 CONFIG_NET_SCH_FQ=y
 CONFIG_NET_SCH_FQ_CODEL=y
 

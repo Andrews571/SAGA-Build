@@ -32,14 +32,24 @@ echo "$PATCH_CONTENT" | patch -p1 --forward --no-backup-if-mismatch \
 # Inject DEFAULT_BBR3 directly into gki_defconfig BEFORE make defconfig runs.
 # This must be done here (not via scripts/config) because make olddefconfig
 # resets any post-defconfig changes that violate Kconfig constraints.
+#
+# CRITICAL: CONFIG_TCP_CONG_BBR3 and CONFIG_DEFAULT_BBR3 both live inside
+# `if TCP_CONG_ADVANCED ... endif` in net/ipv4/Kconfig. TCP_CONG_ADVANCED
+# is normally only enabled later via luminaire.fragment (merged AFTER
+# `make gki_defconfig` already ran). Without also setting it here, `make
+# gki_defconfig` sees TCP_CONG_ADVANCED unset, treats the whole if-block
+# (including our BBR3 answers) as nonexistent, and silently falls back to
+# TCP_CONG_CUBIC (`depends on !TCP_CONG_ADVANCED`, default y) instead —
+# this was the actual root cause of BBR3 never sticking as default.
 GKI_DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
 if ! grep -q "CONFIG_DEFAULT_BBR3" "$GKI_DEFCONFIG"; then
     cat >> "$GKI_DEFCONFIG" << 'EOF'
 # BBRv3 as default TCP congestion (Luminaire)
+CONFIG_TCP_CONG_ADVANCED=y
 CONFIG_TCP_CONG_BBR3=y
 CONFIG_DEFAULT_BBR3=y
 EOF
-    log "BBRv3: DEFAULT_BBR3 injected into gki_defconfig ✅"
+    log "BBRv3: TCP_CONG_ADVANCED + DEFAULT_BBR3 injected into gki_defconfig ✅"
 fi
 
 # Extra patch needed for android12-5.10
