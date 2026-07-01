@@ -56,6 +56,7 @@ runs:
       uses: ./.github/actions/restore-caches
       with:
         ccache-prefix: ccache-data-${{ inputs.root-solution }}${{ inputs.susfs == 'true' && '-susfs' || '' }}-${{ inputs.kernel-version }}-${{ inputs.enable-lto != 'NONE' && format('lto-{0}-', inputs.enable-lto) || '' }}${{ steps.clang-key.outputs.clang_variant }}-${{ inputs.ref-name }}-
+        kernel-version: ${{ inputs.kernel-version }}
         gh-token: ${{ inputs.gh-token }}
 
     - name: "Restore LTO Cache"
