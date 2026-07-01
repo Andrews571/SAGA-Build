@@ -40,6 +40,29 @@ run_quiet() {
     return "$rc"
 }
 
+# Maps KERNEL_VERSION (e.g. "6.1") to its ANDROID_VERSION branch prefix
+# (e.g. "android14"). Shared by build.sh and arsenal.sh so the version
+# table only needs updating in one place when a new kernel is added.
+resolve_android_version() {
+    case "${KERNEL_VERSION}" in
+        "5.10") echo "android13" ;;
+        "5.15") echo "android13" ;;
+        "6.1")  echo "android14" ;;
+        "6.6")  echo "android15" ;;
+        "6.12") echo "android16" ;;
+        *) error "Unknown kernel version: ${KERNEL_VERSION}" ;;
+    esac
+}
+
+# Sources every *.sh in setup/, in order. Shared by build.sh and arsenal.sh.
+run_setup() {
+    echo "::group::📦 Setup"
+    for script in "${LUMINAIRE_PATCH_DIR}/setup/"*.sh; do
+        source "$script" || error "Setup failed: $(basename "$script")"
+    done
+    echo "::endgroup::"
+}
+
 # Retries a command with exponential backoff.
 # Usage: retry <max_attempts> <command...>
 retry() {

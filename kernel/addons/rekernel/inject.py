@@ -343,18 +343,22 @@ def patch_binder_c(src):
         content, txn_anchors, BINDER_TXN_HOOK, "binder txn hook"
     )
 
-    if not ok_reply and not ok_txn:
-        print("  [ERROR] binder.c: no hooks injected (reply + txn both missed) — aborting!")
+    if not ok_reply or not ok_txn:
+        # A partial injection (e.g. only txn hooked) would still contain the
+        # "Re:Kernel" marker via its own comment, so rekernel.sh's downstream
+        # `grep -q "Re:Kernel" binder.c` guard can't distinguish full from
+        # partial injection. Treat partial as fatal here instead, matching
+        # the fail-fast behavior of the other patch.py scripts in this repo.
+        missing = []
+        if not ok_reply:
+            missing.append("reply")
+        if not ok_txn:
+            missing.append("txn")
+        print(f"  [ERROR] binder.c: hook(s) not injected ({'+'.join(missing)}) — aborting to avoid silent partial patch!")
         sys.exit(1)
 
     write(path, content)
-    hooks = []
-    if ok_reply:
-        hooks.append("reply")
-    if ok_txn:
-        hooks.append("txn")
-    hook_str = "+".join(hooks)
-    print(f"  binder.c: patched ✅ (include + {hook_str})")
+    print("  binder.c: patched ✅ (include + reply+txn)")
 
 
 def patch_binder_alloc_c(src):

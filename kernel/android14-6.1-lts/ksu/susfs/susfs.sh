@@ -59,6 +59,11 @@ else
     if [ "${SUBLEVEL:-0}" -ge 157 ] && ! grep -qF '#include <trace/hooks/blk.h>' "${KERNEL_SRC}/fs/namespace.c"; then
         log "Post-patch: restoring blk.h to namespace.c..."
         sed -i '/^#include "internal\.h"$/a #include <trace\/hooks\/blk.h>' "${KERNEL_SRC}/fs/namespace.c"
+        # Verify the restore actually landed — if the "internal.h" anchor was
+        # itself missing/renamed upstream, sed would silently no-op and we'd
+        # lose blk.h permanently without anyone noticing until link time.
+        grep -qF '#include <trace/hooks/blk.h>' "${KERNEL_SRC}/fs/namespace.c" \
+            || error "SuSFS: failed to restore blk.h include in namespace.c — internal.h anchor may have changed upstream!"
     fi
 
     # Cleanup any leftover .rej files

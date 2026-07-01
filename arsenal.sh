@@ -13,15 +13,7 @@ source "$(cd "$(dirname "$0")" && pwd)/functions.sh"
 
 KERNEL_VERSION="${KERNEL_VERSION:?KERNEL_VERSION is not set}"
 
-case "${KERNEL_VERSION}" in
-  "5.10") ANDROID_VERSION="android13" ;;
-  "5.15") ANDROID_VERSION="android13" ;;
-  "6.1")  ANDROID_VERSION="android14" ;;
-  "6.6")  ANDROID_VERSION="android15" ;;
-  "6.12") ANDROID_VERSION="android16" ;;
-  *) error "Unknown kernel version: ${KERNEL_VERSION}" ;;
-esac
-
+ANDROID_VERSION="$(resolve_android_version)"
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -59,28 +51,9 @@ main() {
 
 
 # ======================================================
-# 📦 SETUP
-# ======================================================
-
-run_setup() {
-    echo "::group::📦 Setup"
-    local setup_dir="${LUMINAIRE_PATCH_DIR}/setup"
-    local scripts=(
-        "${setup_dir}/00_paths.sh"
-        "${setup_dir}/01_deps.sh"
-        "${setup_dir}/02_ccache.sh"
-        "${setup_dir}/03_clang.sh"
-    )
-    for script in "${scripts[@]}"; do
-        [ -f "$script" ] || { warn "Setup script not found: $(basename "$script") — skipping"; continue; }
-        source "$script" || error "Setup failed: $(basename "$script")"
-    done
-    echo "::endgroup::"
-}
-
-# ======================================================
 # 📥 DOWNLOAD
 # ======================================================
+# (run_setup() is defined in functions.sh, shared with build.sh)
 
 run_download() {
     echo "::group::📥 Arsenal Download"

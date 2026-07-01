@@ -13,7 +13,7 @@ PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/resukisu"
 
 log "Integrating ReSukiSU..."
 cd "$KERNEL_SRC"
-RESUKISU_SETUP=$(curl -LSs --fail --retry 3 \
+RESUKISU_SETUP=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 30 \
     "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh") \
     || error "ReSukiSU: failed to download setup.sh!"
 [ -n "$RESUKISU_SETUP" ] || error "ReSukiSU: setup.sh is empty!"

@@ -20,7 +20,7 @@ esac
 log "🚀 Applying BBRv3 patch (${BBRV3_PATCH})..."
 cd "${KERNEL_SRC}"
 
-PATCH_CONTENT=$(curl -LSs --fail --retry 3 --connect-timeout 30 \
+PATCH_CONTENT=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 30 \
     "${BBRV3_PATCHES_BASE}/${BBRV3_PATCH}") \
     || error "BBRv3: failed to download patch!"
 
@@ -44,12 +44,12 @@ fi
 
 # Extra patch needed for android12-5.10
 if [ "${KERNEL_VERSION}" = "5.10" ]; then
-    SYSCTL_PATCH=$(curl -LSs --fail --retry 3 --connect-timeout 30 \
+    SYSCTL_PATCH=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 30 \
         "${BBRV3_PATCHES_BASE}/sysctl_add_proc_dou8vec_minmax.patch") || true
     if [ -n "$SYSCTL_PATCH" ]; then
         if ! grep -qF 'int proc_dou8vec_minmax(' "${KERNEL_SRC}/include/linux/sysctl.h" 2>/dev/null; then
             echo "$SYSCTL_PATCH" | patch -p1 --forward --no-backup-if-mismatch || true
-            SYSCTL_FIX=$(curl -LSs --fail --retry 3 --connect-timeout 30 \
+            SYSCTL_FIX=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 30 \
                 "${BBRV3_PATCHES_BASE}/sysctl_fix_data-races_in_proc_dou8vec_minmax.patch") || true
             [ -n "$SYSCTL_FIX" ] && echo "$SYSCTL_FIX" | patch -p1 --forward --no-backup-if-mismatch || true
         fi

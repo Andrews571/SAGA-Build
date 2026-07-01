@@ -13,15 +13,7 @@ source "$(cd "$(dirname "$0")" && pwd)/functions.sh"
 
 KERNEL_VERSION="${KERNEL_VERSION:?KERNEL_VERSION is not set}"
 
-case "${KERNEL_VERSION}" in
-  "5.10") ANDROID_VERSION="android13" ;;
-  "5.15") ANDROID_VERSION="android13" ;;
-  "6.1")  ANDROID_VERSION="android14" ;;
-  "6.6")  ANDROID_VERSION="android15" ;;
-  "6.12") ANDROID_VERSION="android16" ;;
-  *) error "Unknown kernel version: ${KERNEL_VERSION}" ;;
-esac
-
+ANDROID_VERSION="$(resolve_android_version)"
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -41,6 +33,9 @@ main() {
     echo "========================================"
 
     run_setup
+
+    [ -d "$VERSION_PATCH_DIR" ] \
+        || error "Kernel version ${KERNEL_VERSION} is not yet supported — missing ${VERSION_PATCH_DIR} (no KSU/patches implemented for this version)"
 
     mkdir -p "$KERNEL_DIR" "$OUT_DIR"
 
@@ -65,20 +60,9 @@ main() {
 
 
 # ======================================================
-# 📦 SETUP
-# ======================================================
-
-run_setup() {
-    echo "::group::📦 Setup"
-    for script in "${LUMINAIRE_PATCH_DIR}/setup/"*.sh; do
-        source "$script" || error "Setup failed: $(basename "$script")"
-    done
-    echo "::endgroup::"
-}
-
-# ======================================================
 # 📥 KERNEL SOURCE
 # ======================================================
+# (run_setup() is defined in functions.sh, shared with arsenal.sh)
 
 restore_kernel_source() {
     echo "::group::📥 Kernel Source"
@@ -165,6 +149,13 @@ run_addons() {
     [ -z "${ADDONS}" ] && return 0
     echo "::group::⚡ Addons"
     IFS=',' read -ra ADDON_LIST <<< "$ADDONS"
+
+    # Conflict matrix — addons that patch overlapping kernel subsystems and
+    # cannot be safely combined. Checked up front so a bad combo fails fast
+    # instead of leaving a half-patched tree mid-build.
+    if [[ ",${ADDONS}," == *,nomount,* ]] && [[ ",${ADDONS}," == *,zeromount,* ]]; then
+        error "Addon conflict: 'nomount' and 'zeromount' both redirect VFS paths and cannot be combined — pick one."
+    fi
     for addon in "${ADDON_LIST[@]}"; do
         addon="${addon// /}"
         [ -z "$addon" ] && continue

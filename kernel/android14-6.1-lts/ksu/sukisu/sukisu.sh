@@ -13,7 +13,7 @@ PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/sukisu"
 
 log "Integrating SukiSU-Ultra..."
 cd "$KERNEL_SRC"
-SUKISU_SETUP=$(curl -LSs --fail --retry 3 \
+SUKISU_SETUP=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 30 \
     "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh") \
     || error "SukiSU-Ultra: failed to download setup.sh!"
 [ -n "$SUKISU_SETUP" ] || error "SukiSU-Ultra: setup.sh is empty!"

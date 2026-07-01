@@ -19,9 +19,17 @@ mkdir -p "$LTO_CACHE_DIR"
 
 log "Applying Luminaire configs (fragment)..."
 DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
+# Regexes are held in variables before use in [[ =~ ]] — inlining a regex
+# literal containing unquoted spaces (e.g. "is not set") causes bash to
+# tokenize it as separate conditional-expression words and throw a syntax
+# error, which previously broke this loop on every Kleaf build.
+RE_CONFIG_SET='^(CONFIG_[^=]+)=(.*)$'
+RE_CONFIG_UNSET_GUARD='^(# CONFIG_[^ ]+) is not set$'
+RE_CONFIG_UNSET_EXTRACT='^# (CONFIG_[^ ]+) is not set$'
+
 while IFS= read -r line; do
-    [[ "$line" =~ ^(CONFIG_[^=]+)=(.*)$ ]] || \
-    [[ "$line" =~ ^(# CONFIG_[^ ]+) is not set$ ]] || continue
+    [[ "$line" =~ $RE_CONFIG_SET ]] || \
+    [[ "$line" =~ $RE_CONFIG_UNSET_GUARD ]] || continue
 
     if [[ "$line" =~ ^CONFIG_([^=]+)=(.*)$ ]]; then
         key="CONFIG_${BASH_REMATCH[1]}"
@@ -29,7 +37,7 @@ while IFS= read -r line; do
         # Remove existing entry (set or unset) then append — mirrors merge_config.sh -m
         sed -i "/^${key}[= ]/d;/^# ${key} is not set/d" "$DEFCONFIG"
         echo "${key}=${val}" >> "$DEFCONFIG"
-    elif [[ "$line" =~ ^# (CONFIG_[^ ]+) is not set$ ]]; then
+    elif [[ "$line" =~ $RE_CONFIG_UNSET_EXTRACT ]]; then
         key="${BASH_REMATCH[1]}"
         sed -i "/^${key}[= ]/d;/^# ${key} is not set/d" "$DEFCONFIG"
         echo "# ${key} is not set" >> "$DEFCONFIG"
