@@ -3,6 +3,7 @@
 # ======================================================
 # 🔑 ROOT SOLUTION — SukiSU-Ultra (android14-6.1-lts)
 # ======================================================
+# Repo: https://github.com/SukiSU-Ultra/SukiSU-Ultra
 
 KSU_DIR="${KERNEL_SRC}/KernelSU"
 PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/sukisu"

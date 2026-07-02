@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+# ======================================================
+# 📦 ADDON — BBG (Baseband Guard LSM)
+# ======================================================
+# Repo: https://github.com/vc-teahouse/Baseband-guard
+
 log "Setting up Baseband Guard (BBG)..."
 cd "${KERNEL_SRC}"
 BBG_SETUP=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 30 \

@@ -3,6 +3,7 @@
 # ======================================================
 # 🔑 ROOT SOLUTION — ReSukiSU (android14-6.1-lts)
 # ======================================================
+# Repo: https://github.com/ReSukiSU/ReSukiSU
 
 KSU_DIR="${KERNEL_SRC}/KernelSU"
 PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/resukisu"

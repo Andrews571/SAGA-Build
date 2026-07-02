@@ -45,16 +45,6 @@ while IFS= read -r line; do
 done < <(grep -E '^CONFIG_|^# CONFIG_' "${LUMINAIRE_PATCH_DIR}/kernel/config/luminaire.fragment")
 log "Fragment applied ✅"
 
-# BBRv3
-if [ "${BBRV3_ENABLED:-false}" = "true" ]; then
-    for entry in "CONFIG_TCP_CONG_ADVANCED=y" "CONFIG_TCP_CONG_BBR3=y"; do
-        key="${entry%%=*}"
-        sed -i "/^${key}[= ]/d;/^# ${key} is not set/d" "$DEFCONFIG"
-        echo "${entry}" >> "$DEFCONFIG"
-    done
-    log "BBRv3: configs enabled ✅"
-fi
-
 log "Running config pass to canonicalize gki_defconfig..."
 cd "$KERNEL_DIR"
 tools/bazel build "${KLEAF_ARGS[@]}" //common:kernel_aarch64_config
@@ -67,7 +57,6 @@ else
     error "Canonical defconfig not found — config pass may have failed early"
 fi
 cd "$ROOT_DIR"
-log "Fragment applied ✅"
 
 log "Applying version patches..."
 for patch in "${VERSION_PATCH_DIR}/patches/"*.patch; do

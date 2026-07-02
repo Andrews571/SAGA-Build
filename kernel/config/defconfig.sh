@@ -40,13 +40,6 @@ fi
 
 log "Luminaire defconfig applied ✅"
 
-# BBRv3
-if [ "${BBRV3_ENABLED:-false}" = "true" ]; then
-    config --enable CONFIG_TCP_CONG_ADVANCED
-    config --enable CONFIG_TCP_CONG_BBR3
-    log "BBRv3: configs enabled ✅"
-fi
-
 # BBG requires baseband_guard in CONFIG_LSM — patch here because .config
 # is not available when bbg.sh runs (before make defconfig)
 if [ "${BBG_ENABLED:-false}" = "true" ]; then

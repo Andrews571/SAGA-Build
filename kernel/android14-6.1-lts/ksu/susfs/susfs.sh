@@ -3,6 +3,7 @@
 # ======================================================
 # 🧬 SuSFS — shared apply logic (any KSU fork, android14-6.1-lts)
 # ======================================================
+# Repo: https://gitlab.com/simonpunk/susfs4ksu
 
 # SuSFS compatibility guard
 # SukiSU-Ultra uses syscall_hook_manager with restricted symbol

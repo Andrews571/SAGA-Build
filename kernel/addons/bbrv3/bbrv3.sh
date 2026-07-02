@@ -2,7 +2,8 @@
 
 # ======================================================
 # 🚀 ADDON — BBRv3
-# TCP congestion control patch from WildKernels/kernel_patches
+# TCP congestion control backport by fatalcoder524
+# Patch source: https://github.com/WildKernels/kernel_patches
 # ======================================================
 
 BBRV3_PATCHES_BASE="https://github.com/WildKernels/kernel_patches/raw/main/common/bbrv3"
@@ -80,6 +81,4 @@ python3 "${LUMINAIRE_PATCH_DIR}/kernel/addons/bbrv3/enforcer.py" "${KERNEL_SRC}/
 
 cd "${ROOT_DIR}"
 
-export BBRV3_ENABLED=true
-
-log "BBRv3 patch applied ✅ (configs will be set in defconfig step)"
+log "BBRv3 patch applied, default-congestion enforcer injected ✅"
