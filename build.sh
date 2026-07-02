@@ -52,7 +52,7 @@ main() {
     run_addons
     run_build
 
-    if [ "$WARMING_MODE" = "true" ]; then
+    if [ "${RUN_MODE^^}" = "WARMING" ]; then
         log "🔥 Warming Complete — skipping packaging"
         exit 0
     fi

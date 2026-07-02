@@ -1,5 +1,5 @@
 name: "✨ Luminaire Protocol"
-run-name: "${{ inputs.kernel_version }} | ${{ inputs.enable_lto != 'NONE' && format('{0} LTO x ', inputs.enable_lto) || '' }}${{ contains(inputs.build_system, 'AOSP') && 'AOSP' || contains(inputs.build_system, 'Cirrus') && 'Cirrus' || contains(inputs.build_system, 'Neutron') && 'Neutron' || contains(inputs.build_system, 'WeebX') && 'WeebX' || 'Zyc' }} (${{ inputs.warming_mode && 'Warming' || 'Build' }})"
+run-name: "${{ inputs.kernel_version }} | ${{ inputs.enable_lto != 'NONE' && format('{0} LTO x ', inputs.enable_lto) || '' }}${{ contains(inputs.build_system, 'AOSP') && 'AOSP' || contains(inputs.build_system, 'Cirrus') && 'Cirrus' || contains(inputs.build_system, 'Neutron') && 'Neutron' || contains(inputs.build_system, 'WeebX') && 'WeebX' || 'Zyc' }} (${{ inputs.run_mode }})"
 
 on:
   workflow_dispatch:
@@ -75,14 +75,14 @@ on:
           - "NONE"
           - "THIN"
           - "FULL"
-      warming_mode:
-        description: "🔥 Warming Mode"
-        type: boolean
-        default: false
-      release_channel:
-        description: "🚀 Telegram Release"
-        type: boolean
-        default: false
+      run_mode:
+        description: "Run Mode"
+        type: choice
+        default: "Test"
+        options:
+          - "Warming"
+          - "Test"
+          - "Release"
       changelog:
         description: "Changelog (separate entries with ;)"
         type: string
@@ -183,8 +183,7 @@ jobs:
       SUSFS_ENABLED:               ${{ matrix.susfs }}
       KERNEL_VERSION:              ${{ inputs.kernel_version }}
       ENABLE_LTO:                  ${{ inputs.enable_lto }}
-      WARMING_MODE:                ${{ inputs.warming_mode }}
-      RELEASE_CHANNEL:             ${{ inputs.release_channel }}
+      RUN_MODE:                    ${{ inputs.run_mode }}
       BUILD_SYSTEM:                ${{ inputs.build_system }}
       ADDONS:                      "${{ inputs.bbrv3 && 'bbrv3,' || '' }}${{ inputs.bbg && 'bbg,' || '' }}${{ inputs.rekernel && 'rekernel,' || '' }}${{ inputs.droidspaces && 'droidspaces,' || '' }}${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}"
       CCACHE_DIR:                  ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
@@ -247,7 +246,7 @@ jobs:
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Upload Variant Link"  # for channel post agregation
-        if: inputs.release_channel
+        if: inputs.run_mode == 'Release'
         uses: actions/upload-artifact@v7
         with:
           name: variant-link-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}
@@ -261,7 +260,7 @@ jobs:
     name: "Notify Channel"
     runs-on: ubuntu-latest
     needs: Start-Build
-    if: inputs.release_channel && always()
+    if: inputs.run_mode == 'Release' && always()
 
     steps:
       - name: "Checkout"

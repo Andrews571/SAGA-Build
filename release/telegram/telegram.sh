@@ -25,12 +25,22 @@ if [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
     warn "Skipping Telegram: TELEGRAM_CHAT_ID not set"
     return 0
 fi
-if [ -z "${TELEGRAM_THREAD_ID_ARTIFACT:-}" ]; then
-    warn "Skipping Telegram: TELEGRAM_THREAD_ID_ARTIFACT not set"
-    return 0
-fi
 if [ ! -f "${ZIP_PATH:-}" ]; then
     warn "Skipping Telegram: ZIP_PATH not set or file missing (ZIP_PATH='${ZIP_PATH:-}')"
+    return 0
+fi
+
+# Pick the destination topic from RUN_MODE. Warming mode never reaches this
+# script (build.sh exits before run_release), so only Test/Release are valid
+# here — anything else is a misconfiguration, not a silent no-op.
+RUN_MODE_UPPER="${RUN_MODE^^}"
+case "$RUN_MODE_UPPER" in
+    TEST)    TARGET_THREAD_ID="${TELEGRAM_THREAD_ID_TEST:-}" ;;
+    RELEASE) TARGET_THREAD_ID="${TELEGRAM_THREAD_ID_RELEASE:-}" ;;
+    *)       error "Telegram: unknown RUN_MODE '${RUN_MODE:-}' — expected Test or Release" ;;
+esac
+if [ -z "$TARGET_THREAD_ID" ]; then
+    warn "Skipping Telegram: no thread id configured for RUN_MODE=${RUN_MODE}"
     return 0
 fi
 
@@ -126,7 +136,7 @@ rm -f "$CAPTION_GROUP_FILE" "$CAPTION_CHANNEL_FILE"
 # ------------------------------------------------------
 # Send to group topic — capture message_id
 # ------------------------------------------------------
-log "📤 Sending ${ZIP_NAME} to Telegram group topic..."
+log "📤 Sending ${ZIP_NAME} to Telegram (${RUN_MODE_UPPER} topic)..."
 
 GROUP_MESSAGE_ID=""
 attempt=1
@@ -136,7 +146,7 @@ while [ "$attempt" -le "$TELEGRAM_MAX_RETRIES" ]; do
         --retry 0 \
         -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
         -F "chat_id=${TELEGRAM_CHAT_ID}" \
-        -F "message_thread_id=${TELEGRAM_THREAD_ID_ARTIFACT}" \
+        -F "message_thread_id=${TARGET_THREAD_ID}" \
         -F "parse_mode=MarkdownV2" \
         -F "document=@${ZIP_PATH};filename=${ZIP_NAME}" \
         -F "caption=${CAPTION}" 2>/tmp/telegram_curl_err.log) || http_code="000"
@@ -170,9 +180,9 @@ done
 
 # ------------------------------------------------------
 # Save variant link for channel post agregation
-# (channel post itself is handled by notify-channel job)
+# (channel post itself is handled by notify-channel job, Release mode only)
 # ------------------------------------------------------
-if [ "${RELEASE_CHANNEL:-false}" = "true" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then
+if [ "$RUN_MODE_UPPER" = "RELEASE" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then
     if [ -z "$GROUP_MESSAGE_ID" ]; then
         warn "Telegram: could not get group message_id — skipping variant link save"
     else
