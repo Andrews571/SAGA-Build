@@ -40,7 +40,15 @@ log "SukiSU-Ultra integrated ✅"
 # ======================================================
 
 log "Applying Luminaire branding..."
-python3 "${PATCHER_DIR}/branding.py" "${KSU_DIR}/kernel/Kbuild" \
+# The builtin branch (SUSFS-integrated) restructured kernel/ entirely —
+# no Kbuild file, but kernel/Makefile has the identical KSU_VERSION_FULL
+# lines branding.py patches, just in a different file.
+if [ "${SUSFS_ENABLED:-false}" = "true" ]; then
+    BRANDING_TARGET="${KSU_DIR}/kernel/Makefile"
+else
+    BRANDING_TARGET="${KSU_DIR}/kernel/Kbuild"
+fi
+python3 "${PATCHER_DIR}/branding.py" "$BRANDING_TARGET" \
     || error "SukiSU-Ultra: branding patch failed!"
 log "Branding applied ✅"
 
