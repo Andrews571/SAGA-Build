@@ -121,26 +121,30 @@ case "$ROOT_SOLUTION" in
         fi
         ;;
     SUKISU)
-        # SukiSU-Ultra's own setup.sh defaults to the latest *tag* (not main
-        # HEAD) when no ref is given — match that semantic for "latest".
-        tag=$(latest_sha_or_empty "SukiSU-Ultra release" \
-            "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest" '.tag_name')
-        latest=""
-        [ -n "$tag" ] && latest=$(latest_sha_or_empty "SukiSU-Ultra" \
-            "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/commits/${tag}" '.sha')
-        resolve_component "sukisu" "SUKISU" "$latest"
-
-        # NOTE: SukiSU-Ultra needs a *specific* susfs4ksu commit verified to
-        # pair with its own commit (not just "SuSFS's newest") — unlike
-        # ReSukiSU, tracking SuSFS's branch tip here is unlikely to land on
-        # a working pair. We still auto-try it (the pin+rollback safety net
-        # makes that harmless — a bad candidate just gets blacklisted and
-        # falls back), but don't expect it to move often on its own; bump
-        # the manifest by hand when you find a new community-verified pair.
         if [ "$SUSFS_ENABLED" = "true" ]; then
+            # The "builtin" branch is SukiSU-Ultra's own SUSFS-integrated
+            # line — actively maintained by the SukiSU-Ultra team to stay
+            # in sync with SuSFS, unlike "main" which moved to an
+            # architecture (syscall_hook_manager) that isn't compatible
+            # with SuSFS's adapter patches at all. So for the SUSFS case we
+            # track this branch's tip directly instead of a hand-curated
+            # pin pair — same simple model as ReSukiSU's tracking.
+            latest=$(latest_sha_or_empty "SukiSU-Ultra (builtin)" \
+                "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/commits/builtin" '.sha')
+            resolve_component "sukisu_builtin" "SUKISU_BUILTIN" "$latest"
+
             latest=$(latest_sha_or_empty "SuSFS (SukiSU pairing)" \
                 "https://gitlab.com/api/v4/projects/simonpunk%2Fsusfs4ksu/repository/commits/gki-android14-6.1" '.id')
             resolve_component "susfs_sukisu" "SUSFS_SUKISU" "$latest"
+        else
+            # SukiSU-Ultra's own setup.sh defaults to the latest *tag* (not
+            # main HEAD) when no ref is given — match that semantic here.
+            tag=$(latest_sha_or_empty "SukiSU-Ultra release" \
+                "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest" '.tag_name')
+            latest=""
+            [ -n "$tag" ] && latest=$(latest_sha_or_empty "SukiSU-Ultra" \
+                "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/commits/${tag}" '.sha')
+            resolve_component "sukisu" "SUKISU" "$latest"
         fi
         ;;
     VANILLA)

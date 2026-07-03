@@ -278,7 +278,7 @@ jobs:
             if [ "${{ matrix.root_solution }}" = "RESUKISU" ]; then
               COMPONENTS="resukisu susfs_resukisu"
             else
-              COMPONENTS="sukisu susfs_sukisu"
+              COMPONENTS="sukisu_builtin susfs_sukisu"
             fi
           fi
           bash kernel/android14-6.1-lts/ksu/promote_or_report.sh "$OUTCOME" $COMPONENTS

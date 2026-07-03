@@ -19,6 +19,12 @@ SUKISU_SETUP=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 3
     || error "SukiSU-Ultra: failed to download setup.sh!"
 [ -n "$SUKISU_SETUP" ] || error "SukiSU-Ultra: setup.sh is empty!"
 echo "$SUKISU_SETUP" | grep -q "^#!" || error "SukiSU-Ultra: setup.sh looks invalid (no shebang)!"
+# With SuSFS enabled we need the "builtin" branch (SukiSU-Ultra's own
+# SUSFS-integrated line), resolved separately from the plain main/tag pin
+# used otherwise — see resolve_refs.sh.
+if [ "${SUSFS_ENABLED:-false}" = "true" ]; then
+    SUKISU_REF="${SUKISU_BUILTIN_REF:-builtin}"
+fi
 if [ -n "${SUKISU_REF:-}" ]; then
     log "Pinning SukiSU-Ultra to ${SUKISU_REF}"
     echo "$SUKISU_SETUP" | bash -s -- "$SUKISU_REF" || error "SukiSU-Ultra: setup.sh failed!"
