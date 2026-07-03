@@ -56,7 +56,15 @@ apply_and_push() {
 
     while [ "$attempt" -le "$max_attempts" ]; do
         run_quiet git fetch "$REMOTE" main
-        git show "FETCH_HEAD:${MANIFEST_REL}" > "$MANIFEST"
+        # Must actually move local HEAD to FETCH_HEAD before committing —
+        # git fetch alone doesn't. Without this, every retry re-commits on
+        # top of the same stale parent, so a real conflict (a concurrent
+        # matrix job's push) fails identically on every attempt and this
+        # loop can never actually recover (confirmed with a real two-clone
+        # repro before landing this fix: 0/5 attempts succeeded without
+        # this line, 1/1 with it). workspace/ is gitignored, so this
+        # doesn't touch the in-progress kernel source tree.
+        git reset -q --hard FETCH_HEAD
 
         jq "$jq_patch" "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
 
