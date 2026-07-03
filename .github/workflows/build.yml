@@ -102,8 +102,9 @@ concurrency:
 env:
   DEBIAN_FRONTEND: noninteractive
   # Single source of truth for "is this a Make build" — referenced via
-  # env.IS_MAKE everywhere below instead of each spot re-deriving its own
-  # startsWith(inputs.build_system, 'Make') check.
+  # env.IS_MAKE in step-level `if:` conditions below. Job-level `env:` blocks
+  # can't use the env context to reference this (GitHub Actions limitation),
+  # so those re-derive startsWith(inputs.build_system, 'Make') inline instead.
   IS_MAKE: ${{ startsWith(inputs.build_system, 'Make') }}
 
 jobs:
@@ -131,8 +132,8 @@ jobs:
       USE_CLANG_CACHE:  ${{ inputs.update_arsenal != 'yes' }}
       KERNEL_VERSION:   ${{ inputs.kernel_version }}
       BUILD_SYSTEM:     ${{ inputs.build_system }}
-      CCACHE_DIR:       ${{ env.IS_MAKE == 'true' && format('{0}/.ccache', github.workspace) || '' }}
-      CCACHE_MAXSIZE:   ${{ env.IS_MAKE == 'true' && '1500M' || '' }}
+      CCACHE_DIR:       ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
+      CCACHE_MAXSIZE:   ${{ startsWith(inputs.build_system, 'Make') && '1500M' || '' }}
 
     steps:
       - name: "Checkout"
@@ -207,8 +208,8 @@ jobs:
       RUN_MODE:                    ${{ inputs.run_mode }}
       BUILD_SYSTEM:                ${{ inputs.build_system }}
       ADDONS:                      ${{ needs.prepare-matrix.outputs.addons }}
-      CCACHE_DIR:                  ${{ env.IS_MAKE == 'true' && format('{0}/.ccache', github.workspace) || '' }}
-      CCACHE_MAXSIZE:              ${{ env.IS_MAKE == 'true' && '1500M' || '' }}
+      CCACHE_DIR:                  ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
+      CCACHE_MAXSIZE:              ${{ startsWith(inputs.build_system, 'Make') && '1500M' || '' }}
 
     steps:
       - name: "Checkout"
