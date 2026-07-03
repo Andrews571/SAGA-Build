@@ -78,7 +78,7 @@ on:
       run_mode:
         description: "Run Mode"
         type: choice
-        default: "Test"
+        default: "Warming"
         options:
           - "Warming"
           - "Test"
@@ -267,7 +267,11 @@ jobs:
         id: build
         run: bash build.sh
 
-      - name: "Promote or Report Pin"  # updates manifest.json, files an issue on failed candidates
+      - name: "Ccache Stats"
+        if: always() && env.IS_MAKE == 'true'
+        run: ~/ccache-bin/ccache --show-stats
+
+      - name: "Manifest Updates"  # updates manifest.json, files an issue on failed candidates
         if: always() && matrix.root_solution != 'VANILLA'
         env:
           GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
@@ -279,10 +283,6 @@ jobs:
             COMPONENTS="resukisu susfs"
           fi
           bash kernel/android14-6.1-lts/ksu/promote_or_report.sh "$OUTCOME" $COMPONENTS
-
-      - name: "Ccache Stats"
-        if: always() && env.IS_MAKE == 'true'
-        run: ~/ccache-bin/ccache --show-stats
 
       - name: "Save Build Caches"  # LTO and ccache, both to GH Release
         if: always() && env.IS_MAKE == 'true'
