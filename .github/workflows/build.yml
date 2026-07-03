@@ -113,6 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
+      addons: ${{ steps.set.outputs.addons }}
 
     env:
       PERSONAL_TOKEN:   ${{ secrets.PERSONAL_TOKEN }}
@@ -151,6 +152,12 @@ jobs:
           matrix_json=$(printf '%s\n' "${variants[@]}" | jq -cs '{include: .}')
           echo "matrix=${matrix_json}" >> $GITHUB_OUTPUT
 
+          # Single source of truth for the ADDONS list — reused by Start-Build
+          # and notify-channel via this job's output, instead of each job
+          # rebuilding the same string from inputs independently.
+          ADDONS="${{ inputs.bbrv3 && 'bbrv3,' || '' }}${{ inputs.bbg && 'bbg,' || '' }}${{ inputs.rekernel && 'rekernel,' || '' }}${{ inputs.droidspaces && 'droidspaces,' || '' }}${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}"
+          echo "addons=${ADDONS}" >> $GITHUB_OUTPUT
+
       - name: "Setup Arsenal"  # restores clang+arsenal cache (auto-saved if missing), then runs arsenal.sh
         id: setup-arsenal
         uses: ./.github/actions/setup-arsenal
@@ -185,7 +192,7 @@ jobs:
       ENABLE_LTO:                  ${{ inputs.enable_lto }}
       RUN_MODE:                    ${{ inputs.run_mode }}
       BUILD_SYSTEM:                ${{ inputs.build_system }}
-      ADDONS:                      "${{ inputs.bbrv3 && 'bbrv3,' || '' }}${{ inputs.bbg && 'bbg,' || '' }}${{ inputs.rekernel && 'rekernel,' || '' }}${{ inputs.droidspaces && 'droidspaces,' || '' }}${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}"
+      ADDONS:                      ${{ needs.prepare-matrix.outputs.addons }}
       CCACHE_DIR:                  ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
       CCACHE_MAXSIZE:              ${{ startsWith(inputs.build_system, 'Make') && '1500M' || '' }}
 
@@ -259,7 +266,7 @@ jobs:
   notify-channel:
     name: "Notify Channel"
     runs-on: ubuntu-latest
-    needs: Start-Build
+    needs: [prepare-matrix, Start-Build]
     if: inputs.run_mode == 'Release' && always()
 
     steps:
@@ -279,7 +286,7 @@ jobs:
           LUMINAIRE_PATCH_DIR: ${{ github.workspace }}
           LINKS_DIR:           /tmp/variant-links
           KERNEL_VERSION:      ${{ inputs.kernel_version }}
-          ADDONS:              "${{ inputs.bbrv3 && 'bbrv3,' || '' }}${{ inputs.bbg && 'bbg,' || '' }}${{ inputs.rekernel && 'rekernel,' || '' }}${{ inputs.droidspaces && 'droidspaces,' || '' }}${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}"
+          ADDONS:              ${{ needs.prepare-matrix.outputs.addons }}
           CHANGELOG:           ${{ inputs.changelog }}
           GITHUB_SHA:          ${{ github.sha }}
           GITHUB_SERVER_URL:   ${{ github.server_url }}

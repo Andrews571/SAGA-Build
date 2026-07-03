@@ -89,21 +89,6 @@ if [ "$SUSFS_ENABLED" = "true" ] && [ "$ROOT_SOLUTION" != "VANILLA" ]; then
     fi
 fi
 
-MOUNTLESS_DISPLAY="N/A"
-case ",${ADDONS}," in
-    *,nomount,*)   MOUNTLESS_DISPLAY="NoMount" ;;
-    *,zeromount,*) MOUNTLESS_DISPLAY="ZeroMount" ;;
-esac
-
-BBRV3_DISPLAY="Disable"
-REKERNEL_DISPLAY="Disable"
-BBG_DISPLAY="Disable"
-DROIDSPACES_DISPLAY="Disable"
-case ",${ADDONS}," in *,bbrv3,*)      BBRV3_DISPLAY="Enable" ;; esac
-case ",${ADDONS}," in *,rekernel,*)    REKERNEL_DISPLAY="Enable" ;; esac
-case ",${ADDONS}," in *,bbg,*)         BBG_DISPLAY="Enable" ;; esac
-case ",${ADDONS}," in *,droidspaces,*) DROIDSPACES_DISPLAY="Enable" ;; esac
-
 # ------------------------------------------------------
 # Build group caption (no VARIANT_LINKS_JSON yet)
 # ------------------------------------------------------
@@ -117,11 +102,7 @@ ENABLE_LTO="${ENABLE_LTO:-NONE}" \
 ROOT_SOLUTION="${ROOT_SOLUTION:-}" \
 ROOT_SOLUTION_DISPLAY="$ROOT_SOLUTION_DISPLAY" \
 SUSFS_VER="$SUSFS_VER" \
-MOUNTLESS_DISPLAY="$MOUNTLESS_DISPLAY" \
-BBRV3_DISPLAY="$BBRV3_DISPLAY" \
-REKERNEL_DISPLAY="$REKERNEL_DISPLAY" \
-BBG_DISPLAY="$BBG_DISPLAY" \
-DROIDSPACES_DISPLAY="$DROIDSPACES_DISPLAY" \
+ADDONS="${ADDONS:-}" \
 GITHUB_SHA="${GITHUB_SHA:-}" \
 GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \

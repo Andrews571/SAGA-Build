@@ -22,6 +22,29 @@ VARIANT_DISPLAY = {
     "SUKISU_SUSFS":   "SukiSU\\-Ultra \\+SUSFS",
 }
 
+# Single source of truth for addon display names — shared by build_blocks()
+# (per-build group caption) and build_channel_caption() (channel post).
+# Adding a new addon only means adding an entry here (+ TOGGLE_ADDON_ORDER
+# below if it should show as an explicit Enable/Disable line in the group
+# caption's Add-ons block).
+ADDON_DISPLAY_NAMES = {
+    "bbrv3":       "BBRv3",
+    "bbg":         "BBG",
+    "rekernel":    "Re:Kernel",
+    "droidspaces": "Droidspaces",
+    "zeromount":   "ZeroMount",
+    "nomount":     "NoMount",
+}
+
+# Mountless-engine addons are mutually exclusive (only one, or none, active
+# per build) and shown as a single "Mountless Engine" line rather than their
+# own Enable/Disable row.
+MOUNTLESS_ADDON_TOKENS = ("nomount", "zeromount")
+
+# Toggle-style addons shown as explicit Enable/Disable lines in the group
+# caption, in display order.
+TOGGLE_ADDON_ORDER = ["rekernel", "bbrv3", "bbg", "droidspaces"]
+
 
 def mdv2_escape(s):
     special = r"\_*[]()~`>#+-=|{}.!"
@@ -69,12 +92,21 @@ def build_blocks(env):
     lto             = mdv2_code_escape(env.get("ENABLE_LTO", "NONE"))
     root_solution   = mdv2_code_escape(env.get("ROOT_SOLUTION_DISPLAY", "N/A"))
     susfs_ver       = mdv2_code_escape(env.get("SUSFS_VER", "N/A"))
-    mountless       = mdv2_code_escape(env.get("MOUNTLESS_DISPLAY", "N/A"))
-    rekernel        = mdv2_code_escape(env.get("REKERNEL_DISPLAY", "Disable"))
-    bbrv3           = mdv2_code_escape(env.get("BBRV3_DISPLAY", "Disable"))
-    bbg             = mdv2_code_escape(env.get("BBG_DISPLAY", "Disable"))
-    droidspaces     = mdv2_code_escape(env.get("DROIDSPACES_DISPLAY", "Disable"))
     date_str        = mdv2_code_escape(datetime.now().strftime("%d %b %Y"))
+
+    addon_tokens = [t for t in env.get("ADDONS", "").split(",") if t]
+    mountless = "N/A"
+    for token in addon_tokens:
+        if token in MOUNTLESS_ADDON_TOKENS:
+            mountless = ADDON_DISPLAY_NAMES.get(token, token)
+            break
+    mountless = mdv2_code_escape(mountless)
+
+    addon_status_lines = []
+    for token in TOGGLE_ADDON_ORDER:
+        name = ADDON_DISPLAY_NAMES.get(token, token)
+        status = "Enable" if token in addon_tokens else "Disable"
+        addon_status_lines.append(f"{name.ljust(16)} : {mdv2_code_escape(status)}")
 
     commit_short    = env.get("GITHUB_SHA", "")[:7]
     commit_url      = "{}/{}/commit/{}".format(
@@ -104,10 +136,8 @@ def build_blocks(env):
     block_addons = (
         "```Add-ons\n"
         f"Mountless Engine : {mountless}\n"
-        f"Re:Kernel        : {rekernel}\n"
-        f"BBRv3            : {bbrv3}\n"
-        f"BBG              : {bbg}\n"
-        f"Droidspaces      : {droidspaces}```"
+        + "\n".join(addon_status_lines) +
+        "```"
     )
     footer = "[{}]({}) \\| [Run \\#{}]({})".format(
         mdv2_escape(commit_short),
@@ -118,15 +148,6 @@ def build_blocks(env):
 
     return block_luminaire, block_root, block_addons, footer
 
-
-ADDON_DISPLAY_NAMES = {
-    "bbrv3":       "BBRv3",
-    "bbg":         "BBG",
-    "rekernel":    "Re:Kernel",
-    "droidspaces": "Droidspaces",
-    "zeromount":   "ZeroMount",
-    "nomount":     "NoMount",
-}
 
 CHANGELOG_MAX_LEN = 300
 
