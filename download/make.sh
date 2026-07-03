@@ -7,7 +7,7 @@
 if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -d "${HOME}/kernel-cache/common" ]; then
     log "Restoring kernel source from cache..."
     cp -a "${HOME}/kernel-cache/." "${KERNEL_DIR}/"
-    log "Kernel source restored ✅"
+    log "Kernel source restored ✅ ($(cache_freshness_note))"
 else
     log "Cloning kernel source..."
     git config --global http.connectTimeout 30

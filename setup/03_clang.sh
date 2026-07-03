@@ -34,7 +34,7 @@ if [ "${USE_CLANG_CACHE}" = "true" ] && [ -d "${CLANG_CACHE_DIR}/bin" ]; then
         # Workflow always re-saves clang cache after this step regardless
         log "Clang re-downloaded and cached ✅"
     else
-        log "Clang restored ✅"
+        log "Clang restored ✅ ($(cache_freshness_note))"
     fi
 else
     mkdir -p "$TOOL_CLANG_DIR"

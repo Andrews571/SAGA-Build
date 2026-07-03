@@ -7,7 +7,7 @@
 if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -f "${HOME}/kernel-cache/tools/bazel" ]; then
     log "Restoring Kleaf workspace from cache..."
     cp -a "${HOME}/kernel-cache/." "${KERNEL_DIR}/"
-    log "Kleaf workspace restored ✅"
+    log "Kleaf workspace restored ✅ ($(cache_freshness_note))"
 else
     log "Installing repo tool..."
     command -v repo &>/dev/null || \

@@ -17,7 +17,7 @@ export ZIP_NAME
 
 if [ "${USE_AK3_CACHE}" = "true" ] && [ -d "${HOME}/ak3-cache" ]; then
     cp -a "${HOME}/ak3-cache/." "${TOOL_AK3_DIR}/"
-    log "AnyKernel3 restored from cache ✅"
+    log "AnyKernel3 restored from cache ✅ ($(cache_freshness_note))"
 else
     retry 3 run_quiet git clone -q --depth=1 \
         https://github.com/chainonyourdoor/AnyKernel3-Luminaire.git "$TOOL_AK3_DIR" \

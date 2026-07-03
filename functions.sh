@@ -98,3 +98,19 @@ retry() {
         attempt=$(( attempt + 1 ))
     done
 }
+
+# Human-readable note on WHY a cache-restore path is being taken, for
+# clang/kernel-source/AK3 restore log lines. Start-Build always restores
+# (USE_*_CACHE hardcoded "true" there) — Prepare Arsenal is the single
+# choke point that decides whether that shared cache is actually fresh
+# this run (CACHE_REFRESHED, set from the 'Update Arsenal' input). Without
+# this, "restored from cache ✅" reads the same whether the cache is
+# brand new or weeks old, which is misleading when read from a single
+# job's log in isolation.
+cache_freshness_note() {
+    if [ "${CACHE_REFRESHED:-false}" = "true" ]; then
+        echo "pre-warmed fresh by Prepare Arsenal this run"
+    else
+        echo "existing cache, no refresh requested — set 'Update Arsenal' to force"
+    fi
+}

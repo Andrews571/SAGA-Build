@@ -114,6 +114,12 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       addons: ${{ steps.set.outputs.addons }}
+      # Whether Prepare Arsenal just force-refreshed the shared clang/kernel/AK3
+      # caches this run. Start-Build's own USE_*_CACHE flags are hardcoded
+      # "true" (it always restores — never independently re-downloads), so
+      # this is the only way the scripts it runs can tell an honestly-fresh
+      # restore apart from a pre-existing-cache restore in their log output.
+      cache_refreshed: ${{ inputs.update_arsenal == 'yes' }}
 
     env:
       PERSONAL_TOKEN:   ${{ secrets.PERSONAL_TOKEN }}
@@ -186,6 +192,11 @@ jobs:
       USE_KERNEL_CACHE:            "true"
       USE_AK3_CACHE:               "true"
       USE_CLANG_CACHE:             "true"
+      # Always restores — Prepare Arsenal is the single choke point that
+      # decides whether the shared cache is fresh (see its cache_refreshed
+      # output). Passed through so restore-path log messages can say which
+      # case they're in instead of a bare "restored from cache".
+      CACHE_REFRESHED:             ${{ needs.prepare-matrix.outputs.cache_refreshed }}
       ROOT_SOLUTION:               ${{ matrix.root_solution }}
       SUSFS_ENABLED:               ${{ matrix.susfs }}
       KERNEL_VERSION:              ${{ inputs.kernel_version }}
