@@ -27,12 +27,11 @@ elif [ "${ENABLE_LTO}" = "FULL" ]; then
     config --disable CONFIG_LTO_CLANG_THIN
     config --enable  CONFIG_LTO_CLANG_FULL
     log "LTO: FULL ✅"
-elif [ "${ENABLE_LTO}" = "NONE" ]; then
-    config --enable  CONFIG_LTO_CLANG_NONE
-    config --disable CONFIG_LTO_CLANG_THIN
-    log "LTO: NONE ✅"
 else
-    warn "Unknown ENABLE_LTO value '${ENABLE_LTO}', defaulting to NONE"
+    # Covers both the explicit "NONE" value and any unrecognized value —
+    # NONE is the safe fallback either way, only the log line differs.
+    [ "${ENABLE_LTO}" = "NONE" ] \
+        || warn "Unknown ENABLE_LTO value '${ENABLE_LTO}', defaulting to NONE"
     config --enable  CONFIG_LTO_CLANG_NONE
     config --disable CONFIG_LTO_CLANG_THIN
     log "LTO: NONE ✅"

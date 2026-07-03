@@ -20,17 +20,29 @@ def main():
     #
     # Result: LINUX_COMPILER = "Cirrus Clang 23.0.0, LLD 23.0.0"
 
-    lines = content.split("\n")
-    out = []
-    i = 0
-    cc_replaced = False
-    ld_replaced = False
-
     clean_ld = (
         "LD_VERSION=$(LC_ALL=C $LD -v 2>/dev/null | head -n1 | "
         "grep -oP 'LLD\\s+\\K[0-9]+\\.[0-9]+\\.[0-9]+' | "
         "head -n1 | sed 's/^/LLD /')"
     )
+
+    # Idempotency check (same convention as module_bypass/patch.py). Without
+    # this, re-running the patcher against an already-patched file hits a
+    # false "partial match": the CC pattern (CC_VERSION="$2") no longer
+    # matches since it's now a literal string, but the LD pattern
+    # (LD_VERSION=$() still matches its own already-patched replacement
+    # (clean_ld also starts with "LD_VERSION=$(") — cc_replaced=False,
+    # ld_replaced=True, which trips the fatal partial-match abort below
+    # even though the file is actually fully and correctly patched already.
+    if f'CC_VERSION="{compiler_string}"' in content and clean_ld in content:
+        print("[info] compiler_string_patch: already patched — skipping", flush=True)
+        sys.exit(0)
+
+    lines = content.split("\n")
+    out = []
+    i = 0
+    cc_replaced = False
+    ld_replaced = False
 
     while i < len(lines):
         line = lines[i]
