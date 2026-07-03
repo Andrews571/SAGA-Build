@@ -32,13 +32,39 @@ GH_API_AUTH=()
 # Args: <component name for logging> <curl command to run> <jq filter>
 latest_sha_or_empty() {
     local label="$1" url="$2" jq_filter="$3"
-    local resp sha
-    resp=$(curl -LSs --fail --max-time 20 "${GH_API_AUTH[@]}" "$url" 2>/dev/null) || {
-        warn "resolve_refs: couldn't reach upstream for ${label} — using pinned ref"
+    local body_file http_code curl_exit sha auth_args=()
+
+    # GH_API_AUTH is a GitHub PAT — only attach it for api.github.com calls.
+    # Previously this was attached unconditionally, including to the SuSFS
+    # lookup against gitlab.com: sending a GitHub token as a GitLab
+    # Authorization: Bearer header is a foreign/invalid credential from
+    # GitLab's point of view, which very plausibly gets rejected fast
+    # (matches the ~300ms, consistent-every-run failures actually observed
+    # in CI — not the profile of a timeout or random rate-limit). Scoping
+    # the header to its actual target either confirms or rules this out;
+    # the http_code/curl_exit logging below gives real evidence either way
+    # instead of guessing again.
+    case "$url" in
+        https://api.github.com/*) auth_args=("${GH_API_AUTH[@]}") ;;
+    esac
+
+    body_file="$(mktemp)"
+    if http_code=$(curl -sL -o "$body_file" -w '%{http_code}' --max-time 20 \
+            "${auth_args[@]}" "$url"); then
+        curl_exit=0
+    else
+        curl_exit=$?
+    fi
+
+    if [ "$curl_exit" -ne 0 ] || [ "$http_code" != "200" ]; then
+        warn "resolve_refs: couldn't reach upstream for ${label} (curl exit ${curl_exit}, HTTP ${http_code:-000}) — using pinned ref"
+        rm -f "$body_file"
         echo ""
         return 0
-    }
-    sha=$(echo "$resp" | jq -r "$jq_filter" 2>/dev/null)
+    fi
+
+    sha=$(jq -r "$jq_filter" "$body_file" 2>/dev/null)
+    rm -f "$body_file"
     if [ -z "$sha" ] || [ "$sha" = "null" ]; then
         warn "resolve_refs: couldn't parse latest ${label} commit — using pinned ref"
         echo ""
