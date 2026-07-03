@@ -10,15 +10,15 @@ COLOR_CYAN='\033[0;36m'
 COLOR_RESET='\033[0m'
 
 log() {
-  echo -e "${COLOR_CYAN}[LOG]${COLOR_RESET} $*"
+  echo -e "${COLOR_CYAN}[LOG]${COLOR_RESET} $*" >&2
 }
 
 warn() {
-  echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*"
+  echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*" >&2
 }
 
 error() {
-  echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} $*"
+  echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} $*" >&2
   exit 1
 }
 

@@ -19,6 +19,7 @@ set -eo pipefail
 
 LUMINAIRE_PATCH_DIR="${LUMINAIRE_PATCH_DIR:-$GITHUB_WORKSPACE}"
 source "${LUMINAIRE_PATCH_DIR}/functions.sh"
+cd "$LUMINAIRE_PATCH_DIR"
 
 BUILD_OUTCOME="$1"
 shift
@@ -44,6 +45,15 @@ fi
 git config --global user.name  "luminaire-bot"
 git config --global user.email "luminaire-bot@users.noreply.github.com"
 
+# actions/checkout (default persist-credentials: true) leaves an
+# Authorization header config'd for github.com that overrides whatever
+# credential is embedded in the remote URL below — so without this,
+# every push here silently authenticates as github-actions[bot] (limited
+# permissions) instead of PERSONAL_TOKEN, failing with a 403 that looks
+# like a token/permissions problem but isn't one.
+# https://github.com/actions/checkout/blob/main/adrs/0153-checkout-v2.md#persist-credentials
+git config --unset-all "http.https://github.com/.extraheader" 2>/dev/null || true
+
 REMOTE="https://x-access-token:${PERSONAL_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
 # Applies one jq patch to manifest.json on top of the latest main and
@@ -51,8 +61,6 @@ REMOTE="https://x-access-token:${PERSONAL_TOKEN}@github.com/${GITHUB_REPOSITORY}
 apply_and_push() {
     local jq_patch="$1" commit_msg="$2"
     local attempt=1 max_attempts=5
-
-    cd "$LUMINAIRE_PATCH_DIR"
 
     while [ "$attempt" -le "$max_attempts" ]; do
         run_quiet git fetch "$REMOTE" main
