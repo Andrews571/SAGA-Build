@@ -86,7 +86,6 @@ def truncate(caption, limit, suffix="\n\u2026\n```"):
 
 def build_blocks(env):
     linux_ver       = mdv2_code_escape(env.get("LINUX_VER", "N/A"))
-    kernel_branch   = mdv2_code_escape(env.get("KERNEL_BRANCH", "N/A"))
     build_system    = mdv2_code_escape(env.get("BUILD_SYSTEM_DISPLAY", "N/A"))
     compiler        = mdv2_code_escape(env.get("COMPILER_STRING", "N/A"))
     lto             = mdv2_code_escape(env.get("ENABLE_LTO", "NONE"))

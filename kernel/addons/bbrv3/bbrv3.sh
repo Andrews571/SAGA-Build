@@ -27,8 +27,15 @@ PATCH_CONTENT=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 
 
 [ -n "$PATCH_CONTENT" ] || error "BBRv3: downloaded patch is empty!"
 
-echo "$PATCH_CONTENT" | patch -p1 --forward --no-backup-if-mismatch \
-    || error "BBRv3: patch apply failed!"
+if echo "$PATCH_CONTENT" | patch -p1 --dry-run --reverse --no-backup-if-mismatch > /dev/null 2>&1; then
+    log "BBRv3: patch already applied, skipping."
+elif echo "$PATCH_CONTENT" | patch -p1 --dry-run --forward --no-backup-if-mismatch > /dev/null 2>&1; then
+    echo "$PATCH_CONTENT" | patch -p1 --forward --no-backup-if-mismatch \
+        || error "BBRv3: patch apply failed!"
+    log "BBRv3: patch applied ✅"
+else
+    error "BBRv3: patch does not apply cleanly — conflict or unsupported kernel source!"
+fi
 
 # Inject DEFAULT_BBR3 directly into gki_defconfig BEFORE make defconfig runs.
 # This must be done here (not via scripts/config) because make olddefconfig

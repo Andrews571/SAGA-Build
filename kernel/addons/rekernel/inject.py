@@ -250,14 +250,6 @@ def already_patched(content):
     return MARKER in content
 
 
-def inject_after(content, anchor, injection, label):
-    """Inject after a single anchor. Returns (content, ok)."""
-    if anchor not in content:
-        return content, False
-    idx = content.index(anchor) + len(anchor)
-    return content[:idx] + "\n" + injection + content[idx:], True
-
-
 def inject_after_any(content, anchors, injection, label):
     """Try multiple anchors in order; return on first match."""
     for anchor in anchors:

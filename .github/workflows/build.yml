@@ -101,6 +101,9 @@ concurrency:
 
 env:
   DEBIAN_FRONTEND: noninteractive
+  # Single source of truth for "is this a Make build" — referenced via
+  # env.IS_MAKE everywhere below instead of each spot re-deriving its own
+  # startsWith(inputs.build_system, 'Make') check.
   IS_MAKE: ${{ startsWith(inputs.build_system, 'Make') }}
 
 jobs:
@@ -128,8 +131,8 @@ jobs:
       USE_CLANG_CACHE:  ${{ inputs.update_arsenal != 'yes' }}
       KERNEL_VERSION:   ${{ inputs.kernel_version }}
       BUILD_SYSTEM:     ${{ inputs.build_system }}
-      CCACHE_DIR:       ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
-      CCACHE_MAXSIZE:   ${{ startsWith(inputs.build_system, 'Make') && '1500M' || '' }}
+      CCACHE_DIR:       ${{ env.IS_MAKE == 'true' && format('{0}/.ccache', github.workspace) || '' }}
+      CCACHE_MAXSIZE:   ${{ env.IS_MAKE == 'true' && '1500M' || '' }}
 
     steps:
       - name: "Checkout"
@@ -204,8 +207,8 @@ jobs:
       RUN_MODE:                    ${{ inputs.run_mode }}
       BUILD_SYSTEM:                ${{ inputs.build_system }}
       ADDONS:                      ${{ needs.prepare-matrix.outputs.addons }}
-      CCACHE_DIR:                  ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
-      CCACHE_MAXSIZE:              ${{ startsWith(inputs.build_system, 'Make') && '1500M' || '' }}
+      CCACHE_DIR:                  ${{ env.IS_MAKE == 'true' && format('{0}/.ccache', github.workspace) || '' }}
+      CCACHE_MAXSIZE:              ${{ env.IS_MAKE == 'true' && '1500M' || '' }}
 
     steps:
       - name: "Checkout"
@@ -250,11 +253,11 @@ jobs:
         run: bash build.sh
 
       - name: "Ccache Stats"
-        if: always() && startsWith(inputs.build_system, 'Make')
+        if: always() && env.IS_MAKE == 'true'
         run: ~/ccache-bin/ccache --show-stats
 
       - name: "Save Build Caches"  # LTO and ccache, both to GH Release
-        if: always() && startsWith(inputs.build_system, 'Make')
+        if: always() && env.IS_MAKE == 'true'
         uses: ./.github/actions/save-build-caches
         with:
           build-system:   ${{ inputs.build_system }}
