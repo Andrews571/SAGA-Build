@@ -16,7 +16,7 @@ if [ -f "${CCACHE_CACHE_DIR}/ccache" ]; then
     mkdir -p "${ROOT_DIR}/ccache-bin"
     cp "${CCACHE_CACHE_DIR}/ccache" "${ROOT_DIR}/ccache-bin/ccache"
     chmod +x "${ROOT_DIR}/ccache-bin/ccache"
-    log "ccache-ECS restored ✅"
+    log "ccache-ECS restored ✅ ($(cache_freshness_note))"
 else
     log "Building ccache-ECS from source..."
     git clone --depth=1 -b ccache-ECS-v1.0 \
