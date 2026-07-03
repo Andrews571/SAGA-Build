@@ -149,7 +149,7 @@ run_core() {
 
 run_addons() {
     [ -z "${ADDONS:-}" ] && return 0
-    # Strip whitespace, leading/trailing commas, dan koma ganda
+    # Strip whitespace, leading/trailing commas, and duplicate commas
     ADDONS="${ADDONS// /}"
     ADDONS="$(echo "$ADDONS" | sed 's/^,*//;s/,*$//;s/,,*/,/g')"
     [ -z "${ADDONS}" ] && return 0

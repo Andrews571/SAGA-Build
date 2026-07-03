@@ -76,6 +76,7 @@ This repo does **not** contain kernel source — it contains all the scripts and
 - [ZeroMount](https://github.com/Enginex0/zeromount) — Enginex0
 - [NoMount](https://github.com/maxsteeel/nomount) — maxsteeel
 - [Re:Kernel](https://github.com/Sakion-Team/Re-Kernel) — Sakion-Team
+- [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) — ravindu644
 - [Greenforce Clang](https://github.com/greenforce-project/greenforce_clang) — greenforce-project
 - [Neutron Clang](https://github.com/Neutron-Toolchains/clang-build-catalogue) — Neutron-Toolchains
 - [WeebX Clang](https://github.com/XSans0/WeebX-Clang) — XSans0

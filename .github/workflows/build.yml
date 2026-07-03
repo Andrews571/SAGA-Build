@@ -162,7 +162,7 @@ jobs:
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
   # ======================================================
-  # BUILD PER VARIANT (paralel)
+  # BUILD PER VARIANT (parallel)
   # ======================================================
   Start-Build:
     name: "Build Kernel (${{ matrix.root_solution }}${{ matrix.susfs && '+SUSFS' || '' }})"
@@ -245,7 +245,7 @@ jobs:
           ccache-prefix:  ccache-data-${{ matrix.root_solution }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.enable_lto != 'NONE' && format('lto-{0}-', inputs.enable_lto) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ github.ref_name }}-
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
-      - name: "Upload Variant Link"  # for channel post agregation
+      - name: "Upload Variant Link"  # for channel post aggregation
         if: inputs.run_mode == 'Release'
         uses: actions/upload-artifact@v7
         with:

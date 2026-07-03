@@ -8,7 +8,6 @@ TELEGRAM_API_TIMEOUT="${TELEGRAM_API_TIMEOUT:-60}"
 TELEGRAM_MAX_RETRIES="${TELEGRAM_MAX_RETRIES:-3}"
 TELEGRAM_MAX_FILE_BYTES=$((50 * 1024 * 1024))
 CAPTION_BUILDER="${LUMINAIRE_PATCH_DIR}/release/telegram/caption.py"
-BANNER_DIR="${LUMINAIRE_PATCH_DIR}/release/telegram"
 
 # Source non-sensitive Telegram config (chat ID, thread IDs, channel ID)
 # shellcheck source=release/telegram/config.sh
@@ -179,7 +178,7 @@ while [ "$attempt" -le "$TELEGRAM_MAX_RETRIES" ]; do
 done
 
 # ------------------------------------------------------
-# Save variant link for channel post agregation
+# Save variant link for channel post aggregation
 # (channel post itself is handled by notify-channel job, Release mode only)
 # ------------------------------------------------------
 if [ "$RUN_MODE_UPPER" = "RELEASE" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then

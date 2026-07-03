@@ -12,10 +12,10 @@ TELEGRAM_CHANNEL="LuminaireGKI"       # public channel username (for t.me links)
 # Repository Event
 TELEGRAM_THREAD_ID_EVENT="4"
 
-# Test Builds — untuk mode Test (flash-test sebelum dinyatakan stable)
+# Test Builds — for Test mode (flash-test before being declared stable)
 TELEGRAM_THREAD_ID_TEST="3"
 
-# Release Builds — untuk mode Release (build stable yang dipublish ke channel)
+# Release Builds — for Release mode (stable build published to the channel)
 TELEGRAM_THREAD_ID_RELEASE="84"
 
 # Telegram Channel

@@ -3,8 +3,8 @@
 # ======================================================
 # 📢 RELEASE — TELEGRAM CHANNEL POST
 # ======================================================
-# Agregasi semua variant links dan kirim 1 foto ke channel.
-# Dipanggil dari job notify-channel setelah semua build selesai.
+# Aggregates all variant links and sends a single photo post to the channel.
+# Called from the notify-channel job after all builds have finished.
 
 CAPTION_BUILDER="${LUMINAIRE_PATCH_DIR}/release/telegram/caption.py"
 BANNER_DIR="${LUMINAIRE_PATCH_DIR}/release/telegram"
