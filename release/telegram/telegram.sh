@@ -12,6 +12,8 @@ CAPTION_BUILDER="${LUMINAIRE_PATCH_DIR}/release/telegram/caption.py"
 # Source non-sensitive Telegram config (chat ID, thread IDs, channel ID)
 # shellcheck source=release/telegram/config.sh
 source "${LUMINAIRE_PATCH_DIR}/release/telegram/config.sh"
+# shellcheck source=release/telegram/common.sh
+source "${LUMINAIRE_PATCH_DIR}/release/telegram/common.sh"
 
 # ------------------------------------------------------
 # Guard clauses
@@ -119,44 +121,15 @@ rm -f "$CAPTION_GROUP_FILE" "$CAPTION_CHANNEL_FILE"
 log "📤 Sending ${ZIP_NAME} to Telegram (${RUN_MODE_UPPER} topic)..."
 
 GROUP_MESSAGE_ID=""
-attempt=1
-while [ "$attempt" -le "$TELEGRAM_MAX_RETRIES" ]; do
-    http_code=$(curl -s -o /tmp/telegram_response.json -w "%{http_code}" \
-        --max-time "$TELEGRAM_API_TIMEOUT" \
-        --retry 0 \
-        -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+if telegram_api_call "sendDocument" /tmp/telegram_response.json "Telegram group send" \
         -F "chat_id=${TELEGRAM_CHAT_ID}" \
         -F "message_thread_id=${TARGET_THREAD_ID}" \
         -F "parse_mode=MarkdownV2" \
         -F "document=@${ZIP_PATH};filename=${ZIP_NAME}" \
-        -F "caption=${CAPTION}" 2>/tmp/telegram_curl_err.log) || http_code="000"
-
-    response=$(cat /tmp/telegram_response.json 2>/dev/null || echo "")
-
-    if [ "$http_code" = "200" ] && echo "$response" | grep -q '"ok":true'; then
-        GROUP_MESSAGE_ID=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['message_id'])" 2>/dev/null || echo "")
-        log "Group topic sent ✅ (message_id=${GROUP_MESSAGE_ID})"
-        break
-    fi
-
-    curl_err=$(cat /tmp/telegram_curl_err.log 2>/dev/null || echo "")
-    case "$http_code" in
-        000|429|500|502|503|504)
-            warn "Telegram group send failed: HTTP ${http_code} — will retry. ${curl_err}"
-            ;;
-        *)
-            warn "Telegram group send FAILED: HTTP ${http_code} (non-retryable). Response: ${response}"
-            break
-            ;;
-    esac
-
-    if [ "$attempt" -lt "$TELEGRAM_MAX_RETRIES" ]; then
-        sleep_secs=$(( 2 ** attempt ))
-        log "⏳ Retrying in ${sleep_secs}s..."
-        sleep "$sleep_secs"
-    fi
-    attempt=$(( attempt + 1 ))
-done
+        -F "caption=${CAPTION}"; then
+    GROUP_MESSAGE_ID=$(echo "$TG_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['message_id'])" 2>/dev/null || echo "")
+    log "Group topic sent ✅ (message_id=${GROUP_MESSAGE_ID})"
+fi
 
 # ------------------------------------------------------
 # Save variant link for channel post aggregation
@@ -181,6 +154,6 @@ if [ "$RUN_MODE_UPPER" = "RELEASE" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then
     fi
 fi
 
-rm -f /tmp/telegram_response.json /tmp/telegram_curl_err.log
+rm -f /tmp/telegram_response.json
 
 return 0

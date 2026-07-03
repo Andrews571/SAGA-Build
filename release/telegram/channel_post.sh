@@ -9,9 +9,16 @@
 CAPTION_BUILDER="${LUMINAIRE_PATCH_DIR}/release/telegram/caption.py"
 BANNER_DIR="${LUMINAIRE_PATCH_DIR}/release/telegram"
 
+# Run standalone (bash release/telegram/channel_post.sh) from notify-channel,
+# unlike telegram.sh which is sourced from build.sh's run_release() — so
+# log/warn/error/retry() aren't in scope until sourced explicitly here.
+# shellcheck source=functions.sh
+source "${LUMINAIRE_PATCH_DIR}/functions.sh"
 # Source non-sensitive Telegram config
 # shellcheck source=release/telegram/config.sh
 source "${LUMINAIRE_PATCH_DIR}/release/telegram/config.sh"
+# shellcheck source=release/telegram/common.sh
+source "${LUMINAIRE_PATCH_DIR}/release/telegram/common.sh"
 
 TELEGRAM_API_TIMEOUT="${TELEGRAM_API_TIMEOUT:-60}"
 TELEGRAM_MAX_RETRIES="${TELEGRAM_MAX_RETRIES:-3}"
@@ -20,11 +27,11 @@ TELEGRAM_MAX_RETRIES="${TELEGRAM_MAX_RETRIES:-3}"
 # Guard clauses
 # ------------------------------------------------------
 if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
-    echo "⚠️ Skipping channel post: TELEGRAM_BOT_TOKEN not set"
+    warn "Skipping channel post: TELEGRAM_BOT_TOKEN not set"
     exit 0
 fi
 if [ -z "${TELEGRAM_CHANNEL_ID:-}" ]; then
-    echo "⚠️ Skipping channel post: TELEGRAM_CHANNEL_ID not set in config.sh"
+    warn "Skipping channel post: TELEGRAM_CHANNEL_ID not set in config.sh"
     exit 0
 fi
 
@@ -41,7 +48,7 @@ for ext in jpg jpeg png; do
 done
 
 if [ -z "$BANNER_PATH" ]; then
-    echo "⚠️ Skipping channel post: no banner found in ${BANNER_DIR}"
+    warn "Skipping channel post: no banner found in ${BANNER_DIR}"
     exit 0
 fi
 
@@ -53,7 +60,7 @@ fi
 LINKS_DIR="${LINKS_DIR:-/tmp/variant-links}"
 
 if [ ! -d "$LINKS_DIR" ]; then
-    echo "⚠️ Skipping channel post: LINKS_DIR not found (${LINKS_DIR})"
+    warn "Skipping channel post: LINKS_DIR not found (${LINKS_DIR})"
     exit 0
 fi
 
@@ -83,12 +90,12 @@ KERNEL_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.
 export LINUX_VER KERNEL_VERSION
 
 if [ "$VARIANT_LINKS_JSON" = "{}" ] || [ -z "$VARIANT_LINKS_JSON" ]; then
-    echo "⚠️ Skipping channel post: no valid variant links found"
+    warn "Skipping channel post: no valid variant links found"
     exit 0
 fi
 
-echo "Variant links: $VARIANT_LINKS_JSON"
-echo "Linux version: $LINUX_VER | Kernel: $KERNEL_VERSION"
+log "Variant links: $VARIANT_LINKS_JSON"
+log "Linux version: $LINUX_VER | Kernel: $KERNEL_VERSION"
 
 
 # ------------------------------------------------------
@@ -108,7 +115,7 @@ GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
 GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
 VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
 python3 "$CAPTION_BUILDER" "$CAPTION_GROUP_DUMMY" "$CAPTION_CHANNEL_FILE" \
-    || { echo "❌ Caption builder failed"; exit 1; }
+    || error "Caption builder failed"
 
 CAPTION_CHANNEL="$(cat "$CAPTION_CHANNEL_FILE")"
 rm -f "$CAPTION_CHANNEL_FILE" "$CAPTION_GROUP_DUMMY"
@@ -116,43 +123,13 @@ rm -f "$CAPTION_CHANNEL_FILE" "$CAPTION_GROUP_DUMMY"
 # ------------------------------------------------------
 # Send photo to channel
 # ------------------------------------------------------
-attempt=1
-while [ "$attempt" -le "$TELEGRAM_MAX_RETRIES" ]; do
-    echo "📸 Sending channel post (attempt ${attempt}/${TELEGRAM_MAX_RETRIES})..."
-
-    http_code=$(curl -s -o /tmp/tg_channel_response.json -w "%{http_code}" \
-        --max-time "$TELEGRAM_API_TIMEOUT" \
-        --retry 0 \
-        -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto" \
+log "📸 Sending channel post..."
+if telegram_api_call "sendPhoto" /tmp/tg_channel_response.json "Channel send" \
         -F "chat_id=${TELEGRAM_CHANNEL_ID}" \
         -F "parse_mode=MarkdownV2" \
         -F "photo=@${BANNER_PATH}" \
-        -F "caption=${CAPTION_CHANNEL}" 2>/tmp/tg_channel_curl_err.log) || http_code="000"
+        -F "caption=${CAPTION_CHANNEL}"; then
+    log "Channel post sent ✅"
+fi
 
-    response=$(cat /tmp/tg_channel_response.json 2>/dev/null || echo "")
-
-    if [ "$http_code" = "200" ] && echo "$response" | grep -q '"ok":true'; then
-        echo "Channel post sent ✅"
-        break
-    fi
-
-    curl_err=$(cat /tmp/tg_channel_curl_err.log 2>/dev/null || echo "")
-    case "$http_code" in
-        000|429|500|502|503|504)
-            echo "⚠️ Channel send failed: HTTP ${http_code} — will retry. ${curl_err}"
-            ;;
-        *)
-            echo "❌ Channel send FAILED: HTTP ${http_code} (non-retryable). Response: ${response}"
-            break
-            ;;
-    esac
-
-    if [ "$attempt" -lt "$TELEGRAM_MAX_RETRIES" ]; then
-        sleep_secs=$(( 2 ** attempt ))
-        echo "⏳ Retrying in ${sleep_secs}s..."
-        sleep "$sleep_secs"
-    fi
-    attempt=$(( attempt + 1 ))
-done
-
-rm -f /tmp/tg_channel_response.json /tmp/tg_channel_curl_err.log
+rm -f /tmp/tg_channel_response.json

@@ -19,8 +19,9 @@ if [ -f "${CCACHE_CACHE_DIR}/ccache" ]; then
     log "ccache-ECS restored ✅ ($(cache_freshness_note))"
 else
     log "Building ccache-ECS from source..."
-    git clone --depth=1 -b ccache-ECS-v1.0 \
-        https://github.com/cctv18/ccache-ECS /tmp/ccache-ECS
+    retry 3 run_quiet git clone --depth=1 -b ccache-ECS-v1.0 \
+        https://github.com/cctv18/ccache-ECS /tmp/ccache-ECS \
+        || error "Failed to clone ccache-ECS! (see output above)"
     cmake -S /tmp/ccache-ECS -B /tmp/ccache-build \
         -GNinja -DCMAKE_BUILD_TYPE=Release \
         -DZSTD_FROM_INTERNET=OFF -DENABLE_TESTING=OFF \
