@@ -31,7 +31,7 @@ on:
       resukisu:
         description: "ReSukiSU"
         type: boolean
-        default: false
+        default: true
       sukisu:
         description: "SukiSU-Ultra"
         type: boolean
@@ -70,7 +70,7 @@ on:
       enable_lto:
         description: "LTO"
         type: choice
-        default: "NONE"
+        default: "THIN"
         options:
           - "NONE"
           - "THIN"
@@ -84,7 +84,7 @@ on:
           - "Test"
           - "Release"
       changelog:
-        description: "Changelog (separate entries with ;)"
+        description: "Changelog on Post"
         type: string
         default: ""
       update_arsenal:
