@@ -54,13 +54,14 @@ KSU_LOCAL_VERSION=$(git -C "$KSU_DIR" rev-list --count HEAD 2>/dev/null || echo 
 KSU_VERSION_CODE=$((30000 + KSU_LOCAL_VERSION + 700))
 KSU_UAPI_VERSION=$(grep -oP 'KERNEL_SU_UAPI_VERSION\s*=\s*\K[0-9]+' "${KSU_DIR}/uapi/supercall.h" 2>/dev/null || echo "")
 
-# branding.py overrides KSU_VERSION_FULL to "$(KSU_TAG_NAME) Luminaire" (not
-# KSU_TAG_NAME itself), so that's what the manager app's version string
-# actually shows — match it here instead of the raw upstream tag.
+# This is KSU's own version info, not Luminaire's — branding.py appends
+# " Luminaire" to KSU_VERSION_FULL for the manager app's display, but that's
+# a separate concern from what version of ReSukiSU is actually running, so
+# the raw upstream tag is used here instead.
 if [ -n "$KSU_UAPI_VERSION" ]; then
-    RESUKISU_VERSION_DISPLAY="${KSU_TAG_NAME} Luminaire (${KSU_VERSION_CODE}/${KSU_UAPI_VERSION})"
+    RESUKISU_VERSION_DISPLAY="${KSU_TAG_NAME} (${KSU_VERSION_CODE}/${KSU_UAPI_VERSION})"
 else
-    RESUKISU_VERSION_DISPLAY="${KSU_TAG_NAME} Luminaire (${KSU_VERSION_CODE})"
+    RESUKISU_VERSION_DISPLAY="${KSU_TAG_NAME} (${KSU_VERSION_CODE})"
 fi
 echo "RESUKISU_VERSION_DISPLAY=${RESUKISU_VERSION_DISPLAY}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
 log "Version: ${RESUKISU_VERSION_DISPLAY}"
