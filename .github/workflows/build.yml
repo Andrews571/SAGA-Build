@@ -95,9 +95,16 @@ on:
           - "yes"
           - "no"
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.kernel_version }}
-  cancel-in-progress: true
+# No workflow-level concurrency lock: each dispatch is left free to run
+# in parallel with others (including same kernel_version), so different
+# variant/LTO/build-system combos can be tried side by side. This is
+# safe for checkpoint/manifest.json — checkpoint/engine.sh already
+# handles concurrent writers via its fetch-rebase-push retry loop
+# (originally built for the matrix jobs within a single run, but it
+# doesn't care whether the writer is from this run or another one).
+# ccache-ECS is a remote cache, also fine under concurrent access.
+# Re-add a `concurrency:` block here if runner-minute usage or GH API
+# rate limits from many simultaneous runs become a real problem.
 
 env:
   DEBIAN_FRONTEND: noninteractive
