@@ -24,8 +24,8 @@ on:
           - "6.1"
           - "6.6"
           - "6.12"
-      vanilla:
-        description: "Vanilla"
+      ksu_next:
+        description: "KernelSU-Next"
         type: boolean
         default: true
       resukisu:
@@ -35,11 +35,11 @@ on:
       sukisu:
         description: "SukiSU-Ultra"
         type: boolean
-        default: false
-      ksu_next:
-        description: "KernelSU-Next"
+        default: true
+      vanilla:
+        description: "Vanilla"
         type: boolean
-        default: false
+        default: true
       susfs:
         description: "SuSFS"
         type: choice
