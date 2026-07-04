@@ -105,6 +105,11 @@ Still pinned to the last known-good commit — no action needed unless you want 
     if [ -n "$existing" ] && [ "$existing" != "null" ]; then
         gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body" || warn "file_issue: couldn't comment on existing issue #${existing}"
     else
+        # gh issue create fails outright (no issue at all) if the label
+        # doesn't already exist in the repo — create it first, idempotently.
+        gh label create "upstream-broken" --repo "$GITHUB_REPOSITORY" \
+            --color "d73a4a" --description "Auto-filed: an upstream pin candidate failed to build" \
+            2>/dev/null || true
         gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label "upstream-broken" || warn "file_issue: couldn't create issue for ${key}"
     fi
 }
