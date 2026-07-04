@@ -24,10 +24,10 @@ def main():
     new2 = 'KSU_VERSION_TAG_FALLBACK := v0.0.1 Luminaire'
 
     old3 = "ccflags-y += -DKSU_VERSION_TAG=\\\"$(KSU_VERSION_TAG)\\\""
-    new3 = "ccflags-y += -DKSU_VERSION_TAG='\\\"$(KSU_VERSION_TAG)\\\"'"
+    new3 = "ccflags-y += -DKSU_VERSION_TAG='\"$(KSU_VERSION_TAG)\"'"
 
     old4 = "ccflags-y += -DKSU_VERSION_TAG=\\\"$(KSU_VERSION_TAG_FALLBACK)\\\""
-    new4 = "ccflags-y += -DKSU_VERSION_TAG='\\\"$(KSU_VERSION_TAG_FALLBACK)\\\"'"
+    new4 = "ccflags-y += -DKSU_VERSION_TAG='\"$(KSU_VERSION_TAG_FALLBACK)\"'"
 
     if 'KSU_GIT_TAG) Luminaire' in content:
         print("Branding already applied, skipping.")
@@ -60,4 +60,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
+    
