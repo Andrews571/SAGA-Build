@@ -56,6 +56,46 @@ python3 "${PATCHER_DIR}/branding.py" "${KSU_DIR}/kernel/Kbuild" \
 log "Branding applied ✅"
 
 # ======================================================
+# 2b. Version string (for Telegram caption)
+# ======================================================
+# Official KernelSU-Next's Kbuild: KSU_VERSION = 30000 + rev-list --count
+# HEAD, KSU_VERSION_TAG = `git describe --tags --abbrev=0` at HEAD (fallback
+# v0.0.1). Simple and purely local, like ReSukiSU's formula.
+#
+# pershoot/KernelSU-Next's dev-susfs fork (used when SUSFS_ENABLED) computes
+# both from a BASE_COMMIT instead of raw HEAD — the merge-base between HEAD
+# and origin/<branch-with-suffix-stripped> (falls back to origin/main, then
+# HEAD itself) — so fork-specific commits on top of upstream don't inflate
+# the version number. Replicated here rather than simplified to raw HEAD,
+# since that would give a different number than what's actually compiled.
+# This fork is flagged not-production-ready upstream (see section 1's
+# comment), so treat this version string as unverified until a real build
+# confirms it.
+
+if [ "${SUSFS_ENABLED:-false}" = "true" ]; then
+    KSUNEXT_CUR_BRANCH=$(git -C "$KSU_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD")
+    KSUNEXT_BASE_BRANCH="${KSUNEXT_CUR_BRANCH%%-*}"
+    KSUNEXT_BASE_COMMIT=$(git -C "$KSU_DIR" merge-base HEAD "refs/remotes/origin/${KSUNEXT_BASE_BRANCH}" 2>/dev/null \
+        || git -C "$KSU_DIR" merge-base HEAD refs/remotes/origin/main 2>/dev/null \
+        || echo HEAD)
+else
+    KSUNEXT_BASE_COMMIT="HEAD"
+fi
+
+KSU_LOCAL_VERSION=$(git -C "$KSU_DIR" rev-list --count "$KSUNEXT_BASE_COMMIT" 2>/dev/null || echo 0)
+KSU_VERSION_CODE=$((30000 + KSU_LOCAL_VERSION))
+KSU_TAG_NAME=$(git -C "$KSU_DIR" describe --tags --abbrev=0 "$KSUNEXT_BASE_COMMIT" 2>/dev/null || echo "v0.0.1")
+KSU_UAPI_VERSION=$(grep -oP 'KERNEL_SU_UAPI_VERSION\s*=\s*\K[0-9]+' "${KSU_DIR}/uapi/supercall.h" 2>/dev/null || echo "")
+
+if [ -n "$KSU_UAPI_VERSION" ]; then
+    KSUNEXT_VERSION_DISPLAY="${KSU_TAG_NAME} (${KSU_VERSION_CODE}/${KSU_UAPI_VERSION})"
+else
+    KSUNEXT_VERSION_DISPLAY="${KSU_TAG_NAME} (${KSU_VERSION_CODE})"
+fi
+echo "KSUNEXT_VERSION_DISPLAY=${KSUNEXT_VERSION_DISPLAY}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+log "Version: ${KSUNEXT_VERSION_DISPLAY}"
+
+# ======================================================
 # 3. Kconfig
 # ======================================================
 # No CONFIG_KPM here — KernelPatch is a SukiSU-Ultra/ReSukiSU feature,

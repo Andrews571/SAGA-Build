@@ -78,13 +78,15 @@ case "${KERNEL_VARIANT}" in
     *)        KERNEL_VARIANT_DISPLAY="${KERNEL_VARIANT}" ;;
 esac
 
-# Only ReSukiSU has a resolved version string right now (see
-# resukisu.sh's "Version string" step) — other forks don't compute one
-# yet, so this stays empty for them and the caption just omits it.
+# Each fork resolves its own version string in its integration script
+# (resukisu.sh / sukisu.sh / ksunext.sh, "Version string" step) and exports
+# it via $GITHUB_ENV — pick the one matching this build's fork.
 KERNEL_VARIANT_VERSION=""
-if [ "${KERNEL_VARIANT}" = "RESUKISU" ]; then
-    KERNEL_VARIANT_VERSION="${RESUKISU_VERSION_DISPLAY:-}"
-fi
+case "${KERNEL_VARIANT}" in
+    RESUKISU) KERNEL_VARIANT_VERSION="${RESUKISU_VERSION_DISPLAY:-}" ;;
+    SUKISU)   KERNEL_VARIANT_VERSION="${SUKISU_VERSION_DISPLAY:-}" ;;
+    KSUNEXT)  KERNEL_VARIANT_VERSION="${KSUNEXT_VERSION_DISPLAY:-}" ;;
+esac
 
 SUSFS_VER="N/A"
 if [ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ]; then

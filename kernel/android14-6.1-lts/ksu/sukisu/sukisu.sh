@@ -53,6 +53,54 @@ python3 "${PATCHER_DIR}/branding.py" "$BRANDING_TARGET" \
 log "Branding applied ✅"
 
 # ======================================================
+# 2b. Version string (for Telegram caption)
+# ======================================================
+# Mirrors SukiSU-Ultra's own Kbuild/Makefile formula exactly — this one is
+# NOT purely local like ReSukiSU/KernelSU-Next: SukiSU-Ultra's own build
+# prefers a *live* GitHub API commit count over the local git history
+# (LOCAL_COUNT := GITHUB_COMMITS if reachable, else local `rev-list --count
+# main`), so the compiled version code can differ from what plain local git
+# history would say. Replicated here (not simplified) so our displayed
+# number actually matches what's compiled in. Same VERSION_BASE/OFFSET and
+# GITHUB_COMMITS logic apply on both main and builtin branches (checked
+# against both upstream Kbuild/Makefile) — only the default fallback tag
+# differs (4.1.3 vs 4.1.2).
+
+SUKISU_SHA=$(git -C "$KSU_DIR" rev-parse --short=8 HEAD 2>/dev/null)
+SUKISU_BRANCH=$(git -C "$KSU_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)
+SUKISU_GIT_COMMIT_COUNT=$(git -C "$KSU_DIR" rev-list --count main 2>/dev/null || echo "")
+SUKISU_GITHUB_COMMITS=$(curl -sI --connect-timeout 10 --max-time 15 \
+    "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/commits?sha=main&per_page=1" 2>/dev/null \
+    | grep -i "link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p')
+SUKISU_LOCAL_COUNT="${SUKISU_GITHUB_COMMITS:-$SUKISU_GIT_COMMIT_COUNT}"
+if [ -n "$SUKISU_LOCAL_COUNT" ]; then
+    KSU_VERSION_CODE=$((40000 + SUKISU_LOCAL_COUNT - 2815))
+else
+    KSU_VERSION_CODE=13000
+fi
+
+SUKISU_GIT_LATEST_TAG=$(git -C "$KSU_DIR" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+SUKISU_GITHUB_VER=$(curl -s --connect-timeout 10 --max-time 15 \
+    "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest" 2>/dev/null \
+    | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
+if [ "${SUSFS_ENABLED:-false}" = "true" ]; then
+    SUKISU_DEFAULT_TAG="4.1.2"
+else
+    SUKISU_DEFAULT_TAG="4.1.3"
+fi
+KSU_TAG_NAME="v${SUKISU_GITHUB_VER:-${SUKISU_GIT_LATEST_TAG:-$SUKISU_DEFAULT_TAG}}"
+
+KSU_UAPI_VERSION=$(grep -oP 'KERNEL_SU_UAPI_VERSION\s*=\s*\K[0-9]+' "${KSU_DIR}/uapi/supercall.h" 2>/dev/null || echo "")
+
+if [ -n "$KSU_UAPI_VERSION" ]; then
+    SUKISU_VERSION_DISPLAY="${KSU_TAG_NAME} (${KSU_VERSION_CODE}/${KSU_UAPI_VERSION})"
+else
+    SUKISU_VERSION_DISPLAY="${KSU_TAG_NAME} (${KSU_VERSION_CODE})"
+fi
+echo "SUKISU_VERSION_DISPLAY=${SUKISU_VERSION_DISPLAY}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+log "Version: ${SUKISU_VERSION_DISPLAY}"
+
+# ======================================================
 # 3. Kconfig
 # ======================================================
 
