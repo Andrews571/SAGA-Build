@@ -45,14 +45,13 @@ fi
 git config --global user.name  "luminaire-bot"
 git config --global user.email "luminaire-bot@users.noreply.github.com"
 
-# Real fix for the github-actions[bot]/403 push failure lives in build.yml's
-# Start-Build checkout step (persist-credentials: false), not here. A
-# previous attempt tried `git config --unset-all
-# http.https://github.com/.extraheader` at this point, but actions/checkout
-# v6+ no longer writes that key into this repo's local .git/config — it's
-# persisted via a global `includeIf.gitdir` pointing at a separate file
-# under $RUNNER_TEMP, so there was nothing here to unset and the override
-# kept winning silently. Confirmed against actions/checkout's own v6
+# The github-actions[bot]/403 push failure is fixed in build.yml's
+# Start-Build checkout step (persist-credentials: false), not here.
+# actions/checkout v6+ persists its injected auth header via a global
+# `includeIf.gitdir` config pointing at a file under $RUNNER_TEMP, rather
+# than this repo's local .git/config — so an unset targeting
+# http.https://github.com/.extraheader here has no effect; the fix has
+# to happen at the checkout step itself. See actions/checkout's v6
 # changelog/issue tracker (PR "Persist creds to a separate file").
 REMOTE="https://x-access-token:${PERSONAL_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 

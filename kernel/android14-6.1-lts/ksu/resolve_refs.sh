@@ -35,15 +35,12 @@ latest_sha_or_empty() {
     local body_file http_code curl_exit sha auth_args=()
 
     # GH_API_AUTH is a GitHub PAT — only attach it for api.github.com calls.
-    # Previously this was attached unconditionally, including to the SuSFS
-    # lookup against gitlab.com: sending a GitHub token as a GitLab
-    # Authorization: Bearer header is a foreign/invalid credential from
-    # GitLab's point of view, which very plausibly gets rejected fast
-    # (matches the ~300ms, consistent-every-run failures actually observed
-    # in CI — not the profile of a timeout or random rate-limit). Scoping
-    # the header to its actual target either confirms or rules this out;
-    # the http_code/curl_exit logging below gives real evidence either way
-    # instead of guessing again.
+    # Sending it to a non-GitHub target like gitlab.com (e.g. the SuSFS
+    # lookup) is a foreign/invalid Authorization header from GitLab's point
+    # of view, which it rejects quickly (~300ms, consistent every run —
+    # not the profile of a timeout or rate-limit). Scoping the header to
+    # its actual target avoids this; the http_code/curl_exit logging below
+    # gives concrete evidence if a lookup ever fails again.
     case "$url" in
         https://api.github.com/*) auth_args=("${GH_API_AUTH[@]}") ;;
     esac
