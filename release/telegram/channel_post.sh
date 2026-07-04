@@ -103,6 +103,42 @@ fi
 log "Variant links: $VARIANT_LINKS_JSON"
 log "Linux version: $LINUX_VER | Kernel: $KERNEL_VERSION"
 
+# ------------------------------------------------------
+# Diff: variants selected for this run vs. variants that actually
+# produced a download link. A matrix job can fail (e.g. SUKISU with no
+# promoted checkpoint pin yet — see checkpoint/scout.sh) while others in
+# the same run succeed (fail-fast: false), and this job intentionally
+# still posts for the ones that made it (see build.yml's `always()` on
+# this job). Without this diff, a stale manual CHANGELOG entry mentioning
+# the failed variant would be the only trace of the mismatch — silent
+# both in the post and to whoever wrote the changelog text.
+# ------------------------------------------------------
+MISSING_VARIANTS_JSON=$(python3 -c "
+import json, os
+matrix_json = os.environ.get('EXPECTED_MATRIX_JSON', '')
+links = json.loads('''$VARIANT_LINKS_JSON''')
+missing = []
+if matrix_json:
+    try:
+        matrix = json.loads(matrix_json)
+        for entry in matrix.get('include', []):
+            variant = entry.get('kernel_variant', '')
+            susfs = entry.get('susfs', False)
+            key = variant
+            if susfs and variant != 'VANILLA':
+                key = f'{variant}_SUSFS'
+            if key and key not in links:
+                missing.append(key)
+    except Exception as e:
+        print(f'[warn] {e}', file=__import__('sys').stderr)
+print(json.dumps(missing))
+")
+export MISSING_VARIANTS_JSON
+
+if [ "$MISSING_VARIANTS_JSON" != "[]" ]; then
+    warn "Variants selected but missing a link (build likely failed): ${MISSING_VARIANTS_JSON}"
+fi
+
 
 # ------------------------------------------------------
 # Build channel caption
@@ -121,6 +157,7 @@ GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
 GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
 VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
 VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
+MISSING_VARIANTS_JSON="$MISSING_VARIANTS_JSON" \
 python3 "$CAPTION_BUILDER" "$CAPTION_GROUP_DUMMY" "$CAPTION_CHANNEL_FILE" \
     || error "Caption builder failed"
 

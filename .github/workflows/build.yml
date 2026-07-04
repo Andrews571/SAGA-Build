@@ -356,6 +356,13 @@ jobs:
           KERNEL_VERSION:      ${{ inputs.kernel_version }}
           ADDONS:              ${{ needs.prepare-matrix.outputs.addons }}
           CHANGELOG:           ${{ inputs.changelog }}
+          # Lets channel_post.sh diff "variants selected for this run" against
+          # "variants that actually produced a download link", so a matrix
+          # job that failed (e.g. SUKISU with no promoted pin yet) surfaces
+          # as an explicit warning in the post instead of silently vanishing
+          # from the Download list while a stale manual changelog entry still
+          # claims it shipped.
+          EXPECTED_MATRIX_JSON: ${{ needs.prepare-matrix.outputs.matrix }}
           GITHUB_SHA:          ${{ github.sha }}
           GITHUB_SERVER_URL:   ${{ github.server_url }}
           GITHUB_REPOSITORY:   ${{ github.repository }}
