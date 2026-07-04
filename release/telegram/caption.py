@@ -198,25 +198,15 @@ def build_channel_caption(env, variant_links, variant_versions=None):
     sections.append("\n".join(download_lines))
 
     # Changelog — manual input, optional, capped so it can't crowd out the
-    # rest of the caption if someone pastes something huge
+    # rest of the caption if someone pastes something huge. Rendered as a
+    # code block, same style as the group caption's Root-solution/Add-ons
+    # blocks, instead of plain bold text.
     changelog_raw = env.get("CHANGELOG", "").strip()
     if changelog_raw:
         entries = [e.strip() for e in changelog_raw.split(";") if e.strip()]
-        changelog_lines = ["*Changelog*"]
-        for entry in entries:
-            changelog_lines.append(f"\\- {mdv2_escape(entry)}")
-        changelog_block = "\n".join(changelog_lines)
-        if utf16_len(changelog_block) > CHANGELOG_MAX_LEN:
-            trimmed = []
-            length = 0
-            ellipsis = "\u2026"
-            for ch in changelog_block:
-                ch_len = 2 if ord(ch) > 0xFFFF else 1
-                if length + ch_len + utf16_len(ellipsis) > CHANGELOG_MAX_LEN:
-                    break
-                trimmed.append(ch)
-                length += ch_len
-            changelog_block = "".join(trimmed) + ellipsis
+        changelog_body = "\n".join(f"- {mdv2_code_escape(entry)}" for entry in entries)
+        changelog_block = "```Changelog\n" + changelog_body + "```"
+        changelog_block = truncate(changelog_block, CHANGELOG_MAX_LEN)
         sections.append(changelog_block)
 
     # Traceability — commit + workflow run that produced this post
@@ -249,7 +239,7 @@ def build_channel_caption(env, variant_links, variant_versions=None):
     sections.append("\\#GKI \\#Kernel \\#Luminaire")
 
     caption = "\n\n".join(sections)
-    return truncate(caption, CAPTION_LIMIT, suffix="\n\u2026")
+    return truncate(caption, CAPTION_LIMIT)
 
 
 
