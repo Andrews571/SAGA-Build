@@ -64,11 +64,13 @@ if [ ! -d "$LINKS_DIR" ]; then
     exit 0
 fi
 
-# Parse all variant JSON files — extract links, linux_ver, kernel_version
+# Parse all variant JSON files — extract links, linux_ver, kernel_version,
+# and (where present) ksu_version per variant
 LINKS_PARSED=$(python3 -c "
 import json, glob, sys
 links_dir = '${LINKS_DIR}'
 result = {}
+versions = {}
 linux_ver = ''
 kernel_version = ''
 for f in sorted(glob.glob(links_dir + '/*.json')):
@@ -77,14 +79,18 @@ for f in sorted(glob.glob(links_dir + '/*.json')):
         v = data.get('variant',''); l = data.get('link','')
         if v and l:
             result[v] = l
+        kv = data.get('ksu_version','')
+        if v and kv:
+            versions[v] = kv
         if not linux_ver: linux_ver = data.get('linux_ver','')
         if not kernel_version: kernel_version = data.get('kernel_version','')
     except Exception as e:
         print('[warn] ' + str(e), file=sys.stderr)
-print(json.dumps({'links':result,'linux_ver':linux_ver,'kernel_version':kernel_version}))
+print(json.dumps({'links':result,'versions':versions,'linux_ver':linux_ver,'kernel_version':kernel_version}))
 ")
 
 VARIANT_LINKS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['links']))")
+VARIANT_VERSIONS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['versions']))")
 LINUX_VER=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['linux_ver'])")
 KERNEL_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['kernel_version'])")
 export LINUX_VER KERNEL_VERSION
@@ -114,6 +120,7 @@ GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
 GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
 VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
+VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
 python3 "$CAPTION_BUILDER" "$CAPTION_GROUP_DUMMY" "$CAPTION_CHANNEL_FILE" \
     || error "Caption builder failed"
 

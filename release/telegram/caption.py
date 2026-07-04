@@ -130,6 +130,9 @@ def build_blocks(env):
     )
     is_vanilla = env.get("ROOT_SOLUTION", "").upper() == "VANILLA"
     ksu_display = "N/A" if is_vanilla else root_solution
+    ksu_version = mdv2_code_escape(env.get("ROOT_SOLUTION_VERSION", ""))
+    if not is_vanilla and ksu_version:
+        ksu_display = f"{ksu_display} - {ksu_version}"
     root_lines = [f"KSU   : {ksu_display}", f"SuSFS : {susfs_ver}"]
     if is_vanilla:
         root_lines.append("Vanilla Build")
@@ -153,11 +156,15 @@ def build_blocks(env):
 CHANGELOG_MAX_LEN = 300
 
 
-def build_channel_caption(env, variant_links):
+def build_channel_caption(env, variant_links, variant_versions=None):
     """
     variant_links: dict { "VANILLA": "https://t.me/c/...", "RESUKISU_SUSFS": "...", ... }
-    Only variants present in the dict will be listed.
+    variant_versions: dict { "RESUKISU": "v4.1.0 Luminaire (35002/2)", ... } — optional,
+    only forks with a resolved version string (see resukisu.sh) have an entry.
+    Only variants present in variant_links will be listed.
     """
+    if variant_versions is None:
+        variant_versions = {}
     kernel_ver  = env.get("KERNEL_VERSION", "")
     linux_ver   = env.get("LINUX_VER", "N/A")
     android_ver = KERNEL_VERSION_TO_ANDROID.get(kernel_ver, "?")
@@ -183,6 +190,9 @@ def build_channel_caption(env, variant_links):
     download_lines = ["*Download*"]
     for variant_key, link in variant_links.items():
         display = VARIANT_DISPLAY.get(variant_key, mdv2_escape(variant_key))
+        version = variant_versions.get(variant_key, "")
+        if version:
+            display = f"{display} \\- {mdv2_escape(version)}"
         safe_link = mdv2_escape_url(link)
         download_lines.append(f"• [{display}]({safe_link})")
     sections.append("\n".join(download_lines))
@@ -260,7 +270,14 @@ def main():
         variant_links = json.loads(variant_links_json) if variant_links_json else {}
     except Exception:
         variant_links = {}
-    caption_channel = build_channel_caption(env, variant_links)
+
+    variant_versions_json = env.get("VARIANT_VERSIONS_JSON", "")
+    try:
+        variant_versions = json.loads(variant_versions_json) if variant_versions_json else {}
+    except Exception:
+        variant_versions = {}
+
+    caption_channel = build_channel_caption(env, variant_links, variant_versions)
 
     with open(out_group, "w") as f:
         f.write(caption_group)

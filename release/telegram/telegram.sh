@@ -78,6 +78,14 @@ case "${ROOT_SOLUTION}" in
     *)        ROOT_SOLUTION_DISPLAY="${ROOT_SOLUTION}" ;;
 esac
 
+# Only ReSukiSU has a resolved version string right now (see
+# resukisu.sh's "Version string" step) — other forks don't compute one
+# yet, so this stays empty for them and the caption just omits it.
+ROOT_SOLUTION_VERSION=""
+if [ "${ROOT_SOLUTION}" = "RESUKISU" ]; then
+    ROOT_SOLUTION_VERSION="${RESUKISU_VERSION_DISPLAY:-}"
+fi
+
 SUSFS_VER="N/A"
 if [ "$SUSFS_ENABLED" = "true" ] && [ "$ROOT_SOLUTION" != "VANILLA" ]; then
     SUSFS_H="${KERNEL_SRC}/include/linux/susfs.h"
@@ -104,6 +112,7 @@ COMPILER_STRING="${COMPILER_STRING:-N/A}" \
 ENABLE_LTO="${ENABLE_LTO:-NONE}" \
 ROOT_SOLUTION="${ROOT_SOLUTION:-}" \
 ROOT_SOLUTION_DISPLAY="$ROOT_SOLUTION_DISPLAY" \
+ROOT_SOLUTION_VERSION="$ROOT_SOLUTION_VERSION" \
 SUSFS_VER="$SUSFS_VER" \
 ADDONS="${ADDONS:-}" \
 GITHUB_SHA="${GITHUB_SHA:-}" \
@@ -150,7 +159,7 @@ if [ "$RUN_MODE_UPPER" = "RELEASE" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then
         LINKS_DIR="${GITHUB_WORKSPACE}/variant-links"
         mkdir -p "$LINKS_DIR"
         LINK_FILE="${LINKS_DIR}/${VARIANT_KEY}.json"
-        echo "{\"variant\":\"${VARIANT_KEY}\",\"link\":\"${GROUP_MSG_LINK}\",\"linux_ver\":\"${LINUX_VER}\",\"kernel_version\":\"${KERNEL_VERSION}\"}" > "${LINK_FILE}"
+        echo "{\"variant\":\"${VARIANT_KEY}\",\"link\":\"${GROUP_MSG_LINK}\",\"linux_ver\":\"${LINUX_VER}\",\"kernel_version\":\"${KERNEL_VERSION}\",\"ksu_version\":\"${ROOT_SOLUTION_VERSION}\"}" > "${LINK_FILE}"
         log "Variant link saved → ${LINK_FILE} ✅"
     fi
 fi

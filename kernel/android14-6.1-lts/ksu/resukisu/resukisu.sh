@@ -39,6 +39,33 @@ python3 "${PATCHER_DIR}/branding.py" "${KSU_DIR}/kernel/Kbuild" \
 log "Branding applied ✅"
 
 # ======================================================
+# 2b. Version string (for Telegram caption)
+# ======================================================
+# Mirrors the exact values ReSukiSU's own Kbuild computes at kernel-build
+# time (kernel/Kbuild: KSU_TAG_NAME via `git describe`, KSU_VERSION via
+# 30000 + commit-count + 700) plus the UAPI protocol version the manager
+# app displays alongside them (uapi/supercall.h: KERNEL_SU_UAPI_VERSION,
+# a fixed constant, not a runtime/device value). Recomputed here rather
+# than parsed out of the Kbuild file, since Kbuild only holds the shell
+# formula, not the resolved value.
+
+KSU_TAG_NAME=$(git -C "$KSU_DIR" describe --abbrev=0 --tags 2>/dev/null || echo "v4.1.0")
+KSU_LOCAL_VERSION=$(git -C "$KSU_DIR" rev-list --count HEAD 2>/dev/null || echo 0)
+KSU_VERSION_CODE=$((30000 + KSU_LOCAL_VERSION + 700))
+KSU_UAPI_VERSION=$(grep -oP 'KERNEL_SU_UAPI_VERSION\s*=\s*\K[0-9]+' "${KSU_DIR}/uapi/supercall.h" 2>/dev/null || echo "")
+
+# branding.py overrides KSU_VERSION_FULL to "$(KSU_TAG_NAME) Luminaire" (not
+# KSU_TAG_NAME itself), so that's what the manager app's version string
+# actually shows — match it here instead of the raw upstream tag.
+if [ -n "$KSU_UAPI_VERSION" ]; then
+    RESUKISU_VERSION_DISPLAY="${KSU_TAG_NAME} Luminaire (${KSU_VERSION_CODE}/${KSU_UAPI_VERSION})"
+else
+    RESUKISU_VERSION_DISPLAY="${KSU_TAG_NAME} Luminaire (${KSU_VERSION_CODE})"
+fi
+echo "RESUKISU_VERSION_DISPLAY=${RESUKISU_VERSION_DISPLAY}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+log "Version: ${RESUKISU_VERSION_DISPLAY}"
+
+# ======================================================
 # 3. Multi-Manager
 # ======================================================
 
