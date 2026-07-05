@@ -7,8 +7,10 @@
 # Patch source: https://github.com/Enginex0/Super-Builders
 # Note: self-contained patch (creates fs/zeromount.c,
 #       include/linux/zeromount.h, Kconfig + Makefile wiring).
-#       readdir.c hunk is stripped before apply — handled
-#       exclusively by inject_readdir.py for all variants.
+#       readdir.c and namei.c hunks are stripped before apply —
+#       both are diffed against a SuSFS-patched baseline (mis-apply
+#       on VANILLA/non-SuSFS trees) and are handled exclusively by
+#       inject_readdir.py / inject_namei.py for all variants instead.
 
 ZEROMOUNT_PATCH_URL="https://raw.githubusercontent.com/Enginex0/Super-Builders/main/android14-6.1/ReSukiSU/patches/60_zeromount-android14-6.1.patch"
 ZEROMOUNT_PATCH="/tmp/60_zeromount-android14-6.1.patch"
@@ -22,6 +24,10 @@ log "Stripping readdir.c hunk from patch..."
 python3 "${PATCHER_DIR}/strip_readdir_hunk.py" "$ZEROMOUNT_PATCH" \
     || { warn "ZeroMount: strip_readdir_hunk failed — skipping"; rm -f "$ZEROMOUNT_PATCH"; return 0; }
 
+log "Stripping namei.c hunks from patch..."
+python3 "${PATCHER_DIR}/strip_namei_hunk.py" "$ZEROMOUNT_PATCH" \
+    || { warn "ZeroMount: strip_namei_hunk failed — skipping"; rm -f "$ZEROMOUNT_PATCH"; return 0; }
+
 log "Applying ZeroMount kernel patch..."
 if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$ZEROMOUNT_PATCH" > /dev/null 2>&1; then
     log "ZeroMount patch already applied, skipping."
@@ -34,17 +40,10 @@ fi
 
 rm -f "$ZEROMOUNT_PATCH"
 
-# Guard: verify zeromount was actually injected before running fix scripts.
-if ! grep -qF "zeromount" "${KERNEL_SRC}/fs/namei.c"; then
-    warn "ZeroMount: no zeromount markers found in namei.c — patch may have failed entirely, skipping fix scripts"
-    warn "ZeroMount integration incomplete — kernel will build without ZeroMount"
-    return 0
-fi
-
-log "Fixing namei.c scope issues (zeromount blocks in wrong positions)..."
-python3 "${PATCHER_DIR}/fix_namei.py" "${KERNEL_SRC}/fs/namei.c" \
-    || error "ZeroMount: namei.c fix failed!"
-log "namei.c fixed ✅"
+log "Injecting ZeroMount hooks into namei.c (include, getname hook, permission checks)..."
+python3 "${PATCHER_DIR}/inject_namei.py" "${KERNEL_SRC}/fs/namei.c" \
+    || error "ZeroMount: namei.c injection failed!"
+log "namei.c injected ✅"
 
 log "Fixing task_mmu.c scope issue (zeromount call outside inode scope)..."
 python3 "${PATCHER_DIR}/fix_taskmmu.py" "${KERNEL_SRC}/fs/proc/task_mmu.c" \
