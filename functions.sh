@@ -40,6 +40,19 @@ run_quiet() {
     return "$rc"
 }
 
+# Writes a placeholder file at the path a real kernel Image would occupy,
+# so release/anykernel.sh's packaging step (and everything downstream of
+# it — Telegram notify, checkpoint promotion) can be exercised without
+# actually compiling. Used by build/make.sh and build/kleaf.sh when
+# DRY_RUN=true. Never called for RUN_MODE=Warming or Release — build.sh
+# rejects that combination before reaching here.
+write_dry_run_image() {
+    local path="$1"
+    mkdir -p "$(dirname "$path")"
+    echo "Luminaire Protocol — dry-run placeholder, not a real kernel image" > "$path"
+    log "🧪 DRY RUN — wrote placeholder image to ${path} (compile skipped)"
+}
+
 # Maps KERNEL_VERSION (e.g. "6.1") to its ANDROID_VERSION branch prefix
 # (e.g. "android14"). Shared by build.sh and arsenal.sh so the version
 # table only needs updating in one place when a new kernel is added.

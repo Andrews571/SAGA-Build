@@ -98,13 +98,18 @@ done
 log "Building kernel with Kleaf (Bazel)..."
 START_TIME=$(date +%s)
 
-cd "$KERNEL_DIR"
-tools/bazel build "${KLEAF_ARGS[@]}" //common:kernel_aarch64 \
-    || error "Kleaf build failed!"
-cd "$ROOT_DIR"
+if [ "${DRY_RUN:-false}" = "true" ]; then
+    write_dry_run_image "${KLEAF_OUT_DIR}/Image"
+    BUILD_SECONDS=0
+else
+    cd "$KERNEL_DIR"
+    tools/bazel build "${KLEAF_ARGS[@]}" //common:kernel_aarch64 \
+        || error "Kleaf build failed!"
+    cd "$ROOT_DIR"
 
-BUILD_SECONDS=$(( $(date +%s) - START_TIME ))
-log "Kleaf build completed in ${BUILD_SECONDS}s ✅"
+    BUILD_SECONDS=$(( $(date +%s) - START_TIME ))
+    log "Kleaf build completed in ${BUILD_SECONDS}s ✅"
+fi
 echo "BUILD_SECONDS=${BUILD_SECONDS}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
 
 log "Detecting AOSP Clang version used by Kleaf..."

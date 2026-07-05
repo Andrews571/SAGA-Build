@@ -256,6 +256,8 @@ def main():
     block_luminaire, block_root, block_addons, footer = build_blocks(env)
 
     caption_group = "\n".join([block_luminaire, block_root, block_addons, footer])
+    if env.get("DRY_RUN", "false").lower() == "true":
+        caption_group = "⚠️ *DRY RUN — placeholder file, not a real kernel* ⚠️\n\n" + caption_group
     caption_group = truncate(caption_group, CAPTION_LIMIT)
 
     # Channel caption — built from VARIANT_LINKS_JSON (provided by channel_post.sh)

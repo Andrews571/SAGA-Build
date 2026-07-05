@@ -72,11 +72,16 @@ done
 # CCACHE_IS_KERNEL_COMPILING=true and content-hash validation.
 CC_ARG="${TOOL_CCACHE_WRAPPERS}/clang"
 
-log "Building kernel..."
-START_TIME=$(date +%s)
+if [ "${DRY_RUN:-false}" = "true" ]; then
+    write_dry_run_image "${OUT_DIR}/arch/${ARCH}/boot/Image"
+    BUILD_SECONDS=0
+else
+    log "Building kernel..."
+    START_TIME=$(date +%s)
 
-make "${MAKE_ARGS[@]}" CC="$CC_ARG" || error "Build failed!"
+    make "${MAKE_ARGS[@]}" CC="$CC_ARG" || error "Build failed!"
 
-BUILD_SECONDS=$(( $(date +%s) - START_TIME ))
-log "Build completed in ${BUILD_SECONDS}s ✅"
+    BUILD_SECONDS=$(( $(date +%s) - START_TIME ))
+    log "Build completed in ${BUILD_SECONDS}s ✅"
+fi
 echo "BUILD_SECONDS=${BUILD_SECONDS}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
