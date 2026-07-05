@@ -11,6 +11,15 @@
 #   differs from the pin and isn't already known-bad, that becomes the
 #   candidate for this run — and checkpoint/engine.sh decides after
 #   the build whether to promote it or blacklist it.
+# - Exception (deadlock-breaking retest): if no good pin exists yet AND
+#   the latest upstream commit is already blacklisted, there is no known-
+#   good ref to fall back to at all. Falling back to an empty ref there
+#   would just make build scripts silently default to cloning upstream's
+#   branch HEAD anyway (the very commit that's blacklisted) without ever
+#   tracking it as a candidate — a permanent deadlock where Release mode
+#   can never pass no matter how many Warming/Test runs succeed. In that
+#   specific case only, the blacklisted ref is retried as a last-resort
+#   candidate so a real build outcome can promote or re-blacklist it.
 #
 # Exports (via $GITHUB_ENV) for each relevant component:
 #   <COMPONENT>_REF        — the SHA to actually build against
@@ -93,8 +102,30 @@ resolve_component() {
     else
         is_bad=$(echo "$bad_list" | jq --arg sha "$latest" 'any(. == $sha)')
         if [ "$is_bad" = "true" ]; then
-            ref="$good"; candidate="false"
-            warn "${prefix}: latest upstream ${latest:0:12} is known-bad — falling back to pinned ${good:0:12}"
+            if [ -n "$good" ]; then
+                ref="$good"; candidate="false"
+                warn "${prefix}: latest upstream ${latest:0:12} is known-bad — falling back to pinned ${good:0:12}"
+            else
+                # Deadlock case: no good pin exists yet AND the only ref
+                # upstream has ever offered is already blacklisted. Without
+                # this branch, ref falls back to the empty "$good" forever —
+                # downstream build scripts then silently default to cloning
+                # upstream's branch HEAD anyway (i.e. this exact "bad" SHA),
+                # but since candidate stays "false" here, engine.sh never
+                # gets a chance to promote it even when that build succeeds.
+                # Net effect: Release mode can never pass for this component,
+                # no matter how many green Warming/Test runs happen against
+                # it — confirmed on SUKISU+SUSFS (sukisu_builtin stuck on
+                # b88403d2561b since it was blacklisted in run 28687541974;
+                # upstream's builtin branch hasn't moved since).
+                # Retry it as a last-resort candidate instead: a success
+                # promotes it and breaks the deadlock; a failure just
+                # re-blacklists the same SHA (engine.sh's `bad |= (. + [...])
+                # | unique` makes that a no-op), so this can't make things
+                # worse than the permanent-failure state it replaces.
+                ref="$latest"; candidate="true"
+                warn "${prefix}: latest upstream ${latest:0:12} is known-bad and no good pin exists — retrying it as a last-resort candidate to break the deadlock"
+            fi
         else
             ref="$latest"; candidate="true"
             log "${prefix}: new candidate ${latest:0:12} (pinned: ${good:-none}) — will verify this build"
