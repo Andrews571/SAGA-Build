@@ -107,28 +107,19 @@ python3 "${PATCHER_DIR}/fix_namespace.py" "${KERNEL_SRC}/fs/namespace.c" \
     || error "SuSFS: namespace.c fix failed!"
 log "namespace.c fixed ✅"
 
-if [ "$KERNEL_VARIANT" = "KSUNEXT" ]; then
-    # pershoot's susfs4ksu fork ships a second patch that KernelSU-Next's
-    # dev-susfs branch needs alongside the main SuSFS patch — it scopes
-    # down the manual hooks so they don't collide with KSU-Next's own
-    # syscall_hook_manager wiring. Without it, hook symbols end up
-    # undefined at link time (the same failure mode this whole pairing
-    # was built to avoid — see the comment above).
-    log "Applying KSU-Next scope-minimized manual hooks patch..."
-    HOOKS_PATCH="${SUSFS_DIR}/kernel_patches/60_scope-minimized_manual_hooks.patch"
-    if [ -f "$HOOKS_PATCH" ]; then
-        if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$HOOKS_PATCH" > /dev/null 2>&1; then
-            log "Scope-minimized manual hooks patch already applied, skipping."
-        else
-            patch -p1 --fuzz=3 --forward -d "$KERNEL_SRC" < "$HOOKS_PATCH" \
-                && log "Scope-minimized manual hooks patch applied ✅" \
-                || warn "Scope-minimized manual hooks patch: some hunks failed — continuing"
-            find "$KERNEL_SRC" -name "*.rej" -delete 2>/dev/null || true
-        fi
-    else
-        warn "KSU-Next scope-minimized hooks patch not found in this susfs4ksu fork — continuing without it"
-    fi
-fi
+# NOTE: pershoot's susfs4ksu fork used to ship a second patch
+# (kernel_patches/60_scope-minimized_manual_hooks.patch) that scoped down
+# KernelSU-Next's manual hooks so they wouldn't collide with its
+# syscall_hook_manager wiring. That patch — and syscall_hook_manager
+# itself — is gone as of the fork's current dev-susfs branch: the branch
+# now ships the manual-hook/SuSFS integration directly in KernelSU-Next's
+# own source (kernel/feature, kernel/hook, kernel/selinux, etc.), so
+# there's nothing left to apply here for KSUNEXT. Confirmed via on-device
+# check (2026-07-05): CONFIG_KSU_SUSFS and its sub-options compile in,
+# and dmesg shows the integration's sucompat log line firing at runtime.
+# If pershoot's fork restructures again and SuSFS stops working on
+# KSUNEXT, check kernel_patches/ in that fork first before assuming this
+# comment is still accurate.
 
 rm -rf "$SUSFS_DIR"
 
