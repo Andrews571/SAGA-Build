@@ -23,7 +23,7 @@ if [ "${SUSFS_ENABLED:-false}" = "true" ]; then
     # branch (see susfs.sh) — pershoot's fork keeps a dev-susfs branch that
     # does, paired with their own susfs4ksu fork. Maintainer flags this
     # fork as not production-ready; tracked like any other candidate via
-    # checkpoint/scout.sh.
+    # kernel/checkpoint/scout.sh.
     log "SUSFS enabled — using pershoot/KernelSU-Next's dev-susfs fork"
     KSUNEXT_SETUP_URL="https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh"
     KSUNEXT_SETUP_REF="${KSUNEXT_SUSFS_FORK_REF:-dev-susfs}"

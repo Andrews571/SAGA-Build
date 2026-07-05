@@ -30,8 +30,9 @@ set -eo pipefail
 LUMINAIRE_PATCH_DIR="${LUMINAIRE_PATCH_DIR:-$GITHUB_WORKSPACE}"
 source "${LUMINAIRE_PATCH_DIR}/functions.sh"
 
-MANIFEST="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/checkpoint/manifest.json"
+MANIFEST="${LUMINAIRE_PATCH_DIR}/kernel/checkpoint/manifest.json"
 [ -f "$MANIFEST" ] || error "scout: manifest.json not found at ${MANIFEST}"
+[ -n "${KERNEL_VERSION:-}" ] || error "scout: KERNEL_VERSION not set — manifest pins are namespaced per kernel version"
 
 GH_API_AUTH=()
 [ -n "${PERSONAL_TOKEN:-}" ] && GH_API_AUTH=(-H "Authorization: Bearer ${PERSONAL_TOKEN}")
@@ -86,8 +87,8 @@ resolve_component() {
     local key="$1" prefix="$2" latest="$3"
     local good bad_list is_bad ref candidate
 
-    good=$(jq -r ".${key}.good" "$MANIFEST")
-    bad_list=$(jq -c ".${key}.bad" "$MANIFEST")
+    good=$(jq -r ".\"${KERNEL_VERSION}\".${key}.good // \"\"" "$MANIFEST")
+    bad_list=$(jq -c ".\"${KERNEL_VERSION}\".${key}.bad // []" "$MANIFEST")
 
     if [ "${RUN_MODE^^}" = "RELEASE" ]; then
         [ -n "$good" ] || error "scout: RUN_MODE=Release but no known-good ${key} pin exists yet — run a Test build first."

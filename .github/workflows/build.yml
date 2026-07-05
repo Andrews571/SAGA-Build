@@ -102,7 +102,7 @@ on:
 # No workflow-level concurrency lock: each dispatch is left free to run
 # in parallel with others (including same kernel_version), so different
 # variant/LTO/build-system combos can be tried side by side. This is
-# safe for checkpoint/manifest.json — checkpoint/engine.sh already
+# safe for kernel/checkpoint/manifest.json — kernel/checkpoint/engine.sh already
 # handles concurrent writers via its fetch-rebase-push retry loop
 # (originally built for the matrix jobs within a single run, but it
 # doesn't care whether the writer is from this run or another one).
@@ -224,10 +224,10 @@ jobs:
         with:
           # v6+ persists creds via a global includeIf.gitdir config pointing
           # at a file under $RUNNER_TEMP, not .git/config in this repo — so
-          # it can't be locally unset by a later step (see checkpoint/engine.sh
+          # it can't be locally unset by a later step (see kernel/checkpoint/engine.sh
           # for the fallout this caused). Nothing else in this job needs git
           # auth against LuminaireProtocol itself: kernel/addon sources are
-          # public clones, and checkpoint/engine.sh brings its own
+          # public clones, and kernel/checkpoint/engine.sh brings its own
           # PERSONAL_TOKEN-embedded remote for its push.
           persist-credentials: false
 
@@ -268,7 +268,7 @@ jobs:
 
       - name: "Scout Upstream Refs"  # decides pinned vs candidate ref for KSU fork / SuSFS
         if: matrix.kernel_variant != 'VANILLA'
-        run: bash kernel/android14-6.1-lts/ksu/checkpoint/scout.sh
+        run: bash kernel/checkpoint/scout.sh
 
       - name: "Build"
         id: build
@@ -308,7 +308,7 @@ jobs:
               fi
               ;;
           esac
-          bash kernel/android14-6.1-lts/ksu/checkpoint/engine.sh "$OUTCOME" $COMPONENTS
+          bash kernel/checkpoint/engine.sh "$OUTCOME" $COMPONENTS
 
       - name: "Save Build Caches"  # LTO and ccache, both to GH Release
         if: always() && env.IS_MAKE == 'true'

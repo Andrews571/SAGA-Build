@@ -25,8 +25,10 @@ BUILD_OUTCOME="$1"
 shift
 COMPONENTS=("$@")
 
-MANIFEST_REL="kernel/android14-6.1-lts/ksu/checkpoint/manifest.json"
+MANIFEST_REL="kernel/checkpoint/manifest.json"
 MANIFEST="${LUMINAIRE_PATCH_DIR}/${MANIFEST_REL}"
+
+[ -n "${KERNEL_VERSION:-}" ] || error "checkpoint: KERNEL_VERSION not set — manifest pins are namespaced per kernel version"
 
 any_candidate_used="false"
 for key in "${COMPONENTS[@]}"; do
@@ -93,7 +95,7 @@ apply_and_push() {
 # de-duplicated by a stable title so repeated failed re-tests don't spam.
 file_issue() {
     local key="$1" ref="$2"
-    local title="🔴 Upstream build failure: ${key}"
+    local title="🔴 Upstream build failure: ${key} (${KERNEL_VERSION})"
     local existing
     existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"${title}\"" --json number --jq '.[0].number' 2>/dev/null || true)
 
@@ -115,7 +117,7 @@ Still pinned to the last known-good commit — no action needed unless you want 
 
 close_issue_if_open() {
     local key="$1"
-    local title="🔴 Upstream build failure: ${key}"
+    local title="🔴 Upstream build failure: ${key} (${KERNEL_VERSION})"
     local existing
     existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"${title}\"" --json number --jq '.[0].number' 2>/dev/null || true)
     [ -n "$existing" ] && [ "$existing" != "null" ] && \
@@ -131,12 +133,12 @@ for key in "${COMPONENTS[@]}"; do
     ref="${!ref_var}"
 
     if [ "$BUILD_OUTCOME" = "success" ]; then
-        log "checkpoint: promoting ${key} pin to ${ref:0:12}"
-        apply_and_push ".${key}.good = \"${ref}\"" "chore: bump ${key} pin to ${ref:0:12} (verified via run ${GITHUB_RUN_ID})"
+        log "checkpoint: promoting ${key} pin to ${ref:0:12} (kernel ${KERNEL_VERSION})"
+        apply_and_push ".\"${KERNEL_VERSION}\".${key}.good = \"${ref}\"" "chore: bump ${key} pin to ${ref:0:12} for kernel ${KERNEL_VERSION} (verified via run ${GITHUB_RUN_ID})"
         close_issue_if_open "$key"
     else
-        warn "checkpoint: blacklisting ${key} candidate ${ref:0:12} (build failed)"
-        apply_and_push ".${key}.bad |= (. + [\"${ref}\"] | unique)" "chore: mark ${key} candidate ${ref:0:12} as known-bad (run ${GITHUB_RUN_ID})"
+        warn "checkpoint: blacklisting ${key} candidate ${ref:0:12} (build failed, kernel ${KERNEL_VERSION})"
+        apply_and_push ".\"${KERNEL_VERSION}\".${key}.bad |= (. + [\"${ref}\"] | unique)" "chore: mark ${key} candidate ${ref:0:12} as known-bad for kernel ${KERNEL_VERSION} (run ${GITHUB_RUN_ID})"
         file_issue "$key" "$ref"
     fi
 done

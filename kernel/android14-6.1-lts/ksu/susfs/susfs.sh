@@ -9,7 +9,7 @@
 # SuSFS pin resolution — SukiSU-Ultra needs an exact commit paired with a
 # matching susfs4ksu commit (community-verified combo, not just "old enough").
 # ReSukiSU is generally compatible with SuSFS's branch tip, so it isn't
-# pinned as tightly. checkpoint/scout.sh exports the right *_REF beforehand.
+# pinned as tightly. kernel/checkpoint/scout.sh exports the right *_REF beforehand.
 #
 # KernelSU-Next is a special case: its own dev branch dropped the manual
 # hook API (ksu_handle_*) that simonpunk/susfs4ksu's patch targets, in favor
