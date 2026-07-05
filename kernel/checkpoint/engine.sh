@@ -25,7 +25,8 @@ BUILD_OUTCOME="$1"
 shift
 COMPONENTS=("$@")
 
-MANIFEST_REL="kernel/checkpoint/${KERNEL_VERSION:?checkpoint: KERNEL_VERSION not set}/manifest.json"
+[ -n "${KERNEL_VERSION:-}" ] || error "checkpoint: KERNEL_VERSION not set"
+MANIFEST_REL="kernel/$(resolve_android_version)-${KERNEL_VERSION}-lts/manifest.json"
 MANIFEST="${LUMINAIRE_PATCH_DIR}/${MANIFEST_REL}"
 
 any_candidate_used="false"
