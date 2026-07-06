@@ -14,13 +14,9 @@ source "$(cd "$(dirname "$0")" && pwd)/functions.sh"
 KERNEL_VERSION="${KERNEL_VERSION:?KERNEL_VERSION is not set}"
 
 # DRY_RUN skips the actual compile (see build/make.sh, build/kleaf.sh) so
-# the rest of the pipeline can be exercised quickly after a refactor.
-# Restricted to RUN_MODE=Test: Warming's entire purpose is a real compile
-# to prime ccache, and Release must never post a placeholder image to the
-# public channel.
-if [ "${DRY_RUN:-false}" = "true" ] && [ "${RUN_MODE^^}" != "TEST" ]; then
-    error "DRY_RUN is only supported with RUN_MODE=Test (got RUN_MODE=${RUN_MODE:-unset})"
-fi
+# the rest of the pipeline can be exercised quickly after a refactor. It's
+# derived in build.yml from RUN_MODE=="Dry Run", so it can never disagree
+# with RUN_MODE by the time it reaches here.
 
 ANDROID_VERSION="$(resolve_android_version)"
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-lts"

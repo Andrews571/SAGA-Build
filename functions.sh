@@ -44,8 +44,7 @@ run_quiet() {
 # so release/anykernel.sh's packaging step (and everything downstream of
 # it — Telegram notify, checkpoint promotion) can be exercised without
 # actually compiling. Used by build/make.sh and build/kleaf.sh when
-# DRY_RUN=true. Never called for RUN_MODE=Warming or Release — build.sh
-# rejects that combination before reaching here.
+# DRY_RUN=true, which build.yml only ever sets when RUN_MODE="Dry Run".
 write_dry_run_image() {
     local path="$1"
     mkdir -p "$(dirname "$path")"
