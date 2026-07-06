@@ -28,11 +28,16 @@ error() {
 run_quiet() {
     local logfile rc
     logfile="$(mktemp)"
-    if "$@" > "$logfile" 2>&1; then
+    # Capture the exit status on its own line right after the command,
+    # not via `$?` after an `if cmd; then ...; fi` with no else — bash
+    # resets $? to 0 for that construct when the condition is false,
+    # which silently turned every command failure into a false success.
+    "$@" > "$logfile" 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
         rm -f "$logfile"
         return 0
     fi
-    rc=$?
     echo -e "${COLOR_YELLOW}---- command output (last 50 lines) ----${COLOR_RESET}"
     tail -n 50 "$logfile"
     echo -e "${COLOR_YELLOW}-----------------------------------------${COLOR_RESET}"
@@ -112,10 +117,14 @@ retry() {
     local max_attempts="$1"; shift
     local attempt=1 delay=5 rc=0
     while true; do
-        if "$@"; then
+        # Same fix as run_quiet(): capture $? on its own line right after
+        # the command, not via `if cmd; then ...; fi` with no else — bash
+        # resets $? to 0 for that construct when the condition is false.
+        "$@"
+        rc=$?
+        if [ "$rc" -eq 0 ]; then
             return 0
         fi
-        rc=$?
         if [ "$attempt" -ge "$max_attempts" ]; then
             return "$rc"
         fi
