@@ -141,9 +141,29 @@ for key in "${COMPONENTS[@]}"; do
         log "checkpoint: promoting ${key} pin to ${ref:0:12} (kernel ${KERNEL_VERSION})"
         apply_and_push ".${key}.good = \"${ref}\" | .${key}.bad -= [\"${ref}\"]" "chore: bump ${key} pin to ${ref:0:12} for kernel ${KERNEL_VERSION} (verified via run ${GITHUB_RUN_ID})"
         close_issue_if_open "$key"
-    else
-        warn "checkpoint: blacklisting ${key} candidate ${ref:0:12} (build failed, kernel ${KERNEL_VERSION})"
-        apply_and_push ".${key}.bad |= (. + [\"${ref}\"] | unique)" "chore: mark ${key} candidate ${ref:0:12} as known-bad for kernel ${KERNEL_VERSION} (run ${GITHUB_RUN_ID})"
-        file_issue "$key" "$ref"
+        continue
     fi
+
+    # Failure. build.sh's main() only sets these two markers via
+    # mark_stage_ok() once the corresponding stage actually finishes (see
+    # functions.sh) — `set -e` means a stage that fails never reaches its
+    # own marker, so their presence tells us which stage the failure was in
+    # without engine.sh needing any of build.sh's internal state.
+    #
+    # - CHECKPOINT_VARIANT_OK missing -> failed at/before run_variant,
+    #   which is exactly where this candidate ref gets applied -> blame it.
+    # - CHECKPOINT_VARIANT_OK present but CHECKPOINT_ADDONS_OK missing ->
+    #   failed in run_core or run_addons, both unrelated to the KSU-fork/
+    #   SuSFS candidate this component tracks -> leave the pin alone.
+    # - Both present -> failed in run_build itself (the actual compile),
+    #   which the candidate patch can absolutely still be the cause of ->
+    #   blame it, same as a run_variant-stage failure.
+    if [ "${CHECKPOINT_VARIANT_OK:-false}" = "true" ] && [ "${CHECKPOINT_ADDONS_OK:-false}" != "true" ]; then
+        log "checkpoint: ${key} candidate ${ref:0:12} left untouched — build failed in an unrelated stage (run_core/run_addons), not in run_variant/run_build (kernel ${KERNEL_VERSION})"
+        continue
+    fi
+
+    warn "checkpoint: blacklisting ${key} candidate ${ref:0:12} (build failed, kernel ${KERNEL_VERSION})"
+    apply_and_push ".${key}.bad |= (. + [\"${ref}\"] | unique)" "chore: mark ${key} candidate ${ref:0:12} as known-bad for kernel ${KERNEL_VERSION} (run ${GITHUB_RUN_ID})"
+    file_issue "$key" "$ref"
 done

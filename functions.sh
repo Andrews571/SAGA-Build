@@ -40,6 +40,21 @@ run_quiet() {
     return "$rc"
 }
 
+# Exports a "this stage actually finished" marker to $GITHUB_ENV. Called
+# right after a build.sh stage completes (see main()). Thanks to `set -e`,
+# a failing stage exits before its own mark_stage_ok call ever runs — so
+# checkpoint/engine.sh can tell *which* stage a failure happened in just by
+# checking which of these markers made it into the job's env. This is what
+# lets engine.sh avoid blaming a KSU-fork/SuSFS candidate for a failure that
+# actually happened in an unrelated later stage (e.g. an addon like ADIOS
+# failing to apply) instead of in run_variant/run_build where that candidate
+# is actually exercised. No-op outside CI (GITHUB_ENV unset) so this is safe
+# to call from a local/manual run of build.sh too.
+mark_stage_ok() {
+    local marker="$1"
+    [ -n "${GITHUB_ENV:-}" ] && echo "${marker}=true" >> "$GITHUB_ENV"
+}
+
 # Writes a placeholder file at the path a real kernel Image would occupy,
 # so release/anykernel.sh's packaging step (and everything downstream of
 # it — Telegram notify, checkpoint promotion) can be exercised without

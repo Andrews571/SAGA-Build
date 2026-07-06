@@ -53,8 +53,10 @@ main() {
     restore_kernel_source
     run_branding
     run_variant
+    mark_stage_ok CHECKPOINT_VARIANT_OK
     run_core
     run_addons
+    mark_stage_ok CHECKPOINT_ADDONS_OK
     run_build
 
     if [ "${RUN_MODE^^}" = "WARMING" ]; then
