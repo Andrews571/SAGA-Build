@@ -74,11 +74,11 @@ on:
       bore:
         description: "BORE (CPU scheduler)"
         type: boolean
-        default: false
+        default: true
       adios:
         description: "ADIOS (I/O scheduler)"
         type: boolean
-        default: false
+        default: true
       lto_mode:
         description: "LTO"
         type: choice
