@@ -50,7 +50,7 @@ on:
       mountless_engine:
         description: "Mountless Engine"
         type: choice
-        default: "zeromount"
+        default: "none"
         options:
           - "none"
           - "nomount"
