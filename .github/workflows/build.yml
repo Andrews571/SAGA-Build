@@ -80,7 +80,7 @@ on:
         type: boolean
         default: true
       kasumi:
-        description: "⚠️ Kasumi (path hide/spoof LKM, experimental, MAKE only)"
+        description: "⚠️ Kasumi (Experimental)"
         type: boolean
         default: false
       lto_mode:
