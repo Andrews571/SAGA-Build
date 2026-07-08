@@ -7,7 +7,7 @@
 **CI/build orchestration for the Luminaire Android GKI kernel**
 
 [![Build](https://img.shields.io/github/actions/workflow/status/chainonyourdoor/LuminaireProtocol/build.yml?branch=main&label=build&logo=github&style=for-the-badge)](https://github.com/chainonyourdoor/LuminaireProtocol/actions/workflows/build.yml)
-[![Telegram](https://img.shields.io/badge/Telegram-LuminaireGKI-blue?style=for-the-badge&logo=telegram)](https://t.me/LuminaireProtocol)
+[![Telegram](https://img.shields.io/badge/Telegram-Luminaire-blue?style=for-the-badge&logo=telegram)](https://t.me/LuminaireProtocol)
 </div>
 
 ---
