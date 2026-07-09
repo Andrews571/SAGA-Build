@@ -6,9 +6,11 @@
 # Repo: https://github.com/firelzrd/adios
 # ======================================================
 # Backport to android14-6.1: elevator_get() instead of elevator_find_get()
-# (doesn't exist on 6.1), SSG preserved as fallback default, and a NULL
-# pointer fix in adios_completed_request() for UFS MCQ (rq->elv.priv[0]
-# can be NULL for requests that never went through elevator insert).
+# (doesn't exist on 6.1), mq-deadline preserved as fallback default when
+# ADIOS default is not selected (this tree has no SSG scheduler — see the
+# patch header for how that was confirmed), and a NULL pointer fix in
+# adios_completed_request() for UFS MCQ (rq->elv.priv[0] can be NULL for
+# requests that never went through elevator insert).
 
 ADIOS_PATCH="${LUMINAIRE_PATCH_DIR}/kernel/addons/adios/adios-android14-6.1-v3.2.0.patch"
 
