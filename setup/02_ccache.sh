@@ -50,14 +50,14 @@ export CCACHE_NOHARDLINK="true"
 export CCACHE_COMPRESS=1
 export CCACHE_COMPRESSLEVEL=1
 
+[ -n "${CCACHE_DIR}" ] || error "ccache: CCACHE_DIR is not set!"
+[ -n "${CCACHE_MAXSIZE}" ] || error "ccache: CCACHE_MAXSIZE is not set!"
+
 # Write sloppiness config — allows ccache-ECS to ignore file timestamps,
 # ctime, mtime, and time macros for cache validation
 mkdir -p "${CCACHE_DIR}"
 echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" \
     >> "${CCACHE_DIR}/ccache.conf"
-
-[ -n "${CCACHE_DIR}" ] || error "ccache: CCACHE_DIR is not set!"
-[ -n "${CCACHE_MAXSIZE}" ] || error "ccache: CCACHE_MAXSIZE is not set!"
 
 # Reset stats (not cache data) for fresh tracking
 ${TOOL_CCACHE_BIN} --zero-stats > /dev/null 2>&1 || true
