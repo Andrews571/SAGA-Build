@@ -9,7 +9,8 @@
 # (kasumi_lkm.ko) built separately against a prepared kernel tree
 # (needs Module.symvers, which only exists after the main kernel build
 # finishes). This script only clones the source; the actual module
-# compile happens post-build in run_modules() (build.sh), and packaging
+# compile happens in kernel/addons/kasumi/postbuild.sh (run_postbuild() in
+# build.sh, after run_build() finishes), and packaging
 # into the AK3 zip happens in release/anykernel.sh. This is a different
 # shape from every other addon here (all of which patch source/defconfig
 # pre-build) — don't move the clone logic into a patch step by mistake.
@@ -50,10 +51,11 @@ EOF
     log "Kasumi: CONFIG_KALLSYMS_ALL injected into gki_defconfig ✅"
 fi
 
-# Consumed later by run_modules() in build.sh (post kernel-build compile
-# step) and release/anykernel.sh (packaging). Exported so it survives into
-# those later stages regardless of call shape.
+# Consumed later by kernel/addons/kasumi/postbuild.sh (run_postbuild() in
+# build.sh, after run_build() finishes) and release/anykernel.sh
+# (packaging). Exported so it survives into those later stages. No separate
+# "enabled" flag needed — run_postbuild() gates on membership in $ADDONS,
+# same as run_addons() does for this script.
 export KASUMI_SRC_DIR
-export KASUMI_ENABLED="true"
 
 log "Kasumi source ready at ${KASUMI_SRC_DIR} ✅ (module build deferred to post-build stage)"

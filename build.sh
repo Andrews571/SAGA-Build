@@ -58,7 +58,7 @@ main() {
     run_addons
     mark_stage_ok CHECKPOINT_ADDONS_OK
     run_build
-    run_modules
+    run_postbuild
 
     if [ "${RUN_MODE^^}" = "WARMING" ]; then
         log "🔥 Warming Complete — skipping packaging"
@@ -198,49 +198,40 @@ run_build() {
 }
 
 # ======================================================
-# 🧩 POST-BUILD MODULES (out-of-tree LKMs)
+# 🧩 POST-BUILD (per-addon)
 # ======================================================
 # Separate from run_addons()/run_build() on purpose: addons in run_addons()
 # patch source/defconfig and get compiled as part of the single vmlinux
-# build in run_build(). Out-of-tree LKMs (e.g. Kasumi) instead need to be
-# compiled AFTER run_build() finishes, against the now-built kernel tree's
-# Module.symvers — they can't be folded into either earlier stage.
+# build in run_build(). Some addons instead need work done AFTER run_build()
+# finishes — e.g. Kasumi's out-of-tree LKM needs Module.symvers from the
+# now-built kernel tree, which doesn't exist before that point.
+#
+# This is a thin dispatcher, same shape as run_build(): it doesn't know or
+# care what any given addon's post-build step actually does (compile an
+# LKM, whatever else some future addon needs) — it just runs
+# kernel/addons/<name>/postbuild.sh for every enabled addon that has one.
+# Addons without a postbuild.sh (the majority — anything patch/Kconfig-only)
+# are silently skipped here, same gating as run_addons() (membership in
+# $ADDONS), no separate per-addon "enabled" flag needed.
 
-run_modules() {
+run_postbuild() {
     [ "${DRY_RUN:-false}" = "true" ] && return 0
-    [ "${KASUMI_ENABLED:-false}" = "true" ] || return 0
+    [ -z "${ADDONS:-}" ] && return 0
 
-    echo "::group::🧩 Post-Build Modules"
+    echo "::group::🧩 Post-Build"
 
-    if [ "$BUILD_SYSTEM" != "MAKE" ]; then
-        warn "Kasumi: post-build module compile is only implemented for MAKE builds right now (BUILD_SYSTEM=${BUILD_SYSTEM}) — skipping. Ship an Image without Kasumi for this run, or rerun with a Make build system."
-        echo "::endgroup::"
-        return 0
-    fi
+    IFS=',' read -ra ADDON_LIST <<< "$ADDONS"
+    for addon in "${ADDON_LIST[@]}"; do
+        addon="${addon// /}"
+        [ -z "$addon" ] && continue
 
-    [ -n "${KASUMI_SRC_DIR:-}" ] || error "Kasumi: KASUMI_SRC_DIR not set — kasumi.sh addon may not have run correctly!"
+        script="${LUMINAIRE_PATCH_DIR}/kernel/addons/${addon}/postbuild.sh"
+        [ -f "$script" ] || continue
 
-    log "🥷 Building Kasumi LKM (kasumi_lkm.ko)..."
+        log "🧩 Post-build: ${addon}"
+        source "$script" || error "Post-build step failed: ${addon}"
+    done
 
-    KASUMI_MAKE_ARGS=(
-        -C "$KERNEL_SRC"
-        O="$OUT_DIR"
-        ARCH="$ARCH"
-        CROSS_COMPILE="$TOOL_CROSS_COMPILE"
-        LLVM=1
-        LLVM_IAS=1
-        M="${KASUMI_SRC_DIR}/src"
-        CC="${TOOL_CCACHE_WRAPPERS}/clang"
-    )
-
-    make "${KASUMI_MAKE_ARGS[@]}" modules \
-        || error "Kasumi: module build failed!"
-
-    KASUMI_KO=$(find "${KASUMI_SRC_DIR}/src" -name "*.ko" | head -1)
-    [ -n "$KASUMI_KO" ] || error "Kasumi: build succeeded but no .ko file found under ${KASUMI_SRC_DIR}/src!"
-
-    export KASUMI_KO
-    log "Kasumi LKM built: $(basename "$KASUMI_KO") ✅"
     echo "::endgroup::"
 }
 
