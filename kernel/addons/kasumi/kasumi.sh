@@ -34,6 +34,22 @@ fi
 
 [ -d "${KASUMI_SRC_DIR}/src" ] || error "Kasumi: cloned repo missing src/ — layout may have changed upstream!"
 
+# Kasumi resolves non-exported kernel symbols (kallsyms_lookup_name and
+# friends) at runtime — needs the full kallsyms table, not just exported
+# ones. Inject directly into gki_defconfig (before `make defconfig` runs),
+# same reasoning/pattern as bbrv3.sh: scripts/config post-processing in
+# defconfig.sh runs too late for constraints like this that other Kconfig
+# options key off of.
+GKI_DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
+if ! grep -q "CONFIG_KALLSYMS_ALL" "$GKI_DEFCONFIG"; then
+    cat >> "$GKI_DEFCONFIG" << 'EOF'
+# Kasumi requires full kallsyms (Luminaire)
+CONFIG_KALLSYMS=y
+CONFIG_KALLSYMS_ALL=y
+EOF
+    log "Kasumi: CONFIG_KALLSYMS_ALL injected into gki_defconfig ✅"
+fi
+
 # Consumed later by run_modules() in build.sh (post kernel-build compile
 # step) and release/anykernel.sh (packaging). Exported so it survives into
 # those later stages regardless of call shape.
