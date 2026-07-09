@@ -12,7 +12,7 @@ if [ -f "${KERNEL_DIR}/build/kernel/kleaf/impl/stamp.bzl" ]; then
 fi
 
 if [ "$BUILD_SYSTEM" != "KLEAF" ]; then
-    cd "${KERNEL_DIR}/common"
+    cd "${KERNEL_SRC}"
     git config --local user.name "${BUILD_USER:-chainonyourdoor}"
     git config --local user.email "${BUILD_USER:-chainonyourdoor}@users.noreply.github.com"
     git add . > /dev/null 2>&1 && { git commit --amend --no-edit --quiet 2>/dev/null || git commit -m "Luminaire: Clean dirty flags" --quiet; } \

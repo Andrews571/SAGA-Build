@@ -7,7 +7,7 @@
 GLIBC_VERSION="$(ldd --version 2>/dev/null | head -n 1 | awk '{print $NF}')"
 if [ "$(printf '%s\n' "2.38" "$GLIBC_VERSION" | sort -V | head -n 1)" = "2.38" ]; then
     log "Applying GLIBC >= 2.38 fix..."
-    BTFIDS_MK="${KERNEL_DIR}/common/tools/bpf/resolve_btfids/Makefile"
+    BTFIDS_MK="${KERNEL_SRC}/tools/bpf/resolve_btfids/Makefile"
 
     if [ ! -f "$BTFIDS_MK" ]; then
         warn "GLIBC fix: resolve_btfids/Makefile not found — skipping"
