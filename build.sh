@@ -143,6 +143,7 @@ run_core() {
         "${core_dir}/protected_exports.sh"
         "${core_dir}/compiler_string/compiler_string.sh"
         "${core_dir}/module_bypass/module_bypass.sh"
+        "${core_dir}/openssl3_compat/openssl3_compat.sh"
     )
     for script in "${scripts[@]}"; do
         [ -f "$script" ] || { warn "Core script not found: $(basename "$script") — skipping"; continue; }
