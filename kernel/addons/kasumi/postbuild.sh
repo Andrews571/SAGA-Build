@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 # Compiles kasumi_lkm.ko as an out-of-tree module against the kernel tree
 # run_build() just finished producing (needs its Module.symvers).
 #
