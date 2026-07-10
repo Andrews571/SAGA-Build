@@ -142,6 +142,12 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       addons: ${{ steps.set.outputs.addons }}
+      # github.ref_name as-is (e.g. "test/luminaire-kernel-source") breaks
+      # anywhere it's used as a filesystem path component — the "/" turns
+      # ccache-prefix/lto-asset-name into a bogus extra directory level tar
+      # can't write to. Sanitized once here, reused by Start-Build instead
+      # of every consumer re-deriving (and re-risking) it independently.
+      safe_ref: ${{ steps.set.outputs.safe_ref }}
       # Whether Prepare Arsenal just force-refreshed the shared clang/kernel/AK3
       # caches this run. Start-Build's own USE_*_CACHE flags are hardcoded
       # "true" (it always restores — never independently re-downloads), so
@@ -188,13 +194,18 @@ jobs:
           ADDONS="${{ inputs.bbrv3 && 'bbrv3,' || '' }}${{ inputs.bbg && 'bbg,' || '' }}${{ inputs.rekernel && 'rekernel,' || '' }}${{ inputs.droidspaces && 'droidspaces,' || '' }}${{ inputs.bore && 'bore,' || '' }}${{ inputs.adios && 'adios,' || '' }}${{ inputs.kasumi && 'kasumi,' || '' }}${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}"
           echo "addons=${ADDONS}" >> $GITHUB_OUTPUT
 
+          # "/" -> "-" so this is safe to use as a filesystem path component
+          # (cache asset filenames) wherever ref_name is needed downstream.
+          SAFE_REF="$(echo '${{ github.ref_name }}' | tr '/' '-')"
+          echo "safe_ref=${SAFE_REF}" >> $GITHUB_OUTPUT
+
       - name: "Setup Arsenal"  # restores clang+arsenal cache (auto-saved if missing), then runs arsenal.sh
         id: setup-arsenal
         uses: ./.github/actions/setup-arsenal
         with:
           build-system:   ${{ inputs.build_system }}
           kernel-version: ${{ inputs.kernel_version }}
-          ref-name:       ${{ github.ref_name }}
+          ref-name:       ${{ steps.set.outputs.safe_ref }}
           update-arsenal: ${{ inputs.update_arsenal }}
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
@@ -271,7 +282,7 @@ jobs:
         with:
           build-system:   ${{ inputs.build_system }}
           kernel-version: ${{ inputs.kernel_version }}
-          ref-name:       ${{ github.ref_name }}
+          ref-name:       ${{ needs.prepare-matrix.outputs.safe_ref }}
           kernel-variant:  ${{ matrix.kernel_variant }}
           susfs:          ${{ matrix.susfs }}
           lto-mode:     ${{ inputs.lto_mode }}
@@ -336,8 +347,8 @@ jobs:
         with:
           build-system:   ${{ inputs.build_system }}
           lto-mode:     ${{ inputs.lto_mode }}
-          lto-asset-name: lto-data-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.kernel_variant }}-${{ github.ref_name }}-lto.tar.zst
-          ccache-prefix:  ccache-data-${{ matrix.kernel_variant }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.lto_mode != 'NONE' && format('lto-{0}-', inputs.lto_mode) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ github.ref_name }}-
+          lto-asset-name: lto-data-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.kernel_variant }}-${{ needs.prepare-matrix.outputs.safe_ref }}-lto.tar.zst
+          ccache-prefix:  ccache-data-${{ matrix.kernel_variant }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.lto_mode != 'NONE' && format('lto-{0}-', inputs.lto_mode) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ needs.prepare-matrix.outputs.safe_ref }}-
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Upload Variant Link"  # for channel post aggregation
