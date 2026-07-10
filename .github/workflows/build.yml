@@ -80,7 +80,7 @@ on:
         type: boolean
         default: true
       kasumi:
-        description: "⚠️ Kasumi (Experimental)"
+        description: "Kasumi (Experimental)"
         type: boolean
         default: false
       lto_mode:
@@ -105,7 +105,7 @@ on:
         type: string
         default: ""
       update_arsenal:
-        description: "⚠️ Update Arsenal"
+        description: "Update Arsenal"
         type: choice
         default: "no"
         options:
