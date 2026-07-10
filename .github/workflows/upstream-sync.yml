@@ -55,36 +55,119 @@ jobs:
           echo "TARGET_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts" >> $GITHUB_ENV
           echo "TARGET_REPO=LuminaireKernel-${{ inputs.kernel_version }}" >> $GITHUB_ENV
 
-      # force_adopt path: a shallow clone direct from live ACK, pushed with
-      # --no-thin. Two prior attempts each failed differently:
-      #   - shallow clone/fetch, default (thin) push -> "did not receive
-      #     expected object" (git assumed the remote already had certain
-      #     base objects for its delta-compressed pack; it didn't)
-      #   - full (non-shallow) clone -> 12M+ objects, push too large,
-      #     GitHub's server errored (HTTP 500) trying to process it
-      # --no-thin forces every object the push needs to be sent explicitly
-      # instead of delta-compressed against objects assumed to already
-      # exist on the remote, which is the documented cause of the first
-      # failure mode. Kept shallow (depth=100) to stay clear of the second.
-      - name: "Adopt live ACK (shallow clone, no-thin push)"
+      # force_adopt path: full (non-shallow) clone from live ACK, pushed as
+      # many small sequential checkpoints instead of one giant push.
+      #
+      # Three prior attempts, in order:
+      #   1. shallow clone/fetch, default (thin) push -> "did not receive
+      #      expected object" (git assumed the remote already had certain
+      #      base objects for its delta-compressed pack; it didn't)
+      #   2. shallow clone (depth=100) + --no-thin push -> same
+      #      "did not receive expected object" error again. --no-thin alone
+      #      doesn't fix this class of failure.
+      #   3. full (non-shallow) clone, single push -> clone itself succeeds
+      #      (12M+ objects), but the push is too large in one shot and
+      #      GitHub's server errors (HTTP 500) trying to process it.
+      #
+      # A shallow adopt was never actually viable here regardless of the
+      # push errors above: this repo's whole point is a future 3-way merge
+      # against a linux-stable tag, which needs `git merge-base` to walk
+      # back to a real shared ancestor. A 1-commit (or depth=N, N small)
+      # history has no ancestors to walk back to, so that merge-base would
+      # never be found. Full history is a hard requirement, not a nice-to-
+      # have — so the fix has to be "push the full thing safely", not
+      # "push less".
+      #
+      # The actual fix: GitHub's own docs for the 2 GiB push limit
+      # (https://docs.github.com/en/get-started/using-git/troubleshooting-the-2-gb-push-limit)
+      # recommend pushing checkpoint commits spread across history one at a
+      # time, oldest to newest, so each individual push stays small and the
+      # remote genuinely already has the previous checkpoint's objects
+      # (not just assumed to, like the thin-pack failure above). This also
+      # incidentally sidesteps failure mode #1/#2, since every push here is
+      # a small, self-contained, non-thin-dependent pack.
+      #
+      # The step size below is adaptive rather than a fixed guess: it halves
+      # on any push failure and retries from the last successful checkpoint,
+      # per GitHub's own suggestion to shrink the step size on failure. This
+      # avoids having to know the "right" number in advance for a repo this
+      # size, where commit sizes aren't uniform (some merges touch far more
+      # objects than others).
+      - name: "Adopt live ACK (full clone, adaptive chunked push)"
         if: ${{ inputs.force_adopt == true }}
         run: |
           ACK_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
 
-          git clone --depth=100 --branch "${ACK_BRANCH}" --progress \
+          git clone --branch "${ACK_BRANCH}" --progress \
             "https://android.googlesource.com/kernel/common" ack-fresh
           cd ack-fresh
           git config user.name "chainonyourdoor"
           git config user.email "chainonyourdoor@gmail.com"
 
+          # Large-push hardening: works around the known GitHub HTTP/2
+          # large-pack corruption class of issues, and gives enough buffer
+          # for multi-hundred-MB chunks over HTTP.
+          git config http.postBuffer 524288000
+          git config http.version HTTP/1.1
+
           git remote add target \
             "https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${TARGET_REPO}.git"
-          git push --no-thin target "HEAD:${TARGET_BRANCH}" --force
+
+          echo "Building commit list (oldest -> newest)..."
+          git rev-list --reverse HEAD > /tmp/commits.txt
+          TOTAL=$(wc -l < /tmp/commits.txt)
+          echo "Total commits to push: ${TOTAL}"
+
+          idx=0
+          step=200
+          min_step=1
+          fails_at_min=0
+
+          while [ "$idx" -lt "$TOTAL" ]; do
+            target_idx=$(( idx + step ))
+            if [ "$target_idx" -gt "$TOTAL" ]; then
+              target_idx=$TOTAL
+            fi
+
+            commit_sha=$(awk -v n="$target_idx" 'NR==n{print; exit}' /tmp/commits.txt)
+            echo "Pushing checkpoint ${target_idx}/${TOTAL} (${commit_sha}), step=${step}..."
+
+            success=0
+            for attempt in 1 2 3; do
+              if git push --no-thin target "${commit_sha}:refs/heads/${TARGET_BRANCH}" --force; then
+                success=1
+                break
+              fi
+              echo "Push attempt ${attempt} failed, retrying in 5s..."
+              sleep 5
+            done
+
+            if [ "$success" -eq 1 ]; then
+              idx=$target_idx
+              fails_at_min=0
+            elif [ "$step" -le "$min_step" ]; then
+              fails_at_min=$((fails_at_min + 1))
+              echo "Still failing at minimum step size (attempt ${fails_at_min}/3) on commit ${commit_sha}..."
+              if [ "$fails_at_min" -ge 3 ]; then
+                echo "::error::Push failed repeatedly even at step=1, at commit ${commit_sha} (checkpoint ${target_idx}/${TOTAL}). This is no longer a chunk-size problem — investigate manually (network, auth token, or an actually oversized single commit)."
+                exit 1
+              fi
+            else
+              step=$(( step / 2 ))
+              if [ "$step" -lt "$min_step" ]; then
+                step=$min_step
+              fi
+              echo "Push failed — reducing step size to ${step} and retrying from checkpoint ${idx}..."
+            fi
+          done
+
+          echo "All checkpoints pushed. Confirming final HEAD is in place..."
+          git push --no-thin target "HEAD:refs/heads/${TARGET_BRANCH}" --force
 
           VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
           PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
           SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
-          echo "Adopted live ACK ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} as new base for ${TARGET_REPO}@${TARGET_BRANCH}"
+          echo "Adopted live ACK ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} as new base for ${TARGET_REPO}@${TARGET_BRANCH} (full history, ${TOTAL} commits)"
 
       # Everything below only runs when NOT adopting — normal incremental
       # sync against a target repo that already has real ACK history.
