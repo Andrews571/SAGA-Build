@@ -140,6 +140,27 @@ jobs:
           SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
           echo "Caught up to ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} (target: ${{ inputs.target_stable_tag }})"
 
+      # Either fetch above (--depth on ack-live and/or stable) leaves a
+      # shallow boundary: the oldest commit(s) in local history reference
+      # parents we never fetched. GitHub's receive-pack rejects a push like
+      # that ("did not receive expected object") since it can't complete
+      # the graph. git-filter-repo treats shallow-boundary commits as
+      # synthetic roots, making the history self-contained and pushable
+      # without needing the full multi-GB upstream history.
+      - name: "Flatten shallow boundary for push"
+        run: |
+          cd kernel-work
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            pip install --user --break-system-packages git-filter-repo
+            export PATH="$HOME/.local/bin:${PATH}"
+            git filter-repo --force
+            # filter-repo drops the origin remote as a safety measure — re-add it.
+            git remote add origin \
+              "https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${TARGET_REPO}.git"
+          else
+            echo "Not shallow, nothing to flatten"
+          fi
+
       - name: "Push"
         run: |
           cd kernel-work
