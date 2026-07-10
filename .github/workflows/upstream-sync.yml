@@ -130,7 +130,15 @@ jobs:
           echo "Avg bytes/object (baseline): ${AVG_BYTES_PER_OBJ}"
 
           idx=0
-          step=10000
+          # 100k commits ≈ 379 MiB at this repo's measured ~3.885 KiB/commit
+          # average (777 KiB / 200 commits, derived from the real
+          # size-pack/object-count baseline) — about 18.5% of GitHub's 2 GiB
+          # push limit, leaving >5x headroom for a checkpoint that happens
+          # to land on an unusually dense range of merge commits. The
+          # auto-halving below is the actual safety net either way; this
+          # number is just a starting point picked to minimize how often
+          # that halving needs to kick in.
+          step=100000
           min_step=1
           fails_at_min=0
 
