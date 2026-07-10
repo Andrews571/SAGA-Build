@@ -55,22 +55,23 @@ jobs:
           echo "TARGET_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts" >> $GITHUB_ENV
           echo "TARGET_REPO=LuminaireKernel-${{ inputs.kernel_version }}" >> $GITHUB_ENV
 
-      # force_adopt path: a FULL (non-shallow) clone direct from live ACK,
-      # pushed straight to the target repo/branch. Two earlier attempts at
-      # a shallow clone/fetch (both "fetch into an existing repo" and a
-      # clean standalone "fresh clone") failed identically on push with
-      # "did not receive expected object" — GitHub's receive-pack doesn't
-      # reliably accept a shallow-bounded pack here regardless of how the
-      # shallow clone was produced locally. A full clone sidesteps the
-      # problem entirely: there's no shallow boundary to fail on, at the
-      # cost of a slower, heavier clone (GitHub Actions runners have the
-      # disk/time budget for this).
-      - name: "Adopt live ACK (full clone, force push)"
+      # force_adopt path: a shallow clone direct from live ACK, pushed with
+      # --no-thin. Two prior attempts each failed differently:
+      #   - shallow clone/fetch, default (thin) push -> "did not receive
+      #     expected object" (git assumed the remote already had certain
+      #     base objects for its delta-compressed pack; it didn't)
+      #   - full (non-shallow) clone -> 12M+ objects, push too large,
+      #     GitHub's server errored (HTTP 500) trying to process it
+      # --no-thin forces every object the push needs to be sent explicitly
+      # instead of delta-compressed against objects assumed to already
+      # exist on the remote, which is the documented cause of the first
+      # failure mode. Kept shallow (depth=100) to stay clear of the second.
+      - name: "Adopt live ACK (shallow clone, no-thin push)"
         if: ${{ inputs.force_adopt == true }}
         run: |
           ACK_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
 
-          git clone --branch "${ACK_BRANCH}" --progress \
+          git clone --depth=100 --branch "${ACK_BRANCH}" --progress \
             "https://android.googlesource.com/kernel/common" ack-fresh
           cd ack-fresh
           git config user.name "chainonyourdoor"
@@ -78,7 +79,7 @@ jobs:
 
           git remote add target \
             "https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${TARGET_REPO}.git"
-          git push target "HEAD:${TARGET_BRANCH}" --force
+          git push --no-thin target "HEAD:${TARGET_BRANCH}" --force
 
           VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
           PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
