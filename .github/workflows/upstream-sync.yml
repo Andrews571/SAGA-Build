@@ -1,29 +1,30 @@
 name: ⬆️ Upstream Kernel Sync
 
-# Beda sama sync-kernel.yml: ini gak flatten/force-push snapshot. Repo target
-# (LuminaireKernel-{version}-lts) mempertahankan histori git asli, biar bisa
-# di-merge sama linux-stable buat ngejar subversion yang belom di-merge ACK.
+# Unlike sync-kernel.yml, this does not flatten/force-push a snapshot. The
+# target repo (LuminaireKernel-{version}-lts) keeps real git history, so it
+# can be merged against linux-stable to catch up on subversions ACK hasn't
+# merged yet.
 #
-# Manual dulu (workflow_dispatch aja, gak ada cron) — konflik merge di sini
-# butuh judgment manusia, bukan sesuatu yang aman di-auto-resolve di CI.
+# Manual only for now (workflow_dispatch, no cron) — merge conflicts here
+# need human judgment, not something safe to auto-resolve in CI.
 
 on:
   workflow_dispatch:
     inputs:
       kernel_version:
-        description: "Kernel version (contoh: 6.1)"
+        description: "Kernel version (e.g. 6.1)"
         type: string
         default: "6.1"
       android_version:
-        description: "Android version tag (contoh: android14)"
+        description: "Android version tag (e.g. android14)"
         type: string
         default: "android14"
       target_stable_tag:
-        description: "Tag linux-stable buat catch-up (contoh: v6.1.177). Kosongin kalau cuma mau sync ACK doang."
+        description: "linux-stable tag to catch up to (e.g. v6.1.177). Leave empty to only sync with ACK."
         type: string
         default: ""
       force_adopt:
-        description: "Paksa reset branch ke histori live ACK walau udah ada histori lokal (biasanya cuma dipake sekali, run pertama)"
+        description: "Force-reset the branch to live ACK history even if local history already exists (normally only needed once, on the first run)"
         type: boolean
         default: false
 
@@ -60,8 +61,8 @@ jobs:
           ACK_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
           git remote add ack-live "https://android.googlesource.com/kernel/common"
 
-          # Progressive deepen: mulai 2000 commit, nambah kalau merge-base
-          # belom ketemu (skip loop ini kalau force_adopt eksplisit true).
+          # Progressive deepen: start at 2000 commits, grow if the merge-base
+          # isn't found yet (skip this loop if force_adopt is explicitly true).
           DEPTH=2000
           git fetch ack-live "${ACK_BRANCH}" --depth="${DEPTH}"
 
@@ -123,9 +124,9 @@ jobs:
             exit 1
           fi
 
-          # Kalau conflict, job ini GAGAL dengan sengaja — merge conflict di
-          # kernel source butuh judgment manusia, bukan auto-resolve di CI.
-          # Resolve manual di local, lanjut commit+push dari sana.
+          # On conflict, this job FAILS on purpose — kernel source merge
+          # conflicts need human judgment, not CI auto-resolve. Resolve
+          # locally, then commit+push from there.
           if ! git merge --no-edit "${{ inputs.target_stable_tag }}"; then
             echo "::error::Merge conflict catching up to ${{ inputs.target_stable_tag }}. Resolve manually: git clone the repo, replicate these fetch steps, resolve conflicts locally, then push."
             git merge --abort
