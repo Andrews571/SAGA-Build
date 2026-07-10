@@ -1,0 +1,148 @@
+name: ⬆️ Upstream Kernel Sync
+
+# Beda sama sync-kernel.yml: ini gak flatten/force-push snapshot. Repo target
+# (LuminaireKernel-{version}-lts) mempertahankan histori git asli, biar bisa
+# di-merge sama linux-stable buat ngejar subversion yang belom di-merge ACK.
+#
+# Manual dulu (workflow_dispatch aja, gak ada cron) — konflik merge di sini
+# butuh judgment manusia, bukan sesuatu yang aman di-auto-resolve di CI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: "Kernel version (contoh: 6.1)"
+        type: string
+        default: "6.1"
+      android_version:
+        description: "Android version tag (contoh: android14)"
+        type: string
+        default: "android14"
+      target_stable_tag:
+        description: "Tag linux-stable buat catch-up (contoh: v6.1.177). Kosongin kalau cuma mau sync ACK doang."
+        type: string
+        default: ""
+      force_adopt:
+        description: "Paksa reset branch ke histori live ACK walau udah ada histori lokal (biasanya cuma dipake sekali, run pertama)"
+        type: boolean
+        default: false
+
+jobs:
+  upstream-sync:
+    name: "Sync ${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Free up disk space"
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+            /usr/share/swift /usr/local/.ghcup
+          sudo apt-get clean
+          df -h
+
+      - name: "Clone target repo (LuminaireKernel)"
+        run: |
+          BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
+          REPO="LuminaireKernel-${{ inputs.kernel_version }}-lts"
+          echo "TARGET_BRANCH=${BRANCH}" >> $GITHUB_ENV
+          echo "TARGET_REPO=${REPO}" >> $GITHUB_ENV
+
+          git clone --branch "${BRANCH}" \
+            "https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${REPO}.git" \
+            kernel-work
+          cd kernel-work
+          git config user.name "chainonyourdoor"
+          git config user.email "chainonyourdoor@gmail.com"
+
+      - name: "Fetch live ACK history"
+        run: |
+          cd kernel-work
+          ACK_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
+          git remote add ack-live "https://android.googlesource.com/kernel/common"
+
+          # Progressive deepen: mulai 2000 commit, nambah kalau merge-base
+          # belom ketemu (skip loop ini kalau force_adopt eksplisit true).
+          DEPTH=2000
+          git fetch ack-live "${ACK_BRANCH}" --depth="${DEPTH}"
+
+          if [ "${{ inputs.force_adopt }}" != "true" ]; then
+            for i in 1 2 3; do
+              if git merge-base HEAD ack-live/FETCH_HEAD >/dev/null 2>&1 || \
+                 git merge-base HEAD FETCH_HEAD >/dev/null 2>&1; then
+                echo "Merge-base found at depth ${DEPTH} ✅"
+                break
+              fi
+              DEPTH=$((DEPTH * 2))
+              echo "No merge-base yet, deepening to ${DEPTH}..."
+              git fetch ack-live "${ACK_BRANCH}" --depth="${DEPTH}"
+            done
+          fi
+
+      - name: "Sync branch to live ACK"
+        run: |
+          cd kernel-work
+          if git merge-base HEAD FETCH_HEAD >/dev/null 2>&1; then
+            echo "Shared history found — fast-forwarding to live ACK"
+            git merge --ff-only FETCH_HEAD
+          else
+            if [ "${{ inputs.force_adopt }}" = "true" ]; then
+              echo "No shared history (expected on first run) — adopting live ACK as new base"
+              git reset --hard FETCH_HEAD
+            else
+              echo "::error::No shared history with live ACK and force_adopt=false. Re-run with force_adopt=true if this is the first sync, or investigate why history diverged."
+              exit 1
+            fi
+          fi
+
+          VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
+          PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
+          SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
+          echo "Synced to ACK ${VERSION}.${PATCHLEVEL}.${SUBLEVEL}"
+
+      - name: "Catch-up merge to linux-stable tag"
+        if: ${{ inputs.target_stable_tag != '' }}
+        run: |
+          cd kernel-work
+          git remote add stable "https://github.com/gregkh/linux.git"
+
+          DEPTH=2000
+          git fetch stable "refs/tags/${{ inputs.target_stable_tag }}:refs/tags/${{ inputs.target_stable_tag }}" --depth="${DEPTH}"
+
+          for i in 1 2 3; do
+            if git merge-base HEAD "${{ inputs.target_stable_tag }}" >/dev/null 2>&1; then
+              echo "Merge-base with linux-stable found at depth ${DEPTH} ✅"
+              break
+            fi
+            DEPTH=$((DEPTH * 2))
+            echo "No merge-base yet, deepening to ${DEPTH}..."
+            git fetch stable "refs/tags/${{ inputs.target_stable_tag }}:refs/tags/${{ inputs.target_stable_tag }}" --depth="${DEPTH}"
+          done
+
+          if ! git merge-base HEAD "${{ inputs.target_stable_tag }}" >/dev/null 2>&1; then
+            echo "::error::No shared history with linux-stable even at depth ${DEPTH}. Can't do a clean 3-way merge — investigate manually."
+            exit 1
+          fi
+
+          # Kalau conflict, job ini GAGAL dengan sengaja — merge conflict di
+          # kernel source butuh judgment manusia, bukan auto-resolve di CI.
+          # Resolve manual di local, lanjut commit+push dari sana.
+          if ! git merge --no-edit "${{ inputs.target_stable_tag }}"; then
+            echo "::error::Merge conflict catching up to ${{ inputs.target_stable_tag }}. Resolve manually: git clone the repo, replicate these fetch steps, resolve conflicts locally, then push."
+            git merge --abort
+            exit 1
+          fi
+
+          VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
+          PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
+          SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
+          echo "Caught up to ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} (target: ${{ inputs.target_stable_tag }})"
+
+      - name: "Push"
+        run: |
+          cd kernel-work
+          if [ "${{ inputs.force_adopt }}" = "true" ]; then
+            git push origin "${TARGET_BRANCH}" --force
+          else
+            git push origin "${TARGET_BRANCH}"
+          fi
+          echo "Pushed ${TARGET_REPO}@${TARGET_BRANCH}"
