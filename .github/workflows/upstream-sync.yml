@@ -5,6 +5,15 @@ run-name: "${{ inputs.android_version }} | ${{ inputs.kernel_version }}-lts"
 # can be merged against linux-stable to catch up on subversions ACK hasn't
 # merged yet.
 #
+# IMPORTANT: never rewrite commits from this history (no filter-repo,
+# filter-branch, rebase, etc). A previous version of this workflow used
+# git-filter-repo to work around a shallow-push failure during adopt, which
+# silently rewrote every commit hash. That broke merge-base lookups against
+# real ACK/linux-stable forever after, since our commits no longer matched
+# their originals byte-for-byte. Real, unmodified commit identity is the
+# entire point of this repo — it's what lets a future merge with a
+# linux-stable tag find a genuine shared ancestor.
+#
 # Manual only for now (workflow_dispatch, no cron) — merge conflicts here
 # need human judgment, not something safe to auto-resolve in CI.
 
@@ -24,7 +33,7 @@ on:
         type: string
         default: ""
       force_adopt:
-        description: "Force-reset the branch to live ACK history even if local history already exists (normally only needed once, on the first run)"
+        description: "Adopt live ACK as a fresh base via a clean clone + force-push (normally only needed once, on the first run, or if history has diverged)"
         type: boolean
         default: false
 
@@ -41,76 +50,81 @@ jobs:
           sudo apt-get clean
           df -h
 
-      - name: "Clone target repo (LuminaireKernel)"
+      - name: "Resolve target repo/branch"
         run: |
-          BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
-          REPO="LuminaireKernel-${{ inputs.kernel_version }}"
-          echo "TARGET_BRANCH=${BRANCH}" >> $GITHUB_ENV
-          echo "TARGET_REPO=${REPO}" >> $GITHUB_ENV
-          REPO_URL="https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${REPO}.git"
+          echo "TARGET_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts" >> $GITHUB_ENV
+          echo "TARGET_REPO=LuminaireKernel-${{ inputs.kernel_version }}" >> $GITHUB_ENV
 
-          if git clone --branch "${BRANCH}" "${REPO_URL}" kernel-work 2>/tmp/clone.log; then
-            cd kernel-work
-          elif grep -q "Remote branch ${BRANCH} not found" /tmp/clone.log; then
-            if [ "${{ inputs.force_adopt }}" != "true" ]; then
-              echo "::error::Branch ${BRANCH} doesn't exist yet on ${REPO}. Re-run with force_adopt=true to create it (first sync on a fresh repo)."
-              exit 1
-            fi
-            echo "Branch ${BRANCH} doesn't exist yet on ${REPO} — creating it as a new orphan branch."
-            git clone "${REPO_URL}" kernel-work
-            cd kernel-work
-            git checkout --orphan "${BRANCH}"
-            git rm -rf . --quiet 2>/dev/null || true
-          else
-            echo "::error::Clone failed for a reason other than a missing branch:"
-            cat /tmp/clone.log
-            exit 1
-          fi
+      # force_adopt path: a clean, standalone `git clone --depth=N` direct
+      # from live ACK, pushed straight to the target repo/branch. This is
+      # the well-supported shallow-push pattern (fresh clone -> push
+      # elsewhere). Fetching a shallow ref INTO an already-existing clone
+      # (the non-adopt path below) is a messier case that previously failed
+      # with "did not receive expected object" — that's why adopt gets its
+      # own simpler, more reliable path instead of reusing the ff-only flow.
+      - name: "Adopt live ACK (fresh clone, force push)"
+        if: ${{ inputs.force_adopt == true }}
+        run: |
+          ACK_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
 
+          git clone --depth=100 --branch "${ACK_BRANCH}" --progress \
+            "https://android.googlesource.com/kernel/common" ack-fresh
+          cd ack-fresh
           git config user.name "chainonyourdoor"
           git config user.email "chainonyourdoor@gmail.com"
 
-      - name: "Fetch live ACK history"
+          git remote add target \
+            "https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${TARGET_REPO}.git"
+          git push target "HEAD:${TARGET_BRANCH}" --force
+
+          VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
+          PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
+          SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
+          echo "Adopted live ACK ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} as new base for ${TARGET_REPO}@${TARGET_BRANCH}"
+
+      # Everything below only runs when NOT adopting — normal incremental
+      # sync against a target repo that already has real ACK history.
+      - name: "Clone target repo (LuminaireKernel)"
+        if: ${{ inputs.force_adopt == false }}
+        run: |
+          REPO_URL="https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${TARGET_REPO}.git"
+          git clone --branch "${TARGET_BRANCH}" "${REPO_URL}" kernel-work || {
+            echo "::error::Clone failed. If ${TARGET_BRANCH} doesn't exist yet on ${TARGET_REPO}, re-run with force_adopt=true first."
+            exit 1
+          }
+          cd kernel-work
+          git config user.name "chainonyourdoor"
+          git config user.email "chainonyourdoor@gmail.com"
+
+      - name: "Fetch + fast-forward to live ACK"
+        if: ${{ inputs.force_adopt == false }}
         run: |
           cd kernel-work
           ACK_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
           git remote add ack-live "https://android.googlesource.com/kernel/common"
 
-          # Progressive deepen: start at 100 commits (kept small so the
-          # eventual push doesn't exceed GitHub's 2GB pack limit on a fresh
-          # adopt), grow if the merge-base isn't found yet (skip this loop
-          # if force_adopt is explicitly true).
-          DEPTH=100
+          # Small depth is enough here: this only needs to reach commits
+          # newer than our current tip, which — since our tip already IS a
+          # real ACK commit — should be very close by.
+          DEPTH=50
           git fetch ack-live "${ACK_BRANCH}" --depth="${DEPTH}" --progress
 
-          if [ "${{ inputs.force_adopt }}" != "true" ]; then
-            for i in 1 2 3; do
-              if git merge-base HEAD ack-live/FETCH_HEAD >/dev/null 2>&1 || \
-                 git merge-base HEAD FETCH_HEAD >/dev/null 2>&1; then
-                echo "Merge-base found at depth ${DEPTH} ✅"
-                break
-              fi
-              DEPTH=$((DEPTH * 2))
-              echo "No merge-base yet, deepening to ${DEPTH}..."
-              git fetch ack-live "${ACK_BRANCH}" --depth="${DEPTH}" --progress
-            done
+          for i in 1 2 3; do
+            if git merge-base HEAD FETCH_HEAD >/dev/null 2>&1; then
+              echo "Merge-base found at depth ${DEPTH} ✅"
+              break
+            fi
+            DEPTH=$((DEPTH * 2))
+            echo "No merge-base yet, deepening to ${DEPTH}..."
+            git fetch ack-live "${ACK_BRANCH}" --depth="${DEPTH}" --progress
+          done
+
+          if ! git merge-base HEAD FETCH_HEAD >/dev/null 2>&1; then
+            echo "::error::No shared history with live ACK even at depth ${DEPTH}. If history has genuinely diverged (e.g. this repo's history was rewritten), re-run with force_adopt=true to re-adopt live ACK as a fresh base."
+            exit 1
           fi
 
-      - name: "Sync branch to live ACK"
-        run: |
-          cd kernel-work
-          if git merge-base HEAD FETCH_HEAD >/dev/null 2>&1; then
-            echo "Shared history found — fast-forwarding to live ACK"
-            git merge --ff-only FETCH_HEAD
-          else
-            if [ "${{ inputs.force_adopt }}" = "true" ]; then
-              echo "No shared history (expected on first run) — adopting live ACK as new base"
-              git reset --hard FETCH_HEAD
-            else
-              echo "::error::No shared history with live ACK and force_adopt=false. Re-run with force_adopt=true if this is the first sync, or investigate why history diverged."
-              exit 1
-            fi
-          fi
+          git merge --ff-only FETCH_HEAD
 
           VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
           PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
@@ -118,7 +132,7 @@ jobs:
           echo "Synced to ACK ${VERSION}.${PATCHLEVEL}.${SUBLEVEL}"
 
       - name: "Catch-up merge to linux-stable tag"
-        if: ${{ inputs.target_stable_tag != '' }}
+        if: ${{ inputs.force_adopt == false && inputs.target_stable_tag != '' }}
         run: |
           cd kernel-work
           git remote add stable "https://github.com/gregkh/linux.git"
@@ -155,33 +169,9 @@ jobs:
           SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
           echo "Caught up to ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} (target: ${{ inputs.target_stable_tag }})"
 
-      # Either fetch above (--depth on ack-live and/or stable) leaves a
-      # shallow boundary: the oldest commit(s) in local history reference
-      # parents we never fetched. GitHub's receive-pack rejects a push like
-      # that ("did not receive expected object") since it can't complete
-      # the graph. git-filter-repo treats shallow-boundary commits as
-      # synthetic roots, making the history self-contained and pushable
-      # without needing the full multi-GB upstream history.
-      - name: "Flatten shallow boundary for push"
-        run: |
-          cd kernel-work
-          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
-            pip install --user --break-system-packages git-filter-repo
-            export PATH="$HOME/.local/bin:${PATH}"
-            git filter-repo --force
-            # filter-repo drops the origin remote as a safety measure — re-add it.
-            git remote add origin \
-              "https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${TARGET_REPO}.git"
-          else
-            echo "Not shallow, nothing to flatten"
-          fi
-
       - name: "Push"
+        if: ${{ inputs.force_adopt == false }}
         run: |
           cd kernel-work
-          if [ "${{ inputs.force_adopt }}" = "true" ]; then
-            git push origin "${TARGET_BRANCH}" --force
-          else
-            git push origin "${TARGET_BRANCH}"
-          fi
+          git push origin "${TARGET_BRANCH}"
           echo "Pushed ${TARGET_REPO}@${TARGET_BRANCH}"
