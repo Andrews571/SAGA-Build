@@ -138,7 +138,7 @@ jobs:
             success=0
             push_size="n/a"
             for attempt in 1 2 3; do
-              push_log=$(git push --no-thin target "${commit_sha}:refs/heads/${TARGET_BRANCH}" --force 2>&1)
+              push_log=$(git push --no-thin --progress target "${commit_sha}:refs/heads/${TARGET_BRANCH}" --force 2>&1)
               push_exit=$?
               echo "$push_log"
               if [ "$push_exit" -eq 0 ]; then
@@ -178,7 +178,7 @@ jobs:
           done
 
           echo "All checkpoints pushed. Confirming final HEAD is in place..."
-          git push --no-thin target "HEAD:refs/heads/${TARGET_BRANCH}" --force
+          git push --no-thin --progress target "HEAD:refs/heads/${TARGET_BRANCH}" --force
 
           VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
           PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
