@@ -1,7 +1,7 @@
-name: ⬆️ Upstream Kernel Sync
+name: "🌀 Upstream Kernel Sync"
+run-name: "${{ inputs.android_version }} | ${{ inputs.kernel_version }}-lts"
 
-# Unlike sync-kernel.yml, this does not flatten/force-push a snapshot. The
-# target repo (LuminaireKernel-{version}) keeps real git history, so it
+# The target repo (LuminaireKernel-{version}) keeps real git history, so it
 # can be merged against linux-stable to catch up on subversions ACK hasn't
 # merged yet.
 #
