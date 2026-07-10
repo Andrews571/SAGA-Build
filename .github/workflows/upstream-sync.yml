@@ -1,7 +1,7 @@
 name: ⬆️ Upstream Kernel Sync
 
 # Unlike sync-kernel.yml, this does not flatten/force-push a snapshot. The
-# target repo (LuminaireKernel-{version}-lts) keeps real git history, so it
+# target repo (LuminaireKernel-{version}) keeps real git history, so it
 # can be merged against linux-stable to catch up on subversions ACK hasn't
 # merged yet.
 #
@@ -44,7 +44,7 @@ jobs:
       - name: "Clone target repo (LuminaireKernel)"
         run: |
           BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
-          REPO="LuminaireKernel-${{ inputs.kernel_version }}-lts"
+          REPO="LuminaireKernel-${{ inputs.kernel_version }}"
           echo "TARGET_BRANCH=${BRANCH}" >> $GITHUB_ENV
           echo "TARGET_REPO=${REPO}" >> $GITHUB_ENV
 
