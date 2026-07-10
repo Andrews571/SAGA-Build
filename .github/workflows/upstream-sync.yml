@@ -118,6 +118,9 @@ jobs:
           TOTAL=$(wc -l < /tmp/commits.txt)
           echo "Total commits to push: ${TOTAL}"
 
+          echo "Baseline local repo size (for reference only, not per-chunk):"
+          git count-objects -vH
+
           idx=0
           step=200
           min_step=1
@@ -133,9 +136,20 @@ jobs:
             echo "Pushing checkpoint ${target_idx}/${TOTAL} (${commit_sha}), step=${step}..."
 
             success=0
+            push_size="n/a"
             for attempt in 1 2 3; do
-              if git push --no-thin target "${commit_sha}:refs/heads/${TARGET_BRANCH}" --force; then
+              push_log=$(git push --no-thin target "${commit_sha}:refs/heads/${TARGET_BRANCH}" --force 2>&1)
+              push_exit=$?
+              echo "$push_log"
+              if [ "$push_exit" -eq 0 ]; then
                 success=1
+                # This is the actual bytes transferred for THIS chunk (not
+                # local repo total) — real number for calibrating step size,
+                # instead of estimating from unrelated repos.
+                parsed_size=$(echo "$push_log" | grep -E "Writing objects" | tail -1)
+                if [ -n "$parsed_size" ]; then
+                  push_size="$parsed_size"
+                fi
                 break
               fi
               echo "Push attempt ${attempt} failed, retrying in 5s..."
@@ -143,6 +157,8 @@ jobs:
             done
 
             if [ "$success" -eq 1 ]; then
+              chunk_commits=$(( target_idx - idx ))
+              echo "Checkpoint ${target_idx}/${TOTAL} OK — ${chunk_commits} commits — ${push_size}"
               idx=$target_idx
               fails_at_min=0
             elif [ "$step" -le "$min_step" ]; then
