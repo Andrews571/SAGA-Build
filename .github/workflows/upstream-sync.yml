@@ -121,6 +121,14 @@ jobs:
           echo "Baseline local repo size (for reference only, not per-chunk):"
           git count-objects -vH
 
+          # Numeric (KiB) version, used to derive an avg bytes/object ratio
+          # for estimating per-chunk size below. -H's human units (GiB/MiB)
+          # aren't reliably parseable back into a number.
+          BASELINE_INPACK=$(git count-objects -v | awk -F': ' '/^in-pack/{print $2}')
+          BASELINE_SIZEPACK_KIB=$(git count-objects -v | awk -F': ' '/^size-pack/{print $2}')
+          AVG_BYTES_PER_OBJ=$(awk -v s="$BASELINE_SIZEPACK_KIB" -v n="$BASELINE_INPACK" 'BEGIN{ if (n>0) printf "%.2f", (s*1024)/n; else print 0 }')
+          echo "Avg bytes/object (baseline): ${AVG_BYTES_PER_OBJ}"
+
           idx=0
           step=200
           min_step=1
@@ -138,17 +146,27 @@ jobs:
             success=0
             push_size="n/a"
             for attempt in 1 2 3; do
-              push_log=$(git push --no-thin --progress target "${commit_sha}:refs/heads/${TARGET_BRANCH}" --force 2>&1)
+              push_log=$(git push --no-thin target "${commit_sha}:refs/heads/${TARGET_BRANCH}" --force 2>&1)
               push_exit=$?
               echo "$push_log"
               if [ "$push_exit" -eq 0 ]; then
                 success=1
-                # This is the actual bytes transferred for THIS chunk (not
-                # local repo total) — real number for calibrating step size,
-                # instead of estimating from unrelated repos.
-                parsed_size=$(echo "$push_log" | grep -E "Writing objects" | tail -1)
-                if [ -n "$parsed_size" ]; then
-                  push_size="$parsed_size"
+                # Deliberately NOT parsing the live "Writing objects: X%"
+                # meter here — without a tty, git prints every percentage
+                # tick as its own line instead of overwriting one line, and
+                # a prior version of this script raced trying to grab the
+                # final one, ending up with the first (0%) tick instead.
+                # The "Total N (delta M)..." summary line is printed exactly
+                # once, after the push fully completes, so it can't race.
+                # It only has object counts, not bytes, so bytes are
+                # estimated from the baseline bytes/object ratio above.
+                obj_count=$(echo "$push_log" | grep -oE "^Total [0-9]+" | awk '{print $2}')
+                if [ -n "$obj_count" ]; then
+                  push_size=$(awk -v o="$obj_count" -v b="$AVG_BYTES_PER_OBJ" 'BEGIN{
+                    bytes = o * b
+                    if (bytes >= 1048576) printf "%d objects (~%.2f MiB est.)", o, bytes/1048576
+                    else printf "%d objects (~%.1f KiB est.)", o, bytes/1024
+                  }')
                 fi
                 break
               fi
@@ -178,7 +196,7 @@ jobs:
           done
 
           echo "All checkpoints pushed. Confirming final HEAD is in place..."
-          git push --no-thin --progress target "HEAD:refs/heads/${TARGET_BRANCH}" --force
+          git push --no-thin target "HEAD:refs/heads/${TARGET_BRANCH}" --force
 
           VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
           PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
