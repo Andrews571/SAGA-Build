@@ -107,11 +107,11 @@ restore_kernel_source() {
 }
 
 # ======================================================
-# 🏷️ BRANDING
+# 🔖 BRANDING
 # ======================================================
 
 run_branding() {
-    echo "::group::🏷️ Branding"
+    echo "::group::🔖 Branding"
     SUBLEVEL="$(grep '^SUBLEVEL = ' "${KERNEL_SRC}/Makefile" | awk '{print $3}')"
     [ -n "$SUBLEVEL" ] || error "SUBLEVEL not found in kernel Makefile — kernel source may be missing or corrupted!"
     KMI_GENERATION="$(grep '^KMI_GENERATION=' \
@@ -125,13 +125,13 @@ run_branding() {
 }
 
 # ======================================================
-# 🔑 ROOT SOLUTION & SUSFS
+# 🍀 ROOT SOLUTION & SUSFS
 # ======================================================
 
 run_variant() {
     local script="${VERSION_PATCH_DIR}/ksu/${KERNEL_VARIANT,,}/${KERNEL_VARIANT,,}.sh"
     if [ -f "$script" ]; then
-        echo "::group::🔑 Root Solution (${KERNEL_VARIANT})"
+        echo "::group::🍀 Root Solution (${KERNEL_VARIANT})"
         source "$script" || error "Root solution script failed: $(basename "$script")"
         echo "::endgroup::"
     fi
