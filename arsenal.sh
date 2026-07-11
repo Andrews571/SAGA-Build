@@ -33,8 +33,11 @@ LUMINAIRE_PATCH_DIR="${ROOT_DIR}"
 
 main() {
     echo "========================================"
-    echo "  ✨ Luminaire Arsenal — ${KERNEL_VERSION}"
+    echo "  ✨ Luminaire Arsenal ✨"
+    echo "========================================"
+    echo "  🏷️ ${ANDROID_VERSION}-${KERNEL_VERSION}"
     echo "  🖥️ CPU: $(nproc --all) cores"
+    echo "  💾 RAM: $(free -h | grep Mem | awk '{print $2}')"
     echo "  📅 $(date)"
     echo "========================================"
 
@@ -49,8 +52,12 @@ main() {
     # part of the download itself.
     echo "::group::🏁 Finalize"
     wait_for_apt
-    log "✅ Arsenal ready!"
     echo "::endgroup::"
+
+    echo "========================================"
+    echo "  ✅ Arsenal Ready! ✅"
+    echo "  🏷️ ${ANDROID_VERSION}-${KERNEL_VERSION}"
+    echo "========================================"
 }
 
 

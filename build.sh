@@ -39,7 +39,10 @@ LUMINAIRE_PATCH_DIR="${ROOT_DIR}"
 
 main() {
     echo "========================================"
-    echo "  ✨ Luminaire Protocol — ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")$([ "${DRY_RUN:-false}" = "true" ] && echo " — 🧪 DRY RUN")"
+    echo "  ✨ Luminaire Protocol ✨"
+    echo "========================================"
+    echo "  🏷️ ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")"
+    [ "${DRY_RUN:-false}" = "true" ] && echo "  🧪 DRY RUN"
     echo "  🖥️ CPU: $(nproc --all) cores"
     echo "  💾 RAM: $(free -h | grep Mem | awk '{print $2}')"
     echo "  📅 $(date)"
@@ -72,7 +75,8 @@ main() {
 
     if [ "${RUN_MODE^^}" = "WARMING" ]; then
         echo "========================================"
-        echo "  🔥 Warming Complete! — ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")"
+        echo "  🔥 Warming Complete! 🔥"
+        echo "  🏷️ ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")"
         echo "========================================"
         exit 0
     fi
@@ -80,7 +84,8 @@ main() {
     run_release
 
     echo "========================================"
-    echo "  ✅ Build Complete! — ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")"
+    echo "  ✅ Build Complete! ✅"
+    echo "  🏷️ ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")"
     echo "========================================"
 }
 
