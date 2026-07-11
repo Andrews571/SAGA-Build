@@ -18,6 +18,10 @@ source "${LUMINAIRE_PATCH_DIR}/release/telegram/common.sh"
 # ------------------------------------------------------
 # Guard clauses
 # ------------------------------------------------------
+if [ "${DRY_RUN:-false}" = "true" ]; then
+    log "Skipping Telegram: Dry Run mode (pipeline test only)"
+    return 0
+fi
 if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
     warn "Skipping Telegram: TELEGRAM_BOT_TOKEN not set"
     return 0
@@ -32,16 +36,14 @@ if [ ! -f "${ZIP_PATH:-}" ]; then
 fi
 
 # Pick the destination topic from RUN_MODE. Warming mode never reaches this
-# script (build.sh exits before run_release), so only Dry Run/Test/Release
-# are valid here — anything else is a misconfiguration, not a silent no-op.
-# Dry Run shares the Test topic since it's a Test-flavored run under the
-# hood, just with a placeholder image (see DRY_RUN caption note below).
+# script (build.sh exits before run_release), and Dry Run returns above
+# before this point — so only Test/Release are valid here, anything else
+# is a misconfiguration, not a silent no-op.
 RUN_MODE_UPPER="${RUN_MODE^^}"
 case "$RUN_MODE_UPPER" in
-    "DRY RUN") TARGET_THREAD_ID="${TELEGRAM_THREAD_ID_TEST:-}" ;;
     TEST)      TARGET_THREAD_ID="${TELEGRAM_THREAD_ID_TEST:-}" ;;
     RELEASE)   TARGET_THREAD_ID="${TELEGRAM_THREAD_ID_RELEASE:-}" ;;
-    *)         error "Telegram: unknown RUN_MODE '${RUN_MODE:-}' — expected Dry Run, Test, or Release" ;;
+    *)         error "Telegram: unknown RUN_MODE '${RUN_MODE:-}' — expected Test or Release" ;;
 esac
 if [ -z "$TARGET_THREAD_ID" ]; then
     warn "Skipping Telegram: no thread id configured for RUN_MODE=${RUN_MODE}"
@@ -120,7 +122,6 @@ KERNEL_VARIANT_DISPLAY="$KERNEL_VARIANT_DISPLAY" \
 KERNEL_VARIANT_VERSION="$KERNEL_VARIANT_VERSION" \
 SUSFS_VER="$SUSFS_VER" \
 ADDONS="${ADDONS:-}" \
-DRY_RUN="${DRY_RUN:-false}" \
 GITHUB_SHA="${GITHUB_SHA:-}" \
 GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
