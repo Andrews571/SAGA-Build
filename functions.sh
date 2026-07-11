@@ -150,3 +150,18 @@ cache_freshness_note() {
         echo "existing cache, no refresh requested — set 'Update Arsenal' to force"
     fi
 }
+
+# Emoji for a given RUN_MODE, used in build.sh's opening/closing banners.
+# Kept as a lookup instead of embedding the emoji into RUN_MODE itself,
+# since RUN_MODE is exact-string-compared elsewhere (scout.sh, telegram.sh,
+# and build.sh's own "${RUN_MODE^^}" = "WARMING" check) — mutating its
+# value here would silently break those.
+mode_emoji() {
+    case "$1" in
+        "Dry Run") echo "🧪" ;;
+        "Warming") echo "🔥" ;;
+        "Test")    echo "🔬" ;;
+        "Release") echo "🚀" ;;
+        *)         echo "❓" ;;
+    esac
+}

@@ -42,7 +42,7 @@ main() {
     echo "  ✨ Luminaire Protocol ✨"
     echo "========================================"
     echo "  🏷️ ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")"
-    [ "${DRY_RUN:-false}" = "true" ] && echo "  🧪 DRY RUN"
+    echo "  $(mode_emoji "$RUN_MODE") ${RUN_MODE}"
     echo "  🖥️ CPU: $(nproc --all) cores"
     echo "  💾 RAM: $(free -h | grep Mem | awk '{print $2}')"
     echo "  📅 $(date)"
@@ -75,7 +75,7 @@ main() {
 
     if [ "${RUN_MODE^^}" = "WARMING" ]; then
         echo "========================================"
-        echo "  🔥 Warming Complete! 🔥"
+        echo "  $(mode_emoji "$RUN_MODE") ${RUN_MODE} Complete! $(mode_emoji "$RUN_MODE")"
         echo "  🏷️ ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")"
         echo "========================================"
         exit 0
@@ -84,7 +84,7 @@ main() {
     run_release
 
     echo "========================================"
-    echo "  ✅ Build Complete! ✅"
+    echo "  $(mode_emoji "$RUN_MODE") ${RUN_MODE} Complete! $(mode_emoji "$RUN_MODE")"
     echo "  🏷️ ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")"
     echo "========================================"
 }
