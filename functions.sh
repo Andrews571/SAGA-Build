@@ -77,7 +77,7 @@ write_dry_run_image() {
 # table only needs updating in one place when a new kernel is added.
 resolve_android_version() {
     case "${KERNEL_VERSION}" in
-        "5.10") echo "android13" ;;
+        "5.10") echo "android12" ;;
         "5.15") echo "android13" ;;
         "6.1")  echo "android14" ;;
         "6.6")  echo "android15" ;;
