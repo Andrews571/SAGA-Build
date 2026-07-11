@@ -210,7 +210,7 @@ jobs:
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
   # ======================================================
-  # BUILD PER VARIANT (parallel)
+  # BUILD VARIANT (parallel)
   # ======================================================
   Start-Build:
     name: "Build Kernel (${{ matrix.kernel_variant }}${{ matrix.susfs && '+SUSFS' || '' }})"
@@ -295,7 +295,7 @@ jobs:
         if: matrix.kernel_variant != 'VANILLA'
         run: bash kernel/checkpoint/scout.sh
 
-      - name: "Build"
+      - name: "Cooking (${{ matrix.kernel_variant }}${{ matrix.susfs && '+SUSFS' || '' }})"
         id: build
         run: bash build.sh
 
