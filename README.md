@@ -17,7 +17,7 @@
 **LuminaireProtocol** is a build orchestration repository for the **Luminaire** Android GKI kernel.
 This repo does **not** contain kernel source — it contains all the scripts and GitHub Actions workflows that:
 
-1. Download the kernel source from `chainonyourdoor/android_kernel_common-*`
+1. Download the kernel source from `chainonyourdoor/LuminaireKernel-*`
 2. Apply patches, integrations, and addons
 3. Build the kernel via **MAKE** or **KLEAF** (Bazel)
 4. Package and release via AnyKernel3 + Telegram
@@ -30,7 +30,7 @@ This repo does **not** contain kernel source — it contains all the scripts and
 - `6.6` — android15-6.6-lts
 - `6.12` — android16-6.12-lts
 - `5.15` — android13-5.15-lts
-- `5.10` — android13-5.10-lts
+- `5.10` — android12-5.10-lts
 
 ---
 
