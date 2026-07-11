@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/primer/octicons/main/icons/cpu-24.svg" width="64" height="64" />
 
-# ✨ LuminaireProtocol
+# LuminaireProtocol
 
 **CI/build orchestration for the Luminaire Android GKI kernel**
 
