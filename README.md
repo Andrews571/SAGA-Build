@@ -41,7 +41,7 @@ This repo does **not** contain kernel source — it contains all the scripts and
 
 ---
 
-## 🔑 Root Solutions
+## 🍀 Root Solutions
 
 | Variant | KSU Fork | SuSFS |
 |---------|----------|-------|
