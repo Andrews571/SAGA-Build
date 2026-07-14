@@ -234,12 +234,20 @@ jobs:
           # Shallow, not a full clone: the target repo now holds real,
           # complete ACK history (millions of commits after the adopt step),
           # and a routine incremental sync only ever needs recent history to
-          # fast-forward/merge from. This is safe to shallow-push from too —
-          # unlike the adopt case, the remote branch here is never empty, so
-          # none of the earlier "did not receive expected object" issues
-          # apply. If a later step needs more depth than this to find a
-          # merge-base, it deepens this same local clone with
+          # fast-forward/merge from. If a later step needs more depth than
+          # this to find a merge-base, it deepens this same local clone with
           # `git fetch origin --deepen=N` rather than starting over.
+          #
+          # NOTE: shallow here is NOT safe to push from directly. An earlier
+          # version of this comment assumed it was ("the remote branch here
+          # is never empty, so none of the earlier 'did not receive expected
+          # object' issues apply") — that assumption is wrong. Once the
+          # "Fetch + fast-forward to live ACK" step merges in commits from a
+          # *different* remote (ack-live/AOSP), the local object graph no
+          # longer lines up cleanly with what origin already has, and a
+          # shallow push fails with the same "did not receive expected
+          # object" error as the adopt case. The Push step below unshallows
+          # first to fix this.
           #
           # Try PUSH_BRANCH first (the staging branch, when catching up to a
           # stable tag) — it may already exist from a previous catch-up
@@ -348,6 +356,14 @@ jobs:
         if: ${{ inputs.force_adopt == false }}
         run: |
           cd kernel-work
+          # Unshallow before pushing: after the previous step fast-forwards
+          # onto commits fetched from a different remote (ack-live/AOSP),
+          # the local object graph doesn't line up cleanly with what origin
+          # already has, so a shallow push fails with "did not receive
+          # expected object". Full history relative to origin is required
+          # for git to correctly compute what to send.
+          git fetch origin --unshallow --progress
+
           # Explicit refspec, not just `git push origin ${PUSH_BRANCH}` —
           # the local branch name after "Clone target repo" could be either
           # PUSH_BRANCH or TARGET_BRANCH depending on which one existed to
