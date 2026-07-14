@@ -4,19 +4,19 @@
 # ⚙️ TELEGRAM CONFIG
 # ======================================================
 
-TELEGRAM_CHAT_ID="-1004391786664"
-TELEGRAM_CI_GROUP="LuminaireCI"       # bot notifications (Test/Release/Event topics)
-TELEGRAM_GROUP="LuminaireLab"         # community discussion group
-TELEGRAM_CHANNEL="LuminaireProtocol"       # public channel username (for t.me links)
+TELEGRAM_CHAT_ID="-1004443561826"
+TELEGRAM_CI_GROUP="Priv_Kernel"
+TELEGRAM_GROUP="Priv_Kernel"
+TELEGRAM_CHANNEL="Priv_Kernel"
 
 # Repository Event
-TELEGRAM_THREAD_ID_EVENT="4"
+TELEGRAM_THREAD_ID_EVENT="2"
 
-# Test Builds — for Test mode (flash-test before being declared stable)
+# Test Builds
 TELEGRAM_THREAD_ID_TEST="3"
 
-# Release Builds — for Release mode (stable build published to the channel)
-TELEGRAM_THREAD_ID_RELEASE="84"
+# Release Builds
+TELEGRAM_THREAD_ID_RELEASE="4"
 
 # Telegram Channel
-TELEGRAM_CHANNEL_ID="-1003777184726"
+TELEGRAM_CHANNEL_ID="-1004443561826"
