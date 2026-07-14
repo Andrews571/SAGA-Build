@@ -205,7 +205,6 @@ jobs:
         with:
           build-system:   ${{ inputs.build_system }}
           kernel-version: ${{ inputs.kernel_version }}
-          ref-name:       ${{ steps.set.outputs.safe_ref }}
           update-arsenal: ${{ inputs.update_arsenal }}
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 

@@ -6,8 +6,6 @@ inputs:
     required: true
   kernel-version:
     required: true
-  ref-name:
-    required: true
   update-arsenal:
     required: true
   gh-token:
@@ -36,7 +34,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
       run: |
-        gh cache delete "arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}" -R "${{ github.repository }}" 2>/dev/null || true
+        gh cache delete "arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}" -R "${{ github.repository }}" 2>/dev/null || true
         if [ "${{ startsWith(inputs.build-system, 'Make') }}" = "true" ]; then
           gh cache delete "clang-${{ steps.clang-key.outputs.clang_variant }}" -R "${{ github.repository }}" 2>/dev/null || true
         fi
@@ -56,7 +54,7 @@ runs:
           ~/ak3-cache
           ~/kernel-cache
           ~/.apt-cache
-        key: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}-${{ inputs.ref-name }}
+        key: arsenal-${{ startsWith(inputs.build-system, 'Make') && 'MAKE' || 'KLEAF' }}-${{ inputs.kernel-version }}
 
     - name: "Run Arsenal"
       shell: bash
