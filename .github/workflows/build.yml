@@ -360,8 +360,17 @@ jobs:
         with:
           build-system:   ${{ inputs.build_system }}
           lto-mode:     ${{ inputs.lto_mode }}
-          lto-asset-name: lto-data-${{ inputs.kernel_version }}-${{ steps.setup-build-env.outputs.clang-variant }}-${{ matrix.kernel_variant }}-${{ needs.prepare-matrix.outputs.safe_ref }}-lto.tar.zst
-          ccache-prefix:  ccache-data-${{ matrix.kernel_variant }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.kernel_version }}-${{ inputs.lto_mode != 'NONE' && format('lto-{0}-', inputs.lto_mode) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ needs.prepare-matrix.outputs.safe_ref }}-
+          # Both filenames share the same field order — kernel_version,
+          # kernel_variant(+susfs), lto_mode, clang variant, ref — differing
+          # only in the trailing "-ccache"/"-lto" tag, so the two asset
+          # types line up visually in the Release's Assets list instead of
+          # each having its own ad-hoc field order. lto-asset-name now
+          # includes susfs too: it didn't before, which meant a SUSFS and
+          # non-SUSFS build of the same variant/clang/ref silently clobbered
+          # and restored each other's LTO cache (their compiled IR differs,
+          # since susfs patches add code that feeds into LTO).
+          lto-asset-name: ${{ inputs.kernel_version }}-${{ matrix.kernel_variant }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.lto_mode != 'NONE' && format('{0}-', inputs.lto_mode) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ needs.prepare-matrix.outputs.safe_ref }}-lto.tar.zst
+          ccache-prefix:  ${{ inputs.kernel_version }}-${{ matrix.kernel_variant }}${{ matrix.susfs && '-susfs' || '' }}-${{ inputs.lto_mode != 'NONE' && format('{0}-', inputs.lto_mode) || '' }}${{ steps.setup-build-env.outputs.clang-variant }}-${{ needs.prepare-matrix.outputs.safe_ref }}-
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Upload Variant Link"  # for channel post aggregation

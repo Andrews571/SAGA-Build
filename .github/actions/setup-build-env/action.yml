@@ -55,7 +55,10 @@ runs:
       if: startsWith(inputs.build-system, 'Make')
       uses: ./.github/actions/restore-caches
       with:
-        ccache-prefix: ccache-data-${{ inputs.kernel-variant }}${{ inputs.susfs == 'true' && '-susfs' || '' }}-${{ inputs.kernel-version }}-${{ inputs.lto-mode != 'NONE' && format('lto-{0}-', inputs.lto-mode) || '' }}${{ steps.clang-key.outputs.clang_variant }}-${{ inputs.ref-name }}-
+        # Must match the Save step's ccache-prefix in build.yml exactly
+        # (same field order, same susfs handling) or restore silently
+        # misses the asset the save step actually wrote.
+        ccache-prefix: ${{ inputs.kernel-version }}-${{ inputs.kernel-variant }}${{ inputs.susfs == 'true' && '-susfs' || '' }}-${{ inputs.lto-mode != 'NONE' && format('{0}-', inputs.lto-mode) || '' }}${{ steps.clang-key.outputs.clang_variant }}-${{ inputs.ref-name }}-
         kernel-version: ${{ inputs.kernel-version }}
         gh-token: ${{ inputs.gh-token }}
 
@@ -63,5 +66,8 @@ runs:
       if: startsWith(inputs.build-system, 'Make') && inputs.lto-mode == 'THIN'
       uses: ./.github/actions/restore-lto-cache
       with:
-        asset-name: lto-data-${{ inputs.kernel-version }}-${{ steps.clang-key.outputs.clang_variant }}-${{ inputs.kernel-variant }}-${{ inputs.ref-name }}-lto.tar.zst
+        # Must match the Save step's lto-asset-name in build.yml exactly.
+        # Includes susfs (a prior version of this didn't — see build.yml's
+        # comment on the Save Build Caches step for why that was a bug).
+        asset-name: ${{ inputs.kernel-version }}-${{ inputs.kernel-variant }}${{ inputs.susfs == 'true' && '-susfs' || '' }}-${{ inputs.lto-mode != 'NONE' && format('{0}-', inputs.lto-mode) || '' }}${{ steps.clang-key.outputs.clang_variant }}-${{ inputs.ref-name }}-lto.tar.zst
         gh-token:   ${{ inputs.gh-token }}
