@@ -5,7 +5,7 @@
 # SAGA KERNEL
 
 [![Build](https://img.shields.io/github/actions/workflow/status/chainonyourdoor/LuminaireProtocol/build.yml?branch=main&label=build&logo=github&style=for-the-badge)](https://github.com/Andrews571/LuminaireProtocol/actions)
-[![Telegram](https://img.shields.io/badge/Telegram-Luminaire-blue?style=for-the-badge&logo=telegram)](https://t.me/c/4443561826/1)
+[![Telegram](https://img.shields.io/badge/Telegram-SAGA-blue?style=for-the-badge&logo=telegram)](https://t.me/c/4443561826/1)
 </div>
 
 ---
