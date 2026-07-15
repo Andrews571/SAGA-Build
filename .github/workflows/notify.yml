@@ -2,6 +2,8 @@ name: "📡 Notify"
 
 on:
   push:
+    tags-ignore:
+      - '**'   # ignore tag pushes (e.g. the "cache" release tag) — only real branch commits notify
 
 jobs:
 
@@ -19,6 +21,8 @@ jobs:
       - name: "📌 Notify Push"
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          TELEGRAM_THREAD_ID_EVENT: ${{ vars.TELEGRAM_THREAD_ID_EVENT }}
           COMMIT:     ${{ github.sha }}
           BRANCH:     ${{ github.ref_name }}
           MESSAGE:    ${{ github.event.head_commit.message }}
@@ -29,22 +33,29 @@ jobs:
           source "$GITHUB_WORKSPACE/release/telegram/config.sh"
           source "$GITHUB_WORKSPACE/release/telegram/common.sh"
           TELEGRAM_THREAD_ID="$TELEGRAM_THREAD_ID_EVENT"
-
+          SHORT_COMMIT="${COMMIT:0:7}"
           TITLE=$(printf '%s' "$MESSAGE" | head -1)
           BODY=$(printf '%s' "$MESSAGE" | tail -n +3)
 
-          CAPTION_FILE="/tmp/telegram_push_caption.txt"
-          BRANCH="$BRANCH" AUTHOR="$AUTHOR" COMMIT="$COMMIT" URL="$URL" TITLE="$TITLE" BODY="$BODY" \
-            python3 "$GITHUB_WORKSPACE/release/telegram/caption.py" push "$CAPTION_FILE" \
-            || error "Notify: caption builder failed!"
+          html_escape() {
+            printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
+          }
 
-          TEXT="$(cat "$CAPTION_FILE")"
-          rm -f "$CAPTION_FILE"
+          TITLE_ESC=$(html_escape "$TITLE")
+          BODY_ESC=$(html_escape "$BODY")
+          AUTHOR_ESC=$(html_escape "$AUTHOR")
+
+          TEXT=$(printf '📌 New Commit : <a href="%s">%s</a>\nBranch : <code>%s</code>\nAuthor : %s\n\nTitle:\n<i>%s</i>' \
+            "$URL" "$SHORT_COMMIT" "$BRANCH" "$AUTHOR_ESC" "$TITLE_ESC")
+
+          if [ -n "$BODY" ]; then
+            TEXT=$(printf '%s\n\nMessage:\n<pre>%s</pre>' "$TEXT" "$BODY_ESC")
+          fi
 
           if telegram_api_call "sendMessage" /tmp/tg_push_response.json "Push notify" \
                   -d "chat_id=${TELEGRAM_CHAT_ID}" \
                   -d "message_thread_id=${TELEGRAM_THREAD_ID}" \
-                  -d "parse_mode=MarkdownV2" \
+                  -d "parse_mode=HTML" \
                   -d "disable_web_page_preview=true" \
                   --data-urlencode "text=${TEXT}"; then
               log "Notify sent ✅"
