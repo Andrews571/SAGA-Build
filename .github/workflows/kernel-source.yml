@@ -275,7 +275,7 @@ jobs:
           git config user.name "chainonyourdoor"
           git config user.email "chainonyourdoor@gmail.com"
 
-      - name: "Fetch + merge live ACK (android14-6.1 + android14-6.1-lts)"
+      - name: "Fetch + merge live ACK (${{ inputs.android_version }}-${{ inputs.kernel_version }} + ${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts)"
         if: ${{ inputs.force_adopt == false }}
         run: |
           cd kernel-work
