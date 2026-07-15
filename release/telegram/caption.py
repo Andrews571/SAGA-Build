@@ -41,7 +41,6 @@ ADDON_DISPLAY_NAMES = {
     "bore":        "BORE",
     "adios":       "ADIOS",
     "kasumi":      "Kasumi",
-    "ipset":       "IPSet",
     "ntsync":      "NTSync",
 }
 
@@ -52,7 +51,7 @@ MOUNTLESS_ADDON_TOKENS = ("nomount", "zeromount")
 
 # Toggle-style addons shown as explicit Enable/Disable lines in the group
 # caption, in display order.
-TOGGLE_ADDON_ORDER = ["rekernel", "bbrv3", "bbg", "droidspaces", "bore", "adios", "kasumi", "ntsync", "ipset"]
+TOGGLE_ADDON_ORDER = ["rekernel", "bbrv3", "bbg", "droidspaces", "bore", "adios", "kasumi", "ntsync"]
 
 
 def mdv2_escape(s):
