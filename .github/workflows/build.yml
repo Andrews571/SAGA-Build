@@ -223,6 +223,9 @@ jobs:
     env:
       PERSONAL_TOKEN:              ${{ secrets.PERSONAL_TOKEN }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:            ${{ vars.TELEGRAM_CHAT_ID }}
+      TELEGRAM_THREAD_ID_TEST:     ${{ vars.TELEGRAM_THREAD_ID_TEST }}
+      TELEGRAM_THREAD_ID_RELEASE:  ${{ vars.TELEGRAM_THREAD_ID_RELEASE }}
       USE_KERNEL_CACHE:            "true"
       USE_AK3_CACHE:               "true"
       USE_CLANG_CACHE:             "true"
