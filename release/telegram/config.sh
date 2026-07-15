@@ -3,20 +3,25 @@
 # ======================================================
 # ⚙️ TELEGRAM CONFIG
 # ======================================================
+# These are DEFAULTS only. If a same-named repository Variable is set in
+# GitHub (Settings -> Secrets and variables -> Actions -> Variables), its
+# value wins instead via the ${VAR:-default} fallback below. This keeps
+# this file's own text stable across upstream syncs — your real values
+# live in the repo's Variables, never in this tracked file.
 
-TELEGRAM_CHAT_ID="-1004443561826"
-TELEGRAM_CI_GROUP="Priv_Kernel"
-TELEGRAM_GROUP="Priv_Kernel"
-TELEGRAM_CHANNEL="Priv_Kernel"
+TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:--1004391786664}"
+TELEGRAM_CI_GROUP="${TELEGRAM_CI_GROUP:-Demacia_Kernel}"       # bot notifications (Test/Release/Event topics)
+TELEGRAM_GROUP="${TELEGRAM_GROUP:-Demacia_Kernel}"            # community discussion group
+TELEGRAM_CHANNEL="${TELEGRAM_CHANNEL:-Demacia_Kernel}"   # public channel username (for t.me links)
 
 # Repository Event
-TELEGRAM_THREAD_ID_EVENT="2"
+TELEGRAM_THREAD_ID_EVENT="${TELEGRAM_THREAD_ID_EVENT:-4}"
 
-# Test Builds
-TELEGRAM_THREAD_ID_TEST="3"
+# Test Builds — for Test mode (flash-test before being declared stable)
+TELEGRAM_THREAD_ID_TEST="${TELEGRAM_THREAD_ID_TEST:-3}"
 
-# Release Builds
-TELEGRAM_THREAD_ID_RELEASE="4"
+# Release Builds — for Release mode (stable build published to the channel)
+TELEGRAM_THREAD_ID_RELEASE="${TELEGRAM_THREAD_ID_RELEASE:-4}"
 
 # Telegram Channel
-TELEGRAM_CHANNEL_ID="-1004443561826"
+TELEGRAM_CHANNEL_ID="${TELEGRAM_CHANNEL_ID:--1003777184726}"
