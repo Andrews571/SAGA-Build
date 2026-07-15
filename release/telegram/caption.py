@@ -170,7 +170,7 @@ def build_push_caption(env):
     this repo is a solo project, so the git author name and the Telegram
     handle are the same person; no separate mapping needed.
     """
-    branch      = mdv2_escape(env.get("BRANCH", ""))
+    branch_raw  = env.get("BRANCH", "")
     author      = env.get("AUTHOR", "")
     author_esc  = mdv2_escape(author)
     author_url  = mdv2_escape_url("https://t.me/{}".format(author))
@@ -184,7 +184,7 @@ def build_push_caption(env):
     lines = [
         "New Commit \U0001F4CC",
         "",
-        f"Branch : {branch}",
+        f"Branch : `{mdv2_code_escape(branch_raw)}`",
         f"Author : [{author_esc}]({author_url})",
         "```Tittle\n" + mdv2_code_escape(title) + "```",
     ]
