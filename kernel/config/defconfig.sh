@@ -39,6 +39,25 @@ fi
 
 log "Luminaire defconfig applied ✅"
 
+# DAMON_RECLAIM / DAMON_LRU_SORT are compiled in via the fragment above,
+# but each only activates through its own module_param ("enabled",
+# defaulting to false) — there's no Kconfig default for that, the kernel
+# devs' own comment says it's meant to be set "via command line". Append
+# it to CONFIG_CMDLINE (string config, must read-then-append or we'd
+# clobber the existing console=/kasan.*/kvm-arm.* params already there).
+# CONFIG_CMDLINE_EXTEND=y means this still gets merged with whatever
+# cmdline the bootloader/vendor_boot provides on top of this.
+DAMON_CMDLINE_EXTRA="damon_reclaim.enabled=1 damon_lru_sort.enabled=1"
+CURRENT_CMDLINE=$(config --state CONFIG_CMDLINE 2>/dev/null | tr -d '"' || true)
+if echo "$CURRENT_CMDLINE" | grep -q "damon_reclaim.enabled"; then
+    log "DAMON: cmdline params already present ✅"
+elif [ -z "$CURRENT_CMDLINE" ] || [ "$CURRENT_CMDLINE" = "undef" ]; then
+    warn "DAMON: CONFIG_CMDLINE state unknown — skipping cmdline patch"
+else
+    config --set-str CONFIG_CMDLINE "${CURRENT_CMDLINE} ${DAMON_CMDLINE_EXTRA}"
+    log "DAMON: reclaim+lru_sort enabled via CONFIG_CMDLINE ✅"
+fi
+
 # BBG requires baseband_guard in CONFIG_LSM — patch here because .config
 # is not available when bbg.sh runs (before make defconfig)
 if [ "${BBG_ENABLED:-false}" = "true" ]; then
