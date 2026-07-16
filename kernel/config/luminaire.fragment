@@ -78,3 +78,15 @@ CONFIG_IP_NF_TARGET_TTL=y
 CONFIG_UBSAN=n
 CONFIG_PAGE_OWNER=n
 CONFIG_RCU_TRACE=n
+
+# RCU Lazy — force default-ON (fewer idle wakeups, small battery win)
+CONFIG_RCU_LAZY=y
+CONFIG_RCU_LAZY_DEFAULT_OFF=n
+
+# DAMON schemes (DAMOS) — proactive cold-page reclaim + access-aware LRU
+# sorting. Both need CONFIG_DAMON_PADDR; runtime "enabled" toggle for
+# each is handled separately via CONFIG_CMDLINE (see defconfig.sh) since
+# it's a runtime module_param, not something a defconfig line can set.
+CONFIG_DAMON_PADDR=y
+CONFIG_DAMON_RECLAIM=y
+CONFIG_DAMON_LRU_SORT=y
