@@ -1,0 +1,370 @@
+diff --git a/include/linux/damon.h b/include/linux/damon.h
+index 54e02ca54..58198b5ae 100644
+--- a/include/linux/damon.h
++++ b/include/linux/damon.h
+@@ -577,6 +577,8 @@ static inline unsigned int damon_max_nr_accesses(const struct damon_attrs *attrs
+ 
+ int damon_start(struct damon_ctx **ctxs, int nr_ctxs, bool exclusive);
+ int damon_stop(struct damon_ctx **ctxs, int nr_ctxs);
++bool damon_is_running(struct damon_ctx *ctx);
++int damon_kdamond_pid(struct damon_ctx *ctx);
+ 
+ int damon_set_region_biggest_system_ram_default(struct damon_target *t,
+ 				unsigned long *start, unsigned long *end);
+diff --git a/mm/damon/core.c b/mm/damon/core.c
+index b55545201..cde856f0a 100644
+--- a/mm/damon/core.c
++++ b/mm/damon/core.c
+@@ -643,6 +643,39 @@ static bool damon_check_reset_time_interval(struct timespec64 *baseline,
+ 	return true;
+ }
+ 
++/**
++ * damon_is_running() - Returns if a given DAMON context is running.
++ * @ctx:	The DAMON context to see if running.
++ *
++ * Return: true if @ctx is running, false otherwise.
++ */
++bool damon_is_running(struct damon_ctx *ctx)
++{
++	bool running;
++
++	mutex_lock(&ctx->kdamond_lock);
++	running = ctx->kdamond != NULL;
++	mutex_unlock(&ctx->kdamond_lock);
++	return running;
++}
++
++/**
++ * damon_kdamond_pid() - Return pid of a given DAMON context's worker thread.
++ * @ctx:	The DAMON context of the question.
++ *
++ * Return: pid if @ctx is running, negative error code otherwise.
++ */
++int damon_kdamond_pid(struct damon_ctx *ctx)
++{
++	int pid = -EINVAL;
++
++	mutex_lock(&ctx->kdamond_lock);
++	if (ctx->kdamond)
++		pid = ctx->kdamond->pid;
++	mutex_unlock(&ctx->kdamond_lock);
++	return pid;
++}
++
+ /*
+  * Check whether it is time to flush the aggregated information
+  */
+@@ -851,6 +884,7 @@ static void damos_set_effective_quota(struct damos_quota *quota)
+ 	else
+ 		throughput = PAGE_SIZE * 1024;
+ 	esz = throughput * quota->ms;
++	esz = max(DAMON_MIN_REGION, esz);
+ 
+ 	if (quota->sz && quota->sz < esz)
+ 		esz = quota->sz;
+@@ -869,7 +903,8 @@ static void damos_adjust_quota(struct damon_ctx *c, struct damos *s)
+ 		return;
+ 
+ 	/* New charge window starts */
+-	if (time_after_eq(jiffies, quota->charged_from +
++	if (!time_in_range_open(jiffies, quota->charged_from,
++				quota->charged_from +
+ 				msecs_to_jiffies(quota->reset_interval))) {
+ 		if (quota->esz && quota->charged_sz >= quota->esz)
+ 			s->stat.qt_exceeds++;
+diff --git a/mm/damon/lru_sort.c b/mm/damon/lru_sort.c
+index 59d9b2901..87e0b42ac 100644
+--- a/mm/damon/lru_sort.c
++++ b/mm/damon/lru_sort.c
+@@ -111,15 +111,6 @@ module_param(monitor_region_start, ulong, 0600);
+ static unsigned long monitor_region_end __read_mostly;
+ module_param(monitor_region_end, ulong, 0600);
+ 
+-/*
+- * PID of the DAMON thread
+- *
+- * If DAMON_LRU_SORT is enabled, this becomes the PID of the worker thread.
+- * Else, -1.
+- */
+-static int kdamond_pid __read_mostly = -1;
+-module_param(kdamond_pid, int, 0400);
+-
+ static struct damos_stat damon_lru_sort_hot_stat;
+ DEFINE_DAMON_MODULES_DAMOS_STATS_PARAMS(damon_lru_sort_hot_stat,
+ 		lru_sort_tried_hot_regions, lru_sorted_hot_regions,
+@@ -247,28 +238,27 @@ static int damon_lru_sort_turn(bool on)
+ {
+ 	int err;
+ 
+-	if (!on) {
+-		err = damon_stop(&ctx, 1);
+-		if (!err)
+-			kdamond_pid = -1;
+-		return err;
+-	}
++	if (!on)
++		return damon_stop(&ctx, 1);
+ 
+ 	err = damon_lru_sort_apply_parameters();
+ 	if (err)
+ 		return err;
+ 
+-	err = damon_start(&ctx, 1, true);
+-	if (err)
+-		return err;
+-	kdamond_pid = ctx->kdamond->pid;
+-	return 0;
++	return damon_start(&ctx, 1, true);
++}
++
++static bool damon_lru_sort_enabled(void)
++{
++	if (!ctx)
++		return false;
++	return damon_is_running(ctx);
+ }
+ 
+ static int damon_lru_sort_enabled_store(const char *val,
+ 		const struct kernel_param *kp)
+ {
+-	bool is_enabled = enabled;
++	bool is_enabled = damon_lru_sort_enabled();
+ 	bool enable;
+ 	int err;
+ 
+@@ -292,15 +282,57 @@ static int damon_lru_sort_enabled_store(const char *val,
+ 	return err;
+ }
+ 
++static int damon_lru_sort_enabled_load(char *buffer,
++		const struct kernel_param *kp)
++{
++	return sprintf(buffer, "%c\n", damon_lru_sort_enabled() ? 'Y' : 'N');
++}
++
+ static const struct kernel_param_ops enabled_param_ops = {
+ 	.set = damon_lru_sort_enabled_store,
+-	.get = param_get_bool,
++	.get = damon_lru_sort_enabled_load,
+ };
+ 
+ module_param_cb(enabled, &enabled_param_ops, &enabled, 0600);
+ MODULE_PARM_DESC(enabled,
+ 	"Enable or disable DAMON_LRU_SORT (default: disabled)");
+ 
++static int damon_lru_sort_kdamond_pid_store(const char *val,
++		const struct kernel_param *kp)
++{
++	/*
++	 * kdamond_pid is read-only, but kernel command line could write it.
++	 * Do nothing here.
++	 */
++	return 0;
++}
++
++static int damon_lru_sort_kdamond_pid_load(char *buffer,
++		const struct kernel_param *kp)
++{
++	int kdamond_pid = -1;
++
++	if (ctx) {
++		kdamond_pid = damon_kdamond_pid(ctx);
++		if (kdamond_pid < 0)
++			kdamond_pid = -1;
++	}
++	return sprintf(buffer, "%d\n", kdamond_pid);
++}
++
++static const struct kernel_param_ops kdamond_pid_param_ops = {
++	.set = damon_lru_sort_kdamond_pid_store,
++	.get = damon_lru_sort_kdamond_pid_load,
++};
++
++/*
++ * PID of the DAMON thread
++ *
++ * If DAMON_LRU_SORT is enabled, this becomes the PID of the worker thread.
++ * Else, -1.
++ */
++module_param_cb(kdamond_pid, &kdamond_pid_param_ops, NULL, 0400);
++
+ static int damon_lru_sort_handle_commit_inputs(void)
+ {
+ 	int err;
+diff --git a/mm/damon/ops-common.c b/mm/damon/ops-common.c
+index 0ac833cd8..026097443 100644
+--- a/mm/damon/ops-common.c
++++ b/mm/damon/ops-common.c
+@@ -23,10 +23,10 @@ struct page *damon_get_page(unsigned long pfn)
+ {
+ 	struct page *page = pfn_to_online_page(pfn);
+ 
+-	if (!page || !PageLRU(page) || !get_page_unless_zero(page))
++	if (!page || !get_page_unless_zero(page))
+ 		return NULL;
+ 
+-	if (unlikely(!PageLRU(page))) {
++	if (!PageLRU(page)) {
+ 		put_page(page);
+ 		page = NULL;
+ 	}
+diff --git a/mm/damon/reclaim.c b/mm/damon/reclaim.c
+index b32a67909..e30e164eb 100644
+--- a/mm/damon/reclaim.c
++++ b/mm/damon/reclaim.c
+@@ -98,15 +98,6 @@ module_param(monitor_region_start, ulong, 0600);
+ static unsigned long monitor_region_end __read_mostly;
+ module_param(monitor_region_end, ulong, 0600);
+ 
+-/*
+- * PID of the DAMON thread
+- *
+- * If DAMON_RECLAIM is enabled, this becomes the PID of the worker thread.
+- * Else, -1.
+- */
+-static int kdamond_pid __read_mostly = -1;
+-module_param(kdamond_pid, int, 0400);
+-
+ static struct damos_stat damon_reclaim_stat;
+ DEFINE_DAMON_MODULES_DAMOS_STATS_PARAMS(damon_reclaim_stat,
+ 		reclaim_tried_regions, reclaimed_regions, quota_exceeds);
+@@ -182,28 +173,27 @@ static int damon_reclaim_turn(bool on)
+ {
+ 	int err;
+ 
+-	if (!on) {
+-		err = damon_stop(&ctx, 1);
+-		if (!err)
+-			kdamond_pid = -1;
+-		return err;
+-	}
++	if (!on)
++		return damon_stop(&ctx, 1);
+ 
+ 	err = damon_reclaim_apply_parameters();
+ 	if (err)
+ 		return err;
+ 
+-	err = damon_start(&ctx, 1, true);
+-	if (err)
+-		return err;
+-	kdamond_pid = ctx->kdamond->pid;
+-	return 0;
++	return damon_start(&ctx, 1, true);
++}
++
++static bool damon_reclaim_enabled(void)
++{
++	if (!ctx)
++		return false;
++	return damon_is_running(ctx);
+ }
+ 
+ static int damon_reclaim_enabled_store(const char *val,
+ 		const struct kernel_param *kp)
+ {
+-	bool is_enabled = enabled;
++	bool is_enabled = damon_reclaim_enabled();
+ 	bool enable;
+ 	int err;
+ 
+@@ -227,15 +217,57 @@ static int damon_reclaim_enabled_store(const char *val,
+ 	return err;
+ }
+ 
++static int damon_reclaim_enabled_load(char *buffer,
++		const struct kernel_param *kp)
++{
++	return sprintf(buffer, "%c\n", damon_reclaim_enabled() ? 'Y' : 'N');
++}
++
+ static const struct kernel_param_ops enabled_param_ops = {
+ 	.set = damon_reclaim_enabled_store,
+-	.get = param_get_bool,
++	.get = damon_reclaim_enabled_load,
+ };
+ 
+ module_param_cb(enabled, &enabled_param_ops, &enabled, 0600);
+ MODULE_PARM_DESC(enabled,
+ 	"Enable or disable DAMON_RECLAIM (default: disabled)");
+ 
++static int damon_reclaim_kdamond_pid_store(const char *val,
++		const struct kernel_param *kp)
++{
++	/*
++	 * kdamond_pid is read-only, but kernel command line could write it.
++	 * Do nothing here.
++	 */
++	return 0;
++}
++
++static int damon_reclaim_kdamond_pid_load(char *buffer,
++		const struct kernel_param *kp)
++{
++	int kdamond_pid = -1;
++
++	if (ctx) {
++		kdamond_pid = damon_kdamond_pid(ctx);
++		if (kdamond_pid < 0)
++			kdamond_pid = -1;
++	}
++	return sprintf(buffer, "%d\n", kdamond_pid);
++}
++
++static const struct kernel_param_ops kdamond_pid_param_ops = {
++	.set = damon_reclaim_kdamond_pid_store,
++	.get = damon_reclaim_kdamond_pid_load,
++};
++
++/*
++ * PID of the DAMON thread
++ *
++ * If DAMON_RECLAIM is enabled, this becomes the PID of the worker thread.
++ * Else, -1.
++ */
++module_param_cb(kdamond_pid, &kdamond_pid_param_ops, NULL, 0400);
++
+ static int damon_reclaim_handle_commit_inputs(void)
+ {
+ 	int err;
+diff --git a/mm/huge_memory.c b/mm/huge_memory.c
+index 21cd7660b..30e138816 100644
+--- a/mm/huge_memory.c
++++ b/mm/huge_memory.c
+@@ -2207,7 +2207,9 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
+ 			if (!PageReferenced(page) && pmd_young(old_pmd))
+ 				SetPageReferenced(page);
+ 			page_remove_rmap(page, vma, true);
++			add_mm_counter(mm, mm_counter_file(page), -HPAGE_PMD_NR);
+ 			put_page(page);
++			return;
+ 		}
+ 		add_mm_counter(mm, mm_counter_file(page), -HPAGE_PMD_NR);
+ 		return;
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 9a1382dd8..b65705260 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -1576,6 +1576,7 @@ static __always_inline bool free_pages_prepare(struct page *page,
+ 
+ 	page_cpupid_reset_last(page);
+ 	page->flags &= ~PAGE_FLAGS_CHECK_AT_PREP;
++	page->private = 0;
+ 	trace_android_vh_mm_free_page(page);
+ 	reset_page_owner(page, order);
+ 	free_page_pinner(page, order);
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 74a933fa0..fa69c9500 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -4706,6 +4706,10 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
+ 	if (spin_is_contended(pvmw->ptl))
+ 		return;
+ 
++	/* exclude special VMAs containing anon pages from COW */
++	if (pvmw->vma->vm_flags & VM_SPECIAL)
++		return;
++
+ 	/* avoid taking the LRU lock under the PTL when possible */
+ 	walk = current->reclaim_state ? current->reclaim_state->mm_walk : NULL;
