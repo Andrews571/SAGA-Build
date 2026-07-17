@@ -368,3 +368,4 @@ index 74a933fa0..fa69c9500 100644
 +
  	/* avoid taking the LRU lock under the PTL when possible */
  	walk = current->reclaim_state ? current->reclaim_state->mm_walk : NULL;
+ 
