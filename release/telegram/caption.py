@@ -288,7 +288,7 @@ def build_channel_caption(env, variant_links, variant_versions=None):
 
 def main():
     # Push-notify mode: `caption.py push <output_file>` — separate from the
-    # release/test build mode below (2 positional args, no subcommand),
+    # release/build mode below (2 positional args, no subcommand),
     # since it's a different caller (notify.yml) with a different env-var
     # shape (BRANCH/AUTHOR/COMMIT/URL/TITLE/BODY vs. the build-metadata
     # vars build_blocks()/build_channel_caption() expect).
