@@ -56,6 +56,13 @@ if [ -n "${KASUMI_KO:-}" ] && [ -f "${KASUMI_KO}" ]; then
     log "Kasumi: kasumi_lkm.ko included in zip under modules/ (manual insmod required) ✅"
 fi
 
+ZRAM_KO="${OUT_DIR}/drivers/block/zram/zram.ko"
+if [ -f "$ZRAM_KO" ]; then
+    mkdir -p "${TOOL_AK3_DIR}/modules"
+    cp "$ZRAM_KO" "${TOOL_AK3_DIR}/modules/"
+    log "LZ4KD: zram.ko included in zip under modules/ (manual insmod required, see release notes) ✅"
+fi
+
 ZIP_PATH="/tmp/${ZIP_NAME}"
 export ZIP_PATH ZIP_NAME
 cd "$TOOL_AK3_DIR"
