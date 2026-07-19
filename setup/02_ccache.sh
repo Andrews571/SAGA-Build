@@ -51,7 +51,7 @@ export CCACHE_COMPRESSLEVEL=1
 # Write sloppiness config — allows ccache-ECS to ignore file timestamps,
 # ctime, mtime, and time macros for cache validation
 mkdir -p "${CCACHE_DIR}"
-echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" \
+echo "sloppiness = include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" \
     >> "${CCACHE_DIR}/ccache.conf"
 
 # Reset stats (not cache data) for fresh tracking
