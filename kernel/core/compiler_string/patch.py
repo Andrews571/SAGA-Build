@@ -8,12 +8,20 @@ def main():
     with open(path, "r") as f:
         content = f.read()
 
-    # mkcompile_h is called by the kernel Makefile as:
-    #   scripts/mkcompile_h "$(UTS_MACHINE)" "$(CONFIG_CC_VERSION_TEXT)" "$(LD)"
+    # mkcompile_h is called by the kernel Makefile — the exact positional
+    # arg number varies by kernel version/convention:
+    #   - GKI 6.1-style (trimmed): scripts/mkcompile_h "$(UTS_MACHINE)"
+    #     "$(CONFIG_CC_VERSION_TEXT)" "$(LD)"  →  CC_VERSION="$2"
+    #   - Older/mainline-style (e.g. 5.10's GKI tree, still close to
+    #     upstream scripts/mkcompile_h): TARGET/ARCH/SMP/PREEMPT/
+    #     PREEMPT_RT/CC_VERSION/LD as $1.."$7  →  CC_VERSION="$6"
+    # The regex below matches CC_VERSION="$N" for any N so this doesn't
+    # need a per-kernel-version special case — confirmed both patterns
+    # exist in the wild (android14-6.1-lts: $2, android12-5.10-lts: $6).
     #
-    # CC_VERSION="$2" receives CONFIG_CC_VERSION_TEXT which is baked at defconfig
-    # time from raw "clang --version" output — KBUILD_COMPILER_STRING is never
-    # used here. We hardcode CC_VERSION to our clean string directly.
+    # CONFIG_CC_VERSION_TEXT is baked at defconfig time from raw
+    # "clang --version" output — KBUILD_COMPILER_STRING is never used
+    # here. We hardcode CC_VERSION to our clean string directly.
     #
     # LD_VERSION reads raw "ld.lld -v" output with full LLVM commit URL.
     # We replace it with a clean extraction that yields "LLD X.Y.Z" only.
@@ -47,21 +55,38 @@ def main():
     while i < len(lines):
         line = lines[i]
 
-        if not cc_replaced and re.match(r'\s*CC_VERSION="\$2"', line):
+        if not cc_replaced and re.match(r'\s*CC_VERSION="\$\d+"', line):
             out.append(f'CC_VERSION="{compiler_string}"')
             i += 1
             cc_replaced = True
             continue
 
         if not ld_replaced and re.match(r"\s*LD_VERSION=\$\(", line):
+            # Track paren depth to find where this multi-line LD_VERSION=$(...)
+            # assignment actually closes. Must ignore parens inside single
+            # quotes — the sed pattern 's/(compatible with [^)]*)//' has
+            # literal '(' ')' chars that aren't real shell grouping. Naive
+            # raw counting broke on android12-5.10-lts's mkcompile_h, where
+            # that whole quoted sed clause sits on the SAME line as the
+            # opening "$(": depth hit 0 after just that one line (the quoted
+            # parens happened to balance out), leaving the real closing line
+            # (" | sed '...')" ) unconsumed as an orphan — which starts with
+            # "|", causing a shell syntax error at runtime. android14-6.1-lts's
+            # version has the sed clause on its own separate line, so the same
+            # naive counting happened to land on the right line there by
+            # coincidence, masking the bug until this kernel version.
             depth = 0
+            in_squote = False
             j = i
             while j < len(lines):
                 for ch in lines[j]:
-                    if ch == "(":
-                        depth += 1
-                    elif ch == ")":
-                        depth -= 1
+                    if ch == "'":
+                        in_squote = not in_squote
+                    elif not in_squote:
+                        if ch == "(":
+                            depth += 1
+                        elif ch == ")":
+                            depth -= 1
                 if depth <= 0:
                     break
                 j += 1
