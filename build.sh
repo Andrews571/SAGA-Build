@@ -158,6 +158,7 @@ run_core() {
         "${core_dir}/module_bypass/module_bypass.sh"
         "${core_dir}/openssl3_compat/openssl3_compat.sh"
         "${core_dir}/mm_stable_catchup/mm_stable_catchup.sh"
+        "${core_dir}/f2fs_thermal_catchup/f2fs_thermal_catchup.sh"
     )
     for script in "${scripts[@]}"; do
         [ -f "$script" ] || { warn "Core script not found: $(basename "$script") — skipping"; continue; }
