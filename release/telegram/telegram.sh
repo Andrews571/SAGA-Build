@@ -41,7 +41,7 @@ fi
 # is a misconfiguration, not a silent no-op.
 RUN_MODE_UPPER="${RUN_MODE^^}"
 case "$RUN_MODE_UPPER" in
-    BUILD)     TARGET_THREAD_ID="${TELEGRAM_THREAD_ID_BUILD:-}" ;;
+    BUILD)     TARGET_THREAD_ID="${TELEGRAM_THREAD_ID_TEST:-}" ;;
     RELEASE)   TARGET_THREAD_ID="${TELEGRAM_THREAD_ID_RELEASE:-}" ;;
     *)         error "Telegram: unknown RUN_MODE '${RUN_MODE:-}' — expected Build or Release" ;;
 esac
