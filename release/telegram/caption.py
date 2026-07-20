@@ -232,15 +232,22 @@ def build_channel_caption(env, variant_links, variant_versions=None):
         sections.append("\n".join(addon_lines))
 
     # Download links
-    download_lines = ["*Download*"]
+    download_lines = ["> 📥 *Download*"]
+
     for variant_key, link in variant_links.items():
         display = VARIANT_DISPLAY.get(variant_key, mdv2_escape(variant_key))
         version = variant_versions.get(variant_key, "")
+
         if version:
             display = f"{display} \\- {mdv2_escape(version)}"
+
         safe_link = mdv2_escape_url(link)
-        download_lines.append(f"• [{display}]({safe_link})")
-    sections.append("\n".join(download_lines))
+
+        download_lines.append(
+            f"> • [{display}]({safe_link})"
+        )
+
+    sections.append("\n\n".join(download_lines))
 
     # Changelog — manual input, optional, capped so it can't crowd out the
     # rest of the caption if someone pastes something huge. Rendered as a
