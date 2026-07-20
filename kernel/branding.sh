@@ -4,9 +4,9 @@
 # 🏷️ BRANDING — CONFIG + APPLY
 # ======================================================
 
-export KERNEL_NAME="Luminaire"
-export BUILD_USER="chainonyourdoor"
-export BUILD_HOST="LuminaireCI"
+export KERNEL_NAME="SAGA"
+export BUILD_USER="AndrewsPocoX7"
+export BUILD_HOST="VinlandSagaFork"
 
 export KBUILD_BUILD_USER="$BUILD_USER"
 export KBUILD_BUILD_HOST="$BUILD_HOST"
