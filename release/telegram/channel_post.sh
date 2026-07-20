@@ -173,13 +173,13 @@ rm -f "$CAPTION_CHANNEL_FILE" "$CAPTION_GROUP_DUMMY"
 # ------------------------------------------------------
 log "📸 Sending channel post..."
 
-if api_call "sendPhoto" "/tmp/tg_channel_response.json" "Channel send" \
+if telegram_api_call "sendPhoto" "/tmp/tg_channel_response.json" "Channel send" \
     -F "chat_id=${TELEGRAM_CHANNEL_ID}" \
     -F "parse_mode=MarkdownV2" \
     -F "photo=@${BANNER_PATH}" \
     -F "caption=${CAPTION_CHANNEL}" \
 &&
-   api_call "sendPhoto" "/tmp/tg_discussion_response.json" "Discussion send" \
+   telegram_api_call "sendPhoto" "/tmp/tg_discussion_response.json" "Discussion send" \
     -F "chat_id=${TELEGRAM_DISCUSSION_ID}" \
     -F "parse_mode=MarkdownV2" \
     -F "photo=@${BANNER_PATH}" \
