@@ -15,7 +15,7 @@ TELEGRAM_GROUP="${TELEGRAM_GROUP:-SAGA_Kernel}"            # community discussio
 TELEGRAM_CHANNEL="${TELEGRAM_CHANNEL:-SAGA_Kernel}"   # public channel username (for t.me links)
 
 # Repository Event
-TELEGRAM_THREAD_ID_EVENT="${TELEGRAM_THREAD_ID_EVENT:-4}"
+TELEGRAM_THREAD_ID_EVENT="${TELEGRAM_THREAD_ID_EVENT:-2}"
 
 # Test Builds — for Test mode (flash-test before being declared stable)
 TELEGRAM_THREAD_ID_TEST="${TELEGRAM_THREAD_ID_TEST:-3}"
