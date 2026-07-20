@@ -62,7 +62,7 @@ runs:
           gh release create cache \
             --repo "${{ github.repository }}" \
             --title "Cache Storage" \
-            --notes "Automated cache storage for Luminaire build tools" \
+            --notes "Automated cache storage for SAGA build tools" \
             --prerelease && break
           echo "⚠️ Attempt ${i}/3 to ensure cache release exists failed — retrying in $((i * 5))s..."
           sleep $((i * 5))
