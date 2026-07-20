@@ -10,9 +10,9 @@
 # live in the repo's Variables, never in this tracked file.
 
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:--1004391786664}"
-TELEGRAM_CI_GROUP="${TELEGRAM_CI_GROUP:-Demacia_Kernel}"       # bot notifications (Test/Release/Event topics)
-TELEGRAM_GROUP="${TELEGRAM_GROUP:-Demacia_Kernel}"            # community discussion group
-TELEGRAM_CHANNEL="${TELEGRAM_CHANNEL:-Demacia_Kernel}"   # public channel username (for t.me links)
+TELEGRAM_CI_GROUP="${TELEGRAM_CI_GROUP:-SAGA_Kernel}"       # bot notifications (Test/Release/Event topics)
+TELEGRAM_GROUP="${TELEGRAM_GROUP:-SAGA_Kernel}"            # community discussion group
+TELEGRAM_CHANNEL="${TELEGRAM_CHANNEL:-SAGA_Kernel}"   # public channel username (for t.me links)
 
 # Repository Event
 TELEGRAM_THREAD_ID_EVENT="${TELEGRAM_THREAD_ID_EVENT:-4}"
