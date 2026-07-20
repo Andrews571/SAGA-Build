@@ -13,7 +13,7 @@ case "${KERNEL_VARIANT}" in
 esac
 [ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && ZIP_VARIANT_TAG="${ZIP_VARIANT_TAG}+SUSFS"
 [ -n "${SUBLEVEL:-}" ] || error "SUBLEVEL is not set — branding.sh may not have run correctly!"
-ZIP_NAME="Ak3-${KERNEL_VERSION}.${SUBLEVEL}-${ZIP_VARIANT_TAG}-R${GITHUB_RUN_NUMBER:-0}.zip"
+ZIP_NAME="SAGA-${KERNEL_VERSION}.${SUBLEVEL}-${ZIP_VARIANT_TAG}-R${GITHUB_RUN_NUMBER:-0}.zip"
 export ZIP_NAME
 
 if [ "${USE_AK3_CACHE}" = "true" ] && [ -d "${HOME}/ak3-cache" ]; then
