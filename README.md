@@ -24,7 +24,7 @@ This repo does **not** contain kernel source — it contains all the scripts and
 
 ## Build System
 
-- **MAKE** — Clang (AOSP / Cirrus / Neutron / WeebX / ZyC) + ccache-ECS
+- **MAKE** — Clang (AOSP / Neutron / WeebX / ZyC) + ccache-ECS
 
 ---
 
