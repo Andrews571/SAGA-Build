@@ -160,6 +160,9 @@ run_core() {
         "${core_dir}/mm_stable_catchup/mm_stable_catchup.sh"
         "${core_dir}/f2fs_thermal_catchup/f2fs_thermal_catchup.sh"
         "${core_dir}/binder_cpufreq_catchup/binder_cpufreq_catchup.sh"
+        "${core_dir}/ufs_writebooster_catchup/ufs_writebooster_catchup.sh"
+        "${core_dir}/workqueue_catchup/workqueue_catchup.sh"
+        "${core_dir}/schedutil_catchup/schedutil_catchup.sh"
     )
     for script in "${scripts[@]}"; do
         [ -f "$script" ] || { warn "Core script not found: $(basename "$script") — skipping"; continue; }
