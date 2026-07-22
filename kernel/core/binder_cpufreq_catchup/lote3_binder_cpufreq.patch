@@ -1,8 +1,41 @@
 diff --git a/drivers/android/binder.c b/drivers/android/binder.c
-index 1c0e695a5..33c697b33 100644
+index 1c0e695a5..9416d7b3d 100644
 --- a/drivers/android/binder.c
 +++ b/drivers/android/binder.c
-@@ -3487,7 +3487,7 @@ static void binder_transaction(struct binder_proc *proc,
+@@ -1849,7 +1849,20 @@ static void binder_txn_latency_free(struct binder_transaction *t)
+ 
+ static void binder_free_transaction(struct binder_transaction *t)
+ {
+-	struct binder_proc *target_proc = t->to_proc;
++	struct binder_thread *target_thread;
++	struct binder_proc *target_proc;
++
++	spin_lock(&t->lock);
++	target_proc = t->to_proc;
++	target_thread = t->to_thread;
++	/*
++	 * Pin target_thread to keep target_proc alive. Undelivered
++	 * transactions with !target_thread are safe, as target_proc
++	 * can only be the current context there.
++	 */
++	if (target_thread)
++		atomic_inc(&target_thread->tmp_ref);
++	spin_unlock(&t->lock);
+ 
+ 	trace_android_vh_free_oem_binder_struct(t);
+ 	if (target_proc) {
+@@ -1864,6 +1877,10 @@ static void binder_free_transaction(struct binder_transaction *t)
+ 			t->buffer->transaction = NULL;
+ 		binder_inner_proc_unlock(target_proc);
+ 	}
++
++	if (target_thread)
++		binder_thread_dec_tmpref(target_thread);
++
+ 	if (trace_binder_txn_latency_free_enabled())
+ 		binder_txn_latency_free(t);
+ 	/*
+@@ -3487,7 +3504,7 @@ static void binder_transaction(struct binder_proc *proc,
  		t->from = NULL;
  	t->from_pid = proc->pid;
  	t->from_tid = thread->pid;
@@ -11,7 +44,7 @@ index 1c0e695a5..33c697b33 100644
  	t->to_proc = target_proc;
  	t->to_thread = target_thread;
  	t->code = tr->code;
-@@ -6228,7 +6228,7 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
+@@ -6228,7 +6245,7 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
  {
  	struct binder_proc *proc = filp->private_data;
  
@@ -20,7 +53,7 @@ index 1c0e695a5..33c697b33 100644
  		return -EINVAL;
  
  	binder_debug(BINDER_DEBUG_OPEN_CLOSE,
-@@ -6260,7 +6260,7 @@ static int binder_open(struct inode *nodp, struct file *filp)
+@@ -6260,7 +6277,7 @@ static int binder_open(struct inode *nodp, struct file *filp)
  	bool existing_pid = false;
  
  	binder_debug(BINDER_DEBUG_OPEN_CLOSE, "%s: %d:%d\n", __func__,
@@ -29,7 +62,7 @@ index 1c0e695a5..33c697b33 100644
  
  	proc_wrap = kzalloc(sizeof(*proc_wrap), GFP_KERNEL);
  	if (proc_wrap == NULL)
-@@ -6270,8 +6270,8 @@ static int binder_open(struct inode *nodp, struct file *filp)
+@@ -6270,8 +6287,8 @@ static int binder_open(struct inode *nodp, struct file *filp)
  	dbitmap_init(&proc_wrapper(proc)->dmap);
  	spin_lock_init(&proc->inner_lock);
  	spin_lock_init(&proc->outer_lock);
@@ -40,7 +73,7 @@ index 1c0e695a5..33c697b33 100644
  	proc->cred = get_cred(filp->f_cred);
  	INIT_LIST_HEAD(&proc->todo);
  	init_waitqueue_head(&proc->freeze_wait);
-@@ -6297,7 +6297,6 @@ static int binder_open(struct inode *nodp, struct file *filp)
+@@ -6297,7 +6314,6 @@ static int binder_open(struct inode *nodp, struct file *filp)
  	binder_alloc_init(&proc->alloc);
  
  	binder_stats_created(BINDER_STAT_PROC);
