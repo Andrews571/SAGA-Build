@@ -89,7 +89,7 @@ diff --git a/include/linux/sched.h b/include/linux/sched.h
 index 464d41843..8a2c9f1d2 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -584,10 +584,29 @@ struct sched_entity {
+@@ -584,10 +584,33 @@ struct sched_entity {
  	struct sched_avg		avg;
  #endif
  
@@ -187,7 +187,7 @@ diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
 index 3c6d456b1..9e17a8fd0 100644
 --- a/kernel/futex/waitwake.c
 +++ b/kernel/futex/waitwake.c
-@@ -353,13 +353,19 @@ void futex_wait_queue(struct futex_hash_bucket *hb, struct futex_q *q,
+@@ -353,14 +353,20 @@ void futex_wait_queue(struct futex_hash_bucket *hb, struct futex_q *q,
  	if (likely(!plist_node_empty(&q->list))) {
  		/*
  		 * If the timer has already expired, current will already be
@@ -212,7 +212,7 @@ diff --git a/kernel/sched/core.c b/kernel/sched/core.c
 index 31fabf8aa..8664cf96f 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -4535,6 +4535,199 @@ int wake_up_state(struct task_struct *p, unsigned int state)
+@@ -4535,6 +4535,205 @@ int wake_up_state(struct task_struct *p, unsigned int state)
  }
  EXPORT_SYMBOL(wake_up_state);
  
@@ -458,20 +458,20 @@ index 0c11474a6..540f2bdd7 100644
   */
  #include <linux/energy_model.h>
  #include <linux/mmap_lock.h>
-@@ -71,11 +74,18 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_stat_runtime);
+@@ -71,11 +74,17 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_stat_runtime);
   * (to see the precise effective timeslice length of your workload,
   *  run vmstat and monitor the context-switches (cs) field)
   *
-- *  (default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
-+ *  (BORE default: 24ms constant, units: nanoseconds)
-+ *  (CFS  default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
+- * (default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
++ * (BORE default: 24ms constant, units: nanoseconds)
++ * (CFS  default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
   */
 +#ifdef CONFIG_SCHED_BORE
 +unsigned int sysctl_sched_latency			= 24000000ULL;
 +static unsigned int normalized_sysctl_sched_latency	= 24000000ULL;
 +#else
  unsigned int sysctl_sched_latency			= 6000000ULL;
- EXPORT_SYMBOL_GPL(sysctl_sched_latency);
+-EXPORT_SYMBOL_GPL(sysctl_sched_latency);
  static unsigned int normalized_sysctl_sched_latency	= 6000000ULL;
 +#endif
 +EXPORT_SYMBOL_GPL(sysctl_sched_latency);
@@ -479,8 +479,8 @@ index 0c11474a6..540f2bdd7 100644
  /*
   * The initial- and re-scaling of tunables is configurable
 @@ -86,18 +96,29 @@ static unsigned int normalized_sysctl_sched_latency	= 6000000ULL;
-  *  SCHED_TUNABLESCALING_LOG - scaled logarithmical, *1+ilog(ncpus)
-  *  SCHED_TUNABLESCALING_LINEAR - scaled linear, *ncpus
+  *   SCHED_TUNABLESCALING_LOG - scaled logarithmical, *1+ilog(ncpus)
+  *   SCHED_TUNABLESCALING_LINEAR - scaled linear, *ncpus
   *
 - * (default SCHED_TUNABLESCALING_LOG = *(1+ilog(ncpus))
 + * (BORE default SCHED_TUNABLESCALING_NONE = *1 constant)
@@ -511,7 +511,7 @@ index 0c11474a6..540f2bdd7 100644
  
  /*
   * Minimal preemption granularity for CPU-bound SCHED_IDLE tasks.
-@@ -126,14 +147,31 @@ unsigned int sysctl_sched_child_runs_first __read_mostly;
+@@ -126,14 +147,29 @@ unsigned int sysctl_sched_child_runs_first __read_mostly;
   * and reduces their over-scheduling. Synchronous workloads will still
   * have immediate wakeup/sleep latencies.
   *
@@ -523,7 +523,7 @@ index 0c11474a6..540f2bdd7 100644
 +unsigned int sysctl_sched_wakeup_granularity		= 4000000UL;
 +static unsigned int normalized_sysctl_sched_wakeup_granularity	= 4000000UL;
 +#else
- unsigned int sysctl_sched_wakeup_granularity		= 1000000UL;
+ unsigned int sysctl_sched_wakeup_granularity			= 1000000UL;
 -EXPORT_SYMBOL_GPL(sysctl_sched_wakeup_granularity);
  static unsigned int normalized_sysctl_sched_wakeup_granularity	= 1000000UL;
 +#endif
@@ -543,9 +543,9 @@ index 0c11474a6..540f2bdd7 100644
  int sched_thermal_decay_shift;
  static int __init setup_sched_thermal_decay_shift(char *str)
  {
-@@ -563,6 +601,124 @@ static int se_is_idle(struct sched_entity *se)
+@@ -563,6 +601,125 @@ static int se_is_idle(struct sched_entity *se)
  
- #endif /* CONFIG_FAIR_GROUP_SCHED */
+ #endif	/* CONFIG_FAIR_GROUP_SCHED */
  
 +#ifdef CONFIG_SCHED_BORE
 +#define MAX_BURST_PENALTY ((40U << 8) - 1)
@@ -669,7 +669,7 @@ index 0c11474a6..540f2bdd7 100644
  static __always_inline
  void account_cfs_rq_runtime(struct cfs_rq *cfs_rq, u64 delta_exec);
  
-@@ -918,6 +1074,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -918,6 +1074,12 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	curr->sum_exec_runtime += delta_exec;
  	schedstat_add(cfs_rq->exec_clock, delta_exec);
  
@@ -682,10 +682,11 @@ index 0c11474a6..540f2bdd7 100644
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	update_min_vruntime(cfs_rq);
  
-@@ -6263,6 +6423,14 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6263,7 +6423,15 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	bool was_sched_idle = sched_idle_rq(rq);
  
  	util_est_dequeue(&rq->cfs, p);
+ 
 +#ifdef CONFIG_SCHED_BORE
 +	if (task_sleep) {
 +		cfs_rq = cfs_rq_of(se);
@@ -711,7 +712,7 @@ diff --git a/kernel/sysctl.c b/kernel/sysctl.c
 index 63d97d2b6..3d71a97d6 100644
 --- a/kernel/sysctl.c
 +++ b/kernel/sysctl.c
-@@ -101,6 +101,18 @@ static const int six_hundred_forty_kb = 640 * 1024;
+@@ -101,6 +101,21 @@ static const int six_hundred_forty_kb = 640 * 1024;
  static const int ngroups_max = NGROUPS_MAX;
  static const int cap_last_cap = CAP_LAST_CAP;
  
@@ -733,7 +734,7 @@ index 63d97d2b6..3d71a97d6 100644
  #ifdef CONFIG_PROC_SYSCTL
  
  /**
-@@ -1666,6 +1678,54 @@ static struct ctl_table kern_table[] = {
+@@ -1666,6 +1678,60 @@ static struct ctl_table kern_table[] = {
  		.mode		= 0644,
  		.proc_handler	= proc_taint,
  	},
