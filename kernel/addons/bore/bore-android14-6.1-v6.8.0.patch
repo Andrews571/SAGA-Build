@@ -56,25 +56,34 @@ network access to android.googlesource.com to test-apply directly).
 bore.sh's forward/reverse --dry-run check still aborts the build loudly
 on any mismatch instead of silently skipping BORE.
 
-The kernel/futex/waitwake.c hunk is the one exception with the least
-context confidence: it's carried over from firelzrd's mainline patch
-rather than from this repo's own history, since no prior BORE patch in
-this repo touched that file. If it fails to apply, bore.sh will catch
-it (see above) -- the futex boost is a minor optimization and safe to
-drop by removing that one hunk without affecting the rest of BORE.
-
 Signed-off-by: chainonyourdoor <chainonyourdoor@gmail.com>
 ---
  include/linux/sched.h      |  27 +++-
  include/linux/sched/task.h |   3 +
  init/Kconfig               |  17 +++
  kernel/fork.c               |   3 +
- kernel/futex/waitwake.c    |  11 ++
+ kernel/futex/waitwake.c    |  12 ++
  kernel/sched/core.c        | 199 +++++++++++++++++++++++++-
  kernel/sched/debug.c        |   3 +
  kernel/sched/fair.c        | 178 +++++++++++++++++++++--
  kernel/sysctl.c             |  60 +++++++-
- 9 files changed, 480 insertions(+), 21 deletions(-)
+ 9 files changed, 481 insertions(+), 21 deletions(-)
+
+NOTE (this revision): the kernel/futex/waitwake.c hunk was rewritten
+against this tree's real file (not upstream's, which has different
+structure). This kernel already wraps schedule() with an
+Android-vendor-hook call:
+    if (!timeout || timeout->task) {
+        trace_android_vh_futex_sleep_start(current);
+        schedule();
+    }
+(a braced block, unlike upstream's bare `if (...) schedule();`). The
+futex_waiting toggle is now inserted around schedule() inside that
+existing block, preserving the vendor hook call untouched. This was
+the one hunk in the previous revision with no real context and is
+the prime suspect for the "does not apply cleanly" failure on the
+first build attempt -- everything else was already reused from the
+proven-working v5.3.0 patch's context.
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index 464d41843..8a2c9f1d2 100644
@@ -175,35 +184,30 @@ index 9e29a44b2..e774d1a3f 100644
  	retval = perf_event_init_task(p, clone_flags);
  	if (retval)
 diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
-index a9056acb75..a87c3446ac 100644
+index 3c6d456b1..9e17a8fd0 100644
 --- a/kernel/futex/waitwake.c
 +++ b/kernel/futex/waitwake.c
-@@ -4,6 +4,9 @@
- #include <linux/sched/task.h>
- #include <linux/sched/signal.h>
- #include <linux/freezer.h>
+@@ -353,13 +353,19 @@ void futex_wait_queue(struct futex_hash_bucket *hb, struct futex_q *q,
+ 	if (likely(!plist_node_empty(&q->list))) {
+ 		/*
+ 		 * If the timer has already expired, current will already be
+ 		 * flagged for rescheduling. Only call schedule if there
+ 		 * is no timeout, or if it has yet to expire.
+ 		 */
+ 		if (!timeout || timeout->task) {
+ 			trace_android_vh_futex_sleep_start(current);
 +#ifdef CONFIG_SCHED_BORE
-+#include <linux/sched/bore.h>
++			current->se.futex_waiting = true;
 +#endif /* CONFIG_SCHED_BORE */
- 
- #include "futex.h"
- 
-@@ -367,7 +370,15 @@ void futex_wait_queue(struct futex_hash_bucket *hb, struct futex_q *q,
- 	 * is no timeout, or if it has yet to expire.
- 	 */
- 	if (!timeout || timeout->task)
+ 			schedule();
 +#ifdef CONFIG_SCHED_BORE
-+	{
-+		current->se.futex_waiting = true;
++			current->se.futex_waiting = false;
 +#endif /* CONFIG_SCHED_BORE */
- 		schedule();
-+#ifdef CONFIG_SCHED_BORE
-+		current->se.futex_waiting = false;
-+	}
-+#endif /* CONFIG_SCHED_BORE */
- 
+ 		}
+ 	}
  	__set_current_state(TASK_RUNNING);
  }
+
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
 index 31fabf8aa..8664cf96f 100644
 --- a/kernel/sched/core.c
