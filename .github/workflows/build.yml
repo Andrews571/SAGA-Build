@@ -99,7 +99,7 @@ on:
         type: boolean
         default: false  
       kcompressd:
-        description: "optimize zram algorithms"
+        description: "kcompressd - optimize zram algorithms"
         type: boolean
         default: true    
       lto_mode:
