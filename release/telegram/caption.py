@@ -46,6 +46,7 @@ ADDON_DISPLAY_NAMES = {
     "lz4kd":       "LZ4KD",
     "le9uo":       "LE9UO",
     "kcompressd":  "Kcompressd",
+    "zramir":      "Zram_ir",
 }
 
 # Mountless-engine addons are mutually exclusive (only one, or none, active
@@ -55,7 +56,7 @@ MOUNTLESS_ADDON_TOKENS = ("nomount", "zeromount")
 
 # Toggle-style addons shown as explicit Enable/Disable lines in the group
 # caption, in display order.
-TOGGLE_ADDON_ORDER = ["rekernel", "bbrv3", "bbg", "droidspaces", "bore", "adios", "lz4zstd", "lz4kd", "le9uo", "kasumi", "ntsync", "kcompressd"]
+TOGGLE_ADDON_ORDER = ["rekernel", "bbrv3", "bbg", "droidspaces", "bore", "adios", "lz4zstd", "lz4kd", "le9uo", "kasumi", "ntsync", "kcompressd", "zramir"]
 
 
 def mdv2_escape(s):
