@@ -45,6 +45,7 @@ ADDON_DISPLAY_NAMES = {
     "lz4zstd":     "LZ4+ZSTD",
     "lz4kd":       "LZ4KD",
     "le9uo":       "LE9UO",
+    "kcompressd"   "Kcompressd",
 }
 
 # Mountless-engine addons are mutually exclusive (only one, or none, active
