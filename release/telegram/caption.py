@@ -55,7 +55,7 @@ MOUNTLESS_ADDON_TOKENS = ("nomount", "zeromount")
 
 # Toggle-style addons shown as explicit Enable/Disable lines in the group
 # caption, in display order.
-TOGGLE_ADDON_ORDER = ["rekernel", "bbrv3", "bbg", "droidspaces", "bore", "adios", "lz4zstd", "lz4kd", "le9uo", "kasumi", "ntsync"]
+TOGGLE_ADDON_ORDER = ["rekernel", "bbrv3", "bbg", "droidspaces", "bore", "adios", "lz4zstd", "lz4kd", "le9uo", "kasumi", "ntsync", "kcompressd"]
 
 
 def mdv2_escape(s):
