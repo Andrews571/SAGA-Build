@@ -90,4 +90,37 @@ CONFIGS
     fi
 fi
 
+# ------------------------------------------------------
+# Post-check: neutralize lz4kd's zram force-default enforcer
+# ------------------------------------------------------
+# CONFIRMED BUG (2026-07-26 build failure): lz4kd.sh's own
+# "force lz4kd to win over vendor init.rc comp_algorithm races"
+# patch — added earlier for a real, confirmed on-device vendor
+# override — injects `strscpy(zram->compressor, ...)` directly into
+# disksize_store(), gated on CONFIG_ZRAM_DEF_COMP_LZ4KD. It runs
+# BEFORE this addon in the fixed ADDONS order, so at the time it
+# applies, zram_drv.c is still pre-multi-comp and its context matches
+# cleanly. When THIS patch runs afterward and rewrites disksize_store(),
+# `patch --fuzz=3` fuzzy-matches AROUND that injected block instead of
+# through it, leaving `zram->compressor` referenced after the struct
+# no longer has that field — a silent compile break (Hunk succeeds
+# per `patch`'s own log line, so nothing here would otherwise notice).
+#
+# Fix: `zram->compressor`/`zram->comp` should never appear in the file
+# after this patch. If lz4kd's specific enforcer line is the cause,
+# rewrite it in place to the multi-comp-correct equivalent (same
+# intent: re-assert the primary default right before the compressor
+# backend is created, so it wins races with anything that wrote
+# comp_algorithm earlier in boot). Anything else left over is
+# unexpected — fail loudly instead of shipping a silently broken build.
+ZRAM_DRV_C="${KERNEL_SRC}/drivers/block/zram/zram_drv.c"
+if grep -qE "zram->compressor|zram->comp\b" "$ZRAM_DRV_C"; then
+    log "⚠️  zram-ir: found a leftover reference to the pre-multi-comp struct fields (zram->compressor / zram->comp) after patching — checking if it's lz4kd's known enforcer..."
+    sed -i -E 's/^([[:space:]]*)strscpy\(zram->compressor, default_compressor, sizeof\(zram->compressor\)\);/\1comp_algorithm_set(zram, ZRAM_PRIMARY_COMP, default_compressor);/' "$ZRAM_DRV_C"
+    if grep -qE "zram->compressor|zram->comp\b" "$ZRAM_DRV_C"; then
+        error "zram-ir: unrecognized reference to zram->compressor/zram->comp survived patching — another addon likely touches zram_drv.c in a way this addon doesn't know about. Check: $(grep -nE 'zram->compressor|zram->comp\b' "$ZRAM_DRV_C" | head -3)"
+    fi
+    log "zram-ir: neutralized lz4kd's force-default enforcer (rewritten to comp_algorithm_set) ✅"
+fi
+
 log "ZRAM-IR integrated ✅ (remember: recomp_algorithm still needs to be set from userspace before disksize)"
