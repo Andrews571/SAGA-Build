@@ -10,12 +10,12 @@ def main():
     old1 = ('KSU_VERSION_FULL := $(if $(call git_short_sha),v$(VERSION_TAG)-$(call git_short_sha)'
             '@$(call git_branch),v$(VERSION_TAG)-$(REPO_NAME)-unknown@unknown)')
     new1 = (old1 + '\n'
-            'KSU_VERSION_FULL := $(KSU_VERSION_FULL) Luminaire')
+            'KSU_VERSION_FULL := $(KSU_VERSION_FULL) SAGA')
 
     old2 = 'ccflags-y += -DKSU_VERSION_FULL=\\\"$(KSU_VERSION_FULL)\\\"'
     new2 = "ccflags-y += -DKSU_VERSION_FULL='\"$(KSU_VERSION_FULL)\"'"
 
-    if "KSU_VERSION_FULL := $(KSU_VERSION_FULL) Luminaire" in content:
+    if "KSU_VERSION_FULL := $(KSU_VERSION_FULL) SAGA" in content:
         print("Branding already applied, skipping.")
         sys.exit(0)
 
