@@ -9,12 +9,12 @@ def main():
 
     old1 = 'KSU_VERSION_FULL := $(subst %KSU_VERSION%,$(KSU_VERSION),$(KSU_VERSION_FULL))'
     new1 = ('KSU_VERSION_FULL := $(subst %KSU_VERSION%,$(KSU_VERSION),$(KSU_VERSION_FULL))\n'
-            'KSU_VERSION_FULL := $(KSU_TAG_NAME) Luminaire')
+            'KSU_VERSION_FULL := $(KSU_TAG_NAME) SAGA')
 
     old2 = 'ccflags-y += -DKSU_VERSION_FULL=\\\"$(KSU_VERSION_FULL)\\\"'
     new2 = "ccflags-y += -DKSU_VERSION_FULL='\"$(KSU_VERSION_FULL)\"'"
 
-    if "KSU_VERSION_FULL := $(KSU_TAG_NAME) Luminaire" in content:
+    if "KSU_VERSION_FULL := $(KSU_TAG_NAME) SAGA" in content:
         print("Branding already applied, skipping.")
         sys.exit(0)
 
