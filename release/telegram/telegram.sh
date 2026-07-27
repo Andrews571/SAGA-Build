@@ -161,7 +161,8 @@ if [ "$RUN_MODE_UPPER" = "RELEASE" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then
             VARIANT_KEY="${KERNEL_VARIANT}_SUSFS"
         fi
 
-        GROUP_MSG_LINK="https://t.me/${TELEGRAM_CI_GROUP}/${GROUP_MESSAGE_ID}"
+        CI_GROUP_INTERNAL_ID="${TELEGRAM_CHAT_ID#-100}"
+        GROUP_MSG_LINK="https://t.me/c/${CI_GROUP_INTERNAL_ID}/${GROUP_MESSAGE_ID}"
 
         LINKS_DIR="${GITHUB_WORKSPACE}/variant-links"
         mkdir -p "$LINKS_DIR"
