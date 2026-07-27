@@ -114,11 +114,11 @@ fi
 # comp_algorithm earlier in boot). Anything else left over is
 # unexpected — fail loudly instead of shipping a silently broken build.
 ZRAM_DRV_C="${KERNEL_SRC}/drivers/block/zram/zram_drv.c"
-if grep -qE "zram->compressor|zram->comp\b" "$ZRAM_DRV_C"; then
+if grep -vE '^[[:space:]]*(\*|//|/\*)' "$ZRAM_DRV_C" | grep -qE "zram->compressor|zram->comp\b"; then
     log "⚠️  zram-ir: found a leftover reference to the pre-multi-comp struct fields (zram->compressor / zram->comp) after patching — checking if it's lz4kd's known enforcer..."
     sed -i -E 's/^([[:space:]]*)strscpy\(zram->compressor, default_compressor, sizeof\(zram->compressor\)\);/\1comp_algorithm_set(zram, ZRAM_PRIMARY_COMP, default_compressor);/' "$ZRAM_DRV_C"
-    if grep -qE "zram->compressor|zram->comp\b" "$ZRAM_DRV_C"; then
-        error "zram-ir: unrecognized reference to zram->compressor/zram->comp survived patching — another addon likely touches zram_drv.c in a way this addon doesn't know about. Check: $(grep -nE 'zram->compressor|zram->comp\b' "$ZRAM_DRV_C" | head -3)"
+    if grep -vE '^[[:space:]]*(\*|//|/\*)' "$ZRAM_DRV_C" | grep -qE "zram->compressor|zram->comp\b"; then
+        error "zram-ir: unrecognized reference to zram->compressor/zram->comp survived patching — another addon likely touches zram_drv.c in a way this addon doesn't know about. Check: $(grep -vE '^[[:space:]]*(\*|//|/\*)' "$ZRAM_DRV_C" | grep -nE 'zram->compressor|zram->comp\b' | head -3)"
     fi
     log "zram-ir: neutralized lz4kd's force-default enforcer (rewritten to comp_algorithm_set) ✅"
 fi
