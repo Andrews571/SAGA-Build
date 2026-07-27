@@ -8,7 +8,9 @@
   },
   "susfs_resukisu": {
     "good": "8199bb6534174117ad907f726231484872ac345a",
-    "bad": []
+    "bad": [
+      "8eade9cd4aed3efddc9ff30b2e48d2d9667ad77d"
+    ]
   },
   "sukisu": {
     "good": "0ca744a88835144c58d8256ebb32c279edabfcde",
