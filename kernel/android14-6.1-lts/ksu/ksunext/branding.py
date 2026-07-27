@@ -18,10 +18,10 @@ def main():
     # single quotes to make the whole define one token — same fix already
     # applied in resukisu/branding.py and sukisu/branding.py.
     old1 = '$(eval KSU_VERSION_TAG=$(KSU_GIT_TAG))'
-    new1 = '$(eval KSU_VERSION_TAG=$(KSU_GIT_TAG) Luminaire)'
+    new1 = '$(eval KSU_VERSION_TAG=$(KSU_GIT_TAG) SAGA)'
 
     old2 = 'KSU_VERSION_TAG_FALLBACK := v0.0.1'
-    new2 = 'KSU_VERSION_TAG_FALLBACK := v0.0.1 Luminaire'
+    new2 = 'KSU_VERSION_TAG_FALLBACK := v0.0.1 SAGA'
 
     old3 = "ccflags-y += -DKSU_VERSION_TAG=\\\"$(KSU_VERSION_TAG)\\\""
     new3 = "ccflags-y += -DKSU_VERSION_TAG='\"$(KSU_VERSION_TAG)\"'"
@@ -29,7 +29,7 @@ def main():
     old4 = "ccflags-y += -DKSU_VERSION_TAG=\\\"$(KSU_VERSION_TAG_FALLBACK)\\\""
     new4 = "ccflags-y += -DKSU_VERSION_TAG='\"$(KSU_VERSION_TAG_FALLBACK)\"'"
 
-    if 'KSU_GIT_TAG) Luminaire' in content:
+    if 'KSU_GIT_TAG) SAGA' in content:
         print("Branding already applied, skipping.")
         sys.exit(0)
 
