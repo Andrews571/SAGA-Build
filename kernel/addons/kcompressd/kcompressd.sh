@@ -29,7 +29,7 @@
 # mm/vmscan.c at non-overlapping anchors, verified to apply cleanly
 # together in either order.
 
-KCOMPRESSD_PATCH="${LUMINAIRE_PATCH_DIR}/kernel/addons/kcompressd/kcompressd-android14-6.1-v0.5.patch"
+KCOMPRESSD_PATCH="${SAGA_PATCH_DIR}/kernel/addons/kcompressd/kcompressd-android14-6.1-v0.5.patch"
 
 log "⚙️ Applying Kcompressd-Unofficial patch..."
 [ -f "$KCOMPRESSD_PATCH" ] || error "kcompressd: patch file not found at ${KCOMPRESSD_PATCH}!"
