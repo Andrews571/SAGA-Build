@@ -6,7 +6,7 @@
 # Repo: https://github.com/SukiSU-Ultra/SukiSU-Ultra
 
 KSU_DIR="${KERNEL_SRC}/KernelSU"
-PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/sukisu"
+PATCHER_DIR="${SAGA_PATCH_DIR}/kernel/android14-6.1-lts/ksu/sukisu"
 
 # ======================================================
 # 1. SukiSU-Ultra
@@ -39,7 +39,7 @@ log "SukiSU-Ultra integrated ✅"
 # 2. Branding
 # ======================================================
 
-log "Applying Luminaire branding..."
+log "Applying SAGA branding..."
 # The builtin branch (SUSFS-integrated) restructured kernel/ entirely —
 # no Kbuild file, but kernel/Makefile has the identical KSU_VERSION_FULL
 # lines branding.py patches, just in a different file.
