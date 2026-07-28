@@ -41,7 +41,7 @@ fi
 # BBRv3's TCP_CONG_ADVANCED gate, KALLSYMS_ALL (depends on DEBUG_KERNEL &&
 # KALLSYMS) is already the resolved default in stock gki_defconfig
 # (EXPERT selects DEBUG_KERNEL, and nothing in this repo ever disables
-# EXPERT/DEBUG_KERNEL), and kernel/config/luminaire.fragment sets it
+# EXPERT/DEBUG_KERNEL), and kernel/config/saga.fragment sets it
 # explicitly on every build regardless — verified against real Kconfig
 # source + a built `conf` tool, not assumed. A prior version of this
 # script duplicated that injection early into gki_defconfig on the
