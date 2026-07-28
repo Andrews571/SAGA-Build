@@ -35,7 +35,7 @@ fi
 
 KSU_DIR="${KSU_DIR:-${KERNEL_SRC}/KernelSU}"
 SUSFS_DIR="/tmp/susfs4ksu"
-PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/susfs"
+PATCHER_DIR="${SAGA_PATCH_DIR}/kernel/android14-6.1-lts/ksu/susfs"
 
 log "Cloning SuSFS (${SUSFS_BRANCH})..."
 [ -d "$SUSFS_DIR" ] && rm -rf "$SUSFS_DIR"
