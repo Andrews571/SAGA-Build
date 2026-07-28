@@ -29,7 +29,7 @@
 # GKI vendor-hook behavior. Verify on-device if a MTK vendor blob
 # already overrides anon/file balance.
 
-LE9UO_PATCH="${LUMINAIRE_PATCH_DIR}/kernel/addons/le9uo/le9uo-android14-6.1-v1.15.patch"
+LE9UO_PATCH="${SAGA_PATCH_DIR}/kernel/addons/le9uo/le9uo-android14-6.1-v1.15.patch"
 
 log "🛡️ Applying le9uo working set protection patch..."
 [ -f "$LE9UO_PATCH" ] || error "le9uo: patch file not found at ${LE9UO_PATCH}!"
@@ -53,7 +53,7 @@ fi
 GKI_DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
 if ! grep -q "^CONFIG_WORKINGSET_PROTECTION_ENABLED=y" "$GKI_DEFCONFIG"; then
     cat >> "$GKI_DEFCONFIG" << 'CONFIGS'
-# le9uo Working Set Protection — active from boot (Luminaire)
+# le9uo Working Set Protection — active from boot (SAGA)
 CONFIG_WORKINGSET_PROTECTION_ENABLED=y
 CONFIG_ANON_MIN_RATIO=15
 CONFIG_CLEAN_LOW_RATIO=0
