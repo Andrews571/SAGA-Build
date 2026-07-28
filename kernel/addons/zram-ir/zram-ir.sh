@@ -59,7 +59,7 @@
 # before disksize, that write will win over this default — check it
 # if lz4kd doesn't end up active on /sys/block/zram0/comp_algorithm.
 
-ZRAM_IR_PATCH="${LUMINAIRE_PATCH_DIR}/kernel/addons/zram-ir/zram-ir-android14-6.1-v1.patch"
+ZRAM_IR_PATCH="${SAGA_PATCH_DIR}/kernel/addons/zram-ir/zram-ir-android14-6.1-v1.patch"
 
 log "🗜️ Applying ZRAM Multi-Comp + ZRAM-IR patch..."
 [ -f "$ZRAM_IR_PATCH" ] || error "zram-ir: patch file not found at ${ZRAM_IR_PATCH}!"
@@ -80,7 +80,7 @@ fi
 GKI_DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
 if ! grep -q "^CONFIG_ZRAM_MULTI_COMP=y" "$GKI_DEFCONFIG"; then
     cat >> "$GKI_DEFCONFIG" << 'CONFIGS'
-# ZRAM-IR (Luminaire)
+# ZRAM-IR (SAGA)
 CONFIG_ZRAM_MULTI_COMP=y
 CONFIG_ZRAM_DEF_RECOMP_ZSTD=y
 CONFIGS
