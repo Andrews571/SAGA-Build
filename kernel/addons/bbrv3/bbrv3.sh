@@ -43,7 +43,7 @@ fi
 #
 # CRITICAL: CONFIG_TCP_CONG_BBR3 and CONFIG_DEFAULT_BBR3 both live inside
 # `if TCP_CONG_ADVANCED ... endif` in net/ipv4/Kconfig. TCP_CONG_ADVANCED
-# is normally only enabled later via luminaire.fragment (merged AFTER
+# is normally only enabled later via saga.fragment (merged AFTER
 # `make gki_defconfig` already ran). Without also setting it here, `make
 # gki_defconfig` sees TCP_CONG_ADVANCED unset, treats the whole if-block
 # (including our BBR3 answers) as nonexistent, and silently falls back to
@@ -52,7 +52,7 @@ fi
 GKI_DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
 if ! grep -q "CONFIG_DEFAULT_BBR3" "$GKI_DEFCONFIG"; then
     cat >> "$GKI_DEFCONFIG" << 'EOF'
-# BBRv3 as default TCP congestion (Luminaire)
+# BBRv3 as default TCP congestion (SAGA)
 CONFIG_TCP_CONG_ADVANCED=y
 CONFIG_TCP_CONG_BBR3=y
 CONFIG_DEFAULT_BBR3=y
@@ -83,7 +83,7 @@ fi
 # repeatedly, so it wins regardless of what userspace does afterward.
 # Doing it kernel-side (rather than a root-manager service.d script) means
 # it also works on VANILLA builds with no root solution installed at all.
-python3 "${LUMINAIRE_PATCH_DIR}/kernel/addons/bbrv3/enforcer.py" "${KERNEL_SRC}/net/ipv4/tcp_cong.c" \
+python3 "${SAGA_PATCH_DIR}/kernel/addons/bbrv3/enforcer.py" "${KERNEL_SRC}/net/ipv4/tcp_cong.c" \
     || error "BBRv3: enforcer injection into tcp_cong.c failed!"
 
 cd "${ROOT_DIR}"
