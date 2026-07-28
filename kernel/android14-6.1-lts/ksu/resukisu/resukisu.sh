@@ -6,7 +6,7 @@
 # Repo: https://github.com/ReSukiSU/ReSukiSU
 
 KSU_DIR="${KERNEL_SRC}/KernelSU"
-PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/resukisu"
+PATCHER_DIR="${SAGA_PATCH_DIR}/kernel/android14-6.1-lts/ksu/resukisu"
 
 # ======================================================
 # 1. ReSukiSU
@@ -33,7 +33,7 @@ log "ReSukiSU integrated ✅"
 # 2. Branding
 # ======================================================
 
-log "Applying Luminaire branding..."
+log "Applying SAGA branding..."
 python3 "${PATCHER_DIR}/branding.py" "${KSU_DIR}/kernel/Kbuild" \
     || error "ReSukiSU: branding patch failed!"
 log "Branding applied ✅"
@@ -54,8 +54,8 @@ KSU_LOCAL_VERSION=$(git -C "$KSU_DIR" rev-list --count HEAD 2>/dev/null || echo 
 KSU_VERSION_CODE=$((30000 + KSU_LOCAL_VERSION + 700))
 KSU_UAPI_VERSION=$(grep -oP 'KERNEL_SU_UAPI_VERSION\s*=\s*\K[0-9]+' "${KSU_DIR}/uapi/supercall.h" 2>/dev/null || echo "")
 
-# This is KSU's own version info, not Luminaire's — branding.py appends
-# " Luminaire" to KSU_VERSION_FULL for the manager app's display, but that's
+# This is KSU's own version info, not SAGA's — branding.py appends
+# " SAGA" to KSU_VERSION_FULL for the manager app's display, but that's
 # a separate concern from what version of ReSukiSU is actually running, so
 # the raw upstream tag is used here instead.
 if [ -n "$KSU_UAPI_VERSION" ]; then
