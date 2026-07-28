@@ -22,7 +22,7 @@
 
 ZEROMOUNT_PATCH_URL="https://raw.githubusercontent.com/Enginex0/Super-Builders/main/android14-6.1/ReSukiSU/patches/60_zeromount-android14-6.1.patch"
 ZEROMOUNT_PATCH="/tmp/60_zeromount-android14-6.1.patch"
-PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/addons/zeromount"
+PATCHER_DIR="${SAGA_PATCH_DIR}/kernel/addons/zeromount"
 
 log "Downloading ZeroMount kernel patch..."
 retry 3 run_quiet curl -fSL "$ZEROMOUNT_PATCH_URL" -o "$ZEROMOUNT_PATCH" \
