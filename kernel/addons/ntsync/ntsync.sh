@@ -47,7 +47,7 @@ done
 GKI_DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
 if ! grep -q "^CONFIG_NTSYNC=y" "$GKI_DEFCONFIG"; then
     cat >> "$GKI_DEFCONFIG" << 'EOF'
-# NTSync (Luminaire)
+# NTSync (SAGA)
 CONFIG_NTSYNC=y
 EOF
     log "NTSync: CONFIG_NTSYNC enabled ✅"
