@@ -20,7 +20,7 @@ KERNEL_SRC = sys.argv[1] if len(sys.argv) > 1 else "."
 REKERNEL_HEADER = """\
 /* SPDX-License-Identifier: GPL-2.0 */
 /* Re:Kernel — Netlink server for binder/signal event reporting.
- * Integrated by LuminaireProtocol. Source: Sakion-Team/Re-Kernel
+ * Integrated by SAGA. Source: Sakion-Team/Re-Kernel
  */
 #ifndef _REKERNEL_H
 #define _REKERNEL_H
