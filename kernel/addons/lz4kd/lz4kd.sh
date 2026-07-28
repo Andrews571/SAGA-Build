@@ -118,7 +118,7 @@ GKI_DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
 
 if ! grep -q "^CONFIG_CRYPTO_LZ4KD=y" "$GKI_DEFCONFIG"; then
     cat >> "$GKI_DEFCONFIG" << 'CONFIGS'
-# LZ4KD (Luminaire)
+# LZ4KD (SAGA)
 CONFIG_CRYPTO_LZ4HC=y
 CONFIG_CRYPTO_LZ4K=y
 CONFIG_CRYPTO_LZ4KD=y
@@ -134,7 +134,7 @@ fi
 # it lived in the same block.
 if ! grep -q '^CONFIG_ZRAM_DEF_COMP="lz4kd"' "$GKI_DEFCONFIG"; then
     cat >> "$GKI_DEFCONFIG" << 'CONFIGS'
-# LZ4KD as ZRAM default compressor (Luminaire)
+# LZ4KD as ZRAM default compressor (SAGA)
 CONFIG_ZRAM_DEF_COMP="lz4kd"
 CONFIGS
     log "LZ4KD: set as ZRAM default compressor ✅"
