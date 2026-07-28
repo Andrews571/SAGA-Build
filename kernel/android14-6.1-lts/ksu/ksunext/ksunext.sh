@@ -10,7 +10,7 @@
 # setup.sh which both produce a "KernelSU" dir directly — KSU_DIR below is
 # intentionally different from resukisu.sh/sukisu.sh for this reason.
 KSU_DIR="${KERNEL_SRC}/KernelSU-Next"
-PATCHER_DIR="${LUMINAIRE_PATCH_DIR}/kernel/android14-6.1-lts/ksu/ksunext"
+PATCHER_DIR="${SAGA_PATCH_DIR}/kernel/android14-6.1-lts/ksu/ksunext"
 
 # ======================================================
 # 1. KernelSU-Next
@@ -50,7 +50,7 @@ log "KernelSU-Next integrated ✅"
 # 2. Branding
 # ======================================================
 
-log "Applying Luminaire branding..."
+log "Applying SAGA branding..."
 python3 "${PATCHER_DIR}/branding.py" "${KSU_DIR}/kernel/Kbuild" \
     || error "KernelSU-Next: branding patch failed!"
 log "Branding applied ✅"
