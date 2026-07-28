@@ -29,7 +29,7 @@
 #      f2fs_lock_context-based structure)
 #   7. fs/f2fs/acl.c — validate ACL entry size in f2fs_acl_from_disk()
 #      (real KASAN slab-out-of-bounds on malformed ACL xattr,
-#      CONFIG_F2FS_FS_POSIX_ACL=y confirmed active via luminaire.fragment)
+#      CONFIG_F2FS_FS_POSIX_ACL=y confirmed active via saga.fragment)
 #   8. drivers/thermal/thermal_core.c — fix governor leak on failed zone
 #      registration + UAF on concurrent governor swap via sysfs without
 #      holding the zone lock
