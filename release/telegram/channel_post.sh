@@ -6,19 +6,19 @@
 # Aggregates all variant links and sends a single photo post to the channel.
 # Called from the notify-channel job after all builds have finished.
 
-CAPTION_BUILDER="${LUMINAIRE_PATCH_DIR}/release/telegram/caption.py"
-BANNER_DIR="${LUMINAIRE_PATCH_DIR}/release/telegram"
+CAPTION_BUILDER="${SAGA_PATCH_DIR}/release/telegram/caption.py"
+BANNER_DIR="${SAGA_PATCH_DIR}/release/telegram"
 
 # Run standalone (bash release/telegram/channel_post.sh) from notify-channel,
 # unlike telegram.sh which is sourced from build.sh's run_release() — so
 # log/warn/error/retry() aren't in scope until sourced explicitly here.
 # shellcheck source=functions.sh
-source "${LUMINAIRE_PATCH_DIR}/functions.sh"
+source "${SAGA_PATCH_DIR}/functions.sh"
 # Source non-sensitive Telegram config
 # shellcheck source=release/telegram/config.sh
-source "${LUMINAIRE_PATCH_DIR}/release/telegram/config.sh"
+source "${SAGA_PATCH_DIR}/release/telegram/config.sh"
 # shellcheck source=release/telegram/common.sh
-source "${LUMINAIRE_PATCH_DIR}/release/telegram/common.sh"
+source "${SAGA_PATCH_DIR}/release/telegram/common.sh"
 
 TELEGRAM_API_TIMEOUT="${TELEGRAM_API_TIMEOUT:-60}"
 TELEGRAM_MAX_RETRIES="${TELEGRAM_MAX_RETRIES:-3}"
