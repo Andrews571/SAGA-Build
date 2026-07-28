@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ======================================================
-# ✨ LUMINAIRE PROTOCOL — Kernel Config
+# ✨ SAGA — Kernel Config
 # Applied after gki_defconfig via scripts/config
 # ======================================================
 
@@ -8,11 +8,11 @@ config() {
     "${KERNEL_SRC}/scripts/config" --file "${OUT_DIR}/.config" "$@"
 }
 
-# Merge Luminaire fragment
-log "Merging luminaire.fragment..."
+# Merge SAGA fragment
+log "Merging saga.fragment..."
 "${KERNEL_SRC}/scripts/kconfig/merge_config.sh" -m -O "${OUT_DIR}" \
     "${OUT_DIR}/.config" \
-    "${LUMINAIRE_PATCH_DIR}/kernel/config/luminaire.fragment"
+    "${SAGA_PATCH_DIR}/kernel/config/saga.fragment"
 log "Fragment merged ✅"
 
 # LTO
@@ -35,7 +35,7 @@ else
     log "LTO: NONE ✅"
 fi
 
-log "Luminaire defconfig applied ✅"
+log "SAGA defconfig applied ✅"
 
 # DAMON_RECLAIM / DAMON_LRU_SORT are compiled in via the fragment above,
 # but each only activates through its own module_param ("enabled",
