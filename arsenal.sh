@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ======================================================
-# ✨ LUMINAIRE PROTOCOL — Arsenal Orchestrator
+# ✨ SAGA — Arsenal Orchestrator
 # ======================================================
 
 set -eo pipefail
@@ -25,7 +25,7 @@ ANDROID_VERSION="$(resolve_android_version)"
 KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LUMINAIRE_PATCH_DIR="${ROOT_DIR}"
+SAGA_PATCH_DIR="${ROOT_DIR}"
 
 # ======================================================
 # 🚀 MAIN
@@ -33,7 +33,7 @@ LUMINAIRE_PATCH_DIR="${ROOT_DIR}"
 
 main() {
     echo "========================================"
-    echo "  ✨ Luminaire Arsenal ✨"
+    echo "  ✨ SAGA Arsenal ✨"
     echo "========================================"
     echo "  🏷️ ${ANDROID_VERSION}-${KERNEL_VERSION}"
     echo "  🖥️ CPU: $(nproc --all) cores"
@@ -68,7 +68,7 @@ main() {
 
 run_download() {
     echo "::group::📥 Arsenal Download"
-    source "${LUMINAIRE_PATCH_DIR}/download/make.sh"
+    source "${SAGA_PATCH_DIR}/download/make.sh"
     log "Arsenal downloaded ✅"
     echo "::endgroup::"
 }

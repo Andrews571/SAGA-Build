@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ======================================================
-# ✨ LUMINAIRE PROTOCOL — Build Orchestrator
+# ✨ SAGA — Build Orchestrator
 # ======================================================
 
 set -eo pipefail
@@ -31,7 +31,7 @@ KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Bootstrap path — needed before run_setup() sources 00_paths.sh
-LUMINAIRE_PATCH_DIR="${ROOT_DIR}"
+SAGA_PATCH_DIR="${ROOT_DIR}"
 
 # ======================================================
 # 🚀 MAIN
@@ -39,7 +39,7 @@ LUMINAIRE_PATCH_DIR="${ROOT_DIR}"
 
 main() {
     echo "========================================"
-    echo "  ✨ Luminaire Protocol ✨"
+    echo "  ✨ SAGA ✨"
     echo "========================================"
     echo "  🏷️ ${KERNEL_VARIANT}$([ "$SUSFS_ENABLED" = "true" ] && [ "$KERNEL_VARIANT" != "VANILLA" ] && echo "+SUSFS")"
     echo "  $(mode_emoji "$RUN_MODE") ${RUN_MODE}"
@@ -71,6 +71,7 @@ main() {
     run_addons
     mark_stage_ok CHECKPOINT_ADDONS_OK
     run_build
+    mark_stage_ok CHECKPOINT_BUILD_OK
     run_postbuild
 
     if [ "${RUN_MODE^^}" = "WARM RUN" ]; then
@@ -97,7 +98,7 @@ main() {
 
 restore_kernel_source() {
     echo "::group::📥 Kernel Source"
-    source "${LUMINAIRE_PATCH_DIR}/download/make.sh"
+    source "${SAGA_PATCH_DIR}/download/make.sh"
     log "Kernel source ready ✅"
     echo "::endgroup::"
 }
@@ -116,7 +117,7 @@ run_branding() {
     [ -z "$KMI_GENERATION" ] && error "KMI_GENERATION not found!"
     export SUBLEVEL KMI_GENERATION
     echo "SUBLEVEL=${SUBLEVEL}" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
-    source "${LUMINAIRE_PATCH_DIR}/kernel/branding.sh" || error "Branding failed!"
+    source "${SAGA_PATCH_DIR}/kernel/branding.sh" || error "Branding failed!"
     echo "::endgroup::"
 }
 
@@ -149,7 +150,7 @@ run_core() {
     echo "::group::🔧 Core"
     # Flat scripts first, then known subfolder orchestrators
     # Explicit list prevents accidental sourcing of temp/unrelated .sh files
-    local core_dir="${LUMINAIRE_PATCH_DIR}/kernel/core"
+    local core_dir="${SAGA_PATCH_DIR}/kernel/core"
     local scripts=(
         "${core_dir}/dirty_flag.sh"
         "${core_dir}/glibc.sh"
@@ -176,6 +177,12 @@ run_core() {
 # ======================================================
 
 run_addons() {
+    # Populated below with only the addons that were actually found+sourced
+    # (not the raw $ADDONS request) — run_postbuild() dispatches off this,
+    # not off $ADDONS, so it never tries a postbuild step for a name that
+    # never actually ran here (e.g. a typo'd addon, silently warned about
+    # below instead of erroring).
+    APPLIED_ADDONS=""
     [ -z "${ADDONS:-}" ] && return 0
     # Strip whitespace, leading/trailing commas, and duplicate commas
     ADDONS="${ADDONS// /}"
@@ -196,9 +203,10 @@ run_addons() {
     for addon in "${ADDON_LIST[@]}"; do
         addon="${addon// /}"
         [ -z "$addon" ] && continue
-        local script="${LUMINAIRE_PATCH_DIR}/kernel/addons/${addon}/${addon}.sh"
+        local script="${SAGA_PATCH_DIR}/kernel/addons/${addon}/${addon}.sh"
         if [ -f "$script" ]; then
             source "$script" || error "Addon failed: ${addon}"
+            APPLIED_ADDONS="${APPLIED_ADDONS:+${APPLIED_ADDONS},}${addon}"
         else
             log "⚠️ Addon not found: ${addon}"
         fi
@@ -212,7 +220,7 @@ run_addons() {
 
 run_build() {
     echo "::group::🏗️ Build Kernel (${BUILD_SYSTEM})"
-    source "${LUMINAIRE_PATCH_DIR}/build/make.sh"
+    source "${SAGA_PATCH_DIR}/build/make.sh"
     echo "::endgroup::"
 }
 
@@ -235,16 +243,16 @@ run_build() {
 
 run_postbuild() {
     [ "${DRY_RUN:-false}" = "true" ] && return 0
-    [ -z "${ADDONS:-}" ] && return 0
+    [ -z "${APPLIED_ADDONS:-}" ] && return 0
 
     echo "::group::🧩 Post-Build"
 
-    IFS=',' read -ra ADDON_LIST <<< "$ADDONS"
+    IFS=',' read -ra ADDON_LIST <<< "$APPLIED_ADDONS"
     for addon in "${ADDON_LIST[@]}"; do
         addon="${addon// /}"
         [ -z "$addon" ] && continue
 
-        script="${LUMINAIRE_PATCH_DIR}/kernel/addons/${addon}/postbuild.sh"
+        script="${SAGA_PATCH_DIR}/kernel/addons/${addon}/postbuild.sh"
         [ -f "$script" ] || continue
 
         log "🧩 Post-build: ${addon}"
@@ -260,8 +268,8 @@ run_postbuild() {
 
 run_release() {
     echo "::group::🚀 Release"
-    source "${LUMINAIRE_PATCH_DIR}/release/anykernel.sh" || error "Release failed: anykernel.sh"
-    source "${LUMINAIRE_PATCH_DIR}/release/telegram/telegram.sh"  || error "Release failed: telegram.sh"
+    source "${SAGA_PATCH_DIR}/release/anykernel.sh" || error "Release failed: anykernel.sh"
+    source "${SAGA_PATCH_DIR}/release/telegram/telegram.sh"  || error "Release failed: telegram.sh"
     echo "::endgroup::"
 }
 

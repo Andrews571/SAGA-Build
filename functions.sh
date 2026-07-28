@@ -68,7 +68,7 @@ mark_stage_ok() {
 write_dry_run_image() {
     local path="$1"
     mkdir -p "$(dirname "$path")"
-    echo "Luminaire Protocol — dry-run placeholder, not a real kernel image" > "$path"
+    echo "SAGA — dry-run placeholder, not a real kernel image" > "$path"
     log "🧪 DRY RUN — wrote placeholder image to ${path} (compile skipped)"
 }
 
@@ -89,7 +89,7 @@ resolve_android_version() {
 # Sources every *.sh in setup/, in order. Shared by build.sh and arsenal.sh.
 run_setup() {
     echo "::group::📦 Setup"
-    for script in "${LUMINAIRE_PATCH_DIR}/setup/"*.sh; do
+    for script in "${SAGA_PATCH_DIR}/setup/"*.sh; do
         source "$script" || error "Setup failed: $(basename "$script")"
     done
     echo "::endgroup::"

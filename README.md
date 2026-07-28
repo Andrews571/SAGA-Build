@@ -4,7 +4,7 @@
 
 # SAGA KERNEL
 
-[![Build](https://img.shields.io/github/actions/workflow/status/chainonyourdoor/LuminaireProtocol/build.yml?branch=main&label=build&logo=github&style=for-the-badge)](https://github.com/Andrews571/LuminaireProtocol/actions)
+[![Build](https://img.shields.io/github/actions/workflow/status/Andrews571/SAGA-Build/build.yml?branch=main&label=build&logo=github&style=for-the-badge)](https://github.com/Andrews571/SAGA-Build/actions)
 [![Telegram](https://img.shields.io/badge/Telegram-SAGA-blue?style=for-the-badge&logo=telegram)](https://t.me/c/4443561826/1)
 </div>
 
@@ -12,7 +12,7 @@
 
 ## 📖 What is this?
 
-**LuminaireProtocol** is a build orchestration repository for the **Luminaire** Android GKI kernel.
+**SAGA** is a build orchestration repository for the **SAGA** Android GKI kernel.
 This repo does **not** contain kernel source — it contains all the scripts and GitHub Actions workflows that:
 
 1. Download the kernel source from `chainonyourdoor/LuminaireKernel-*`
