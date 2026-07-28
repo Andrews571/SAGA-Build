@@ -31,12 +31,12 @@ OUT_DIR="${WORKSPACE_DIR}/out"
 LTO_CACHE_DIR="/dev/shm/ldcache"
 
 # Patch repo paths
-# LUMINAIRE_PATCH_DIR is bootstrapped by the entrypoint (build.sh/arsenal.sh)
+# SAGA_PATCH_DIR is bootstrapped by the entrypoint (build.sh/arsenal.sh)
 # before run_setup() runs — it's what lets run_setup() find this very file.
 # Guard here instead of silently re-deriving it, so a future entrypoint that
 # forgets to set it fails loud instead of masking the mistake.
-LUMINAIRE_PATCH_DIR="${LUMINAIRE_PATCH_DIR:?LUMINAIRE_PATCH_DIR must be set by the entrypoint before run_setup() runs}"
-VERSION_PATCH_DIR="${LUMINAIRE_PATCH_DIR}/kernel/${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
+SAGA_PATCH_DIR="${SAGA_PATCH_DIR:?SAGA_PATCH_DIR must be set by the entrypoint before run_setup() runs}"
+VERSION_PATCH_DIR="${SAGA_PATCH_DIR}/kernel/${ANDROID_VERSION}-${KERNEL_VERSION}-lts"
 
 # Build config
 DEFCONFIG="gki_defconfig"
