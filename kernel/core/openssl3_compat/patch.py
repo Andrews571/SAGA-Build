@@ -18,7 +18,7 @@ import sys
 ANCHOR = "#ifdef USE_PKCS11_ENGINE\nstatic const char *key_pass;\n#endif"
 
 DEFINE_BLOCK = (
-    "/* Luminaire: USE_PKCS11_ENGINE is used below to gate key_pass but is\n"
+    "/* SAGA: USE_PKCS11_ENGINE is used below to gate key_pass but is\n"
     " * never actually defined upstream in this file (partial OpenSSL-3\n"
     " * backport) -- define it here whenever ENGINE API is available. */\n"
     "#if !defined(OPENSSL_NO_ENGINE) && !defined(OPENSSL_NO_DEPRECATED_3_0)\n"

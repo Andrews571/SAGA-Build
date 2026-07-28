@@ -14,7 +14,7 @@
 # See patch.py for the actual fix (defines the missing macro).
 
 EXTRACT_CERT="${KERNEL_SRC}/certs/extract-cert.c"
-PATCHER="${LUMINAIRE_PATCH_DIR}/kernel/core/openssl3_compat/patch.py"
+PATCHER="${SAGA_PATCH_DIR}/kernel/core/openssl3_compat/patch.py"
 
 [ -f "$EXTRACT_CERT" ] || { warn "extract-cert.c not found, skipping OpenSSL 3 compat patch"; return 0; }
 
