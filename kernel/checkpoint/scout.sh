@@ -27,11 +27,11 @@
 
 set -eo pipefail
 
-LUMINAIRE_PATCH_DIR="${LUMINAIRE_PATCH_DIR:-$GITHUB_WORKSPACE}"
-source "${LUMINAIRE_PATCH_DIR}/functions.sh"
+SAGA_PATCH_DIR="${SAGA_PATCH_DIR:-$GITHUB_WORKSPACE}"
+source "${SAGA_PATCH_DIR}/functions.sh"
 
 [ -n "${KERNEL_VERSION:-}" ] || error "scout: KERNEL_VERSION not set"
-MANIFEST="${LUMINAIRE_PATCH_DIR}/kernel/$(resolve_android_version)-${KERNEL_VERSION}-lts/manifest.json"
+MANIFEST="${SAGA_PATCH_DIR}/kernel/$(resolve_android_version)-${KERNEL_VERSION}-lts/manifest.json"
 
 # A kernel version with no manifest.json yet just means no pin has ever
 # been promoted for it — normal for a kernel version without checkpoint

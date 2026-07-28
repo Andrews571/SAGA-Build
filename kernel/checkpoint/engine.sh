@@ -17,9 +17,9 @@
 
 set -eo pipefail
 
-LUMINAIRE_PATCH_DIR="${LUMINAIRE_PATCH_DIR:-$GITHUB_WORKSPACE}"
-source "${LUMINAIRE_PATCH_DIR}/functions.sh"
-cd "$LUMINAIRE_PATCH_DIR"
+SAGA_PATCH_DIR="${SAGA_PATCH_DIR:-$GITHUB_WORKSPACE}"
+source "${SAGA_PATCH_DIR}/functions.sh"
+cd "$SAGA_PATCH_DIR"
 
 BUILD_OUTCOME="$1"
 shift
@@ -27,7 +27,7 @@ COMPONENTS=("$@")
 
 [ -n "${KERNEL_VERSION:-}" ] || error "checkpoint: KERNEL_VERSION not set"
 MANIFEST_REL="kernel/$(resolve_android_version)-${KERNEL_VERSION}-lts/manifest.json"
-MANIFEST="${LUMINAIRE_PATCH_DIR}/${MANIFEST_REL}"
+MANIFEST="${SAGA_PATCH_DIR}/${MANIFEST_REL}"
 
 any_candidate_used="false"
 for key in "${COMPONENTS[@]}"; do
@@ -155,11 +155,22 @@ for key in "${COMPONENTS[@]}"; do
     # - CHECKPOINT_VARIANT_OK present but CHECKPOINT_ADDONS_OK missing ->
     #   failed in run_core or run_addons, both unrelated to the KSU-fork/
     #   SuSFS candidate this component tracks -> leave the pin alone.
-    # - Both present -> failed in run_build itself (the actual compile),
-    #   which the candidate patch can absolutely still be the cause of ->
-    #   blame it, same as a run_variant-stage failure.
+    # - CHECKPOINT_ADDONS_OK present but CHECKPOINT_BUILD_OK missing ->
+    #   failed in run_build itself (the actual compile), which the
+    #   candidate patch can absolutely still be the cause of -> blame it,
+    #   same as a run_variant-stage failure.
+    # - CHECKPOINT_BUILD_OK present -> the compile itself succeeded, so
+    #   the failure happened afterwards, in run_postbuild or run_release
+    #   (e.g. an addon's postbuild LKM step, packaging, Telegram notify)
+    #   -> unrelated to this candidate -> leave the pin alone, same
+    #   reasoning as the run_core/run_addons case above.
     if [ "${CHECKPOINT_VARIANT_OK:-false}" = "true" ] && [ "${CHECKPOINT_ADDONS_OK:-false}" != "true" ]; then
         log "checkpoint: ${key} candidate ${ref:0:12} left untouched — build failed in an unrelated stage (run_core/run_addons), not in run_variant/run_build (kernel ${KERNEL_VERSION})"
+        continue
+    fi
+
+    if [ "${CHECKPOINT_BUILD_OK:-false}" = "true" ]; then
+        log "checkpoint: ${key} candidate ${ref:0:12} left untouched — compile succeeded (CHECKPOINT_BUILD_OK set), failure happened in run_postbuild/run_release, unrelated to this candidate (kernel ${KERNEL_VERSION})"
         continue
     fi
 
