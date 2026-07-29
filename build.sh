@@ -195,18 +195,32 @@ run_addons() {
     if [[ ",${ADDONS}," == *,nomount,* ]] && [[ ",${ADDONS}," == *,zeromount,* ]]; then
         error "Addon conflict: 'nomount' and 'zeromount' both redirect VFS paths and cannot be combined — pick one."
     fi
-    if [[ ",${ADDONS}," == *,zeromount,* ]] && [ "${SUSFS_ENABLED:-false}" != "true" ]; then
-        # zeromount's readdir.c/namei.c/task_mmu.c hooks are SuSFS-baseline
-        # only — there's no non-SuSFS fallback inside zeromount itself.
-        # ADDONS is a single string shared across the whole build matrix
-        # (see prepare-matrix in build.yml: one workflow_dispatch input
-        # for mountless_engine, fed to every variant job), so a request
-        # for zeromount reaches VANILLA (susfs always false) and any other
-        # susfs:false variant too, not just the SuSFS ones. Rather than
-        # hard-failing those jobs, fall back to 'nomount' for this job
-        # only — same "mountless" goal, no SuSFS requirement. The
-        # nomount/zeromount mutual-exclusion check above already covers
-        # the case where both were explicitly requested together.
+    if [ "${KERNEL_VARIANT:-}" = "VANILLA" ]; then
+        # Both zeromount and nomount exist to hide root/mount artifacts
+        # from detection — meaningless on VANILLA, which has no root
+        # solution at all to hide. Whatever the workflow_dispatch
+        # mountless_engine input picked applies to every variant in the
+        # matrix (see prepare-matrix in build.yml), so it can land here
+        # too; rather than fall back from one to the other like the
+        # SuSFS case below, VANILLA always builds with neither, full
+        # stop — not "pick a different mountless engine", just none.
+        for engine in zeromount nomount; do
+            if [[ ",${ADDONS}," == *,${engine},* ]]; then
+                warn "Addon skip: '${engine}' requested but this is a VANILLA build (no root solution to hide mounts for) — building with neither mountless engine"
+                ADDONS="$(echo ",${ADDONS}," | sed "s/,${engine},/,/")"
+                ADDONS="${ADDONS#,}"
+                ADDONS="${ADDONS%,}"
+            fi
+        done
+    elif [[ ",${ADDONS}," == *,zeromount,* ]] && [ "${SUSFS_ENABLED:-false}" != "true" ]; then
+        # Rooted variant (RESUKISU/SUKISU/KSUNEXT), but this run has
+        # susfs=false — zeromount's readdir.c/namei.c/task_mmu.c hooks are
+        # SuSFS-baseline only, no non-SuSFS fallback inside zeromount
+        # itself. There's still a real root solution to hide here (unlike
+        # VANILLA above), so fall back to 'nomount' instead of dropping
+        # the mountless engine outright. The nomount/zeromount mutual-
+        # exclusion check above already covers both being requested
+        # together explicitly.
         warn "Addon fallback: 'zeromount' requires SuSFS, not enabled for this variant (${KERNEL_VARIANT:-unknown}) — using 'nomount' instead for this build"
         ADDONS="${ADDONS//zeromount/nomount}"
     fi
