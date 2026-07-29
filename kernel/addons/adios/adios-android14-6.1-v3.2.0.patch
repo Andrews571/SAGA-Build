@@ -82,7 +82,7 @@ new file mode 100644
 index 000000000..6e54b5c3b
 --- /dev/null
 +++ b/block/adios.c
-@@ -0,0 +1,2076 @@
+@@ -0,0 +1,2093 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Adaptive Deadline I/O Scheduler (ADIOS)
@@ -2157,7 +2157,24 @@ index 000000000..6e54b5c3b
 +	elv_unregister(&mq_adios);
 +}
 +
-+module_init(adios_init);
++/*
++ * subsys_initcall, not module_init (== device_initcall): the UFS-MTK
++ * platform driver that actually creates these block devices registers
++ * at device_initcall too (module_platform_driver() in ufs-mediatek.c),
++ * so it's a link-order coin flip which one wins the race to run first —
++ * and elevator_init_mq() only ever calls elevator_get_default() once,
++ * at queue creation, before the disk is even added. Lose that race and
++ * elevator_get(q, "adios", false) below finds nothing registered yet,
++ * elevator_init_mq() just returns with no scheduler set, and nothing
++ * ever retries — that queue is stuck without a default forever. Same
++ * reasoning as why CONFIG_MQ_IOSCHED_DEFAULT_ADIOS alone doesn't
++ * reliably win: it only changes *which* elevator_get_default() asks
++ * for, not *when* elevator_init_mq() runs relative to UFS-MTK probe.
++ * subsys_initcall strictly precedes every device_initcall system-wide
++ * (no exceptions, no probe-deferral timing games), so this closes the
++ * race outright instead of leaving it to link order.
++ */
++subsys_initcall(adios_init);
 +module_exit(adios_exit);
 +
 +MODULE_AUTHOR(ADIOS_AUTHOR);

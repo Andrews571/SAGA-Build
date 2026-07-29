@@ -8,9 +8,13 @@
 # Backport to android14-6.1: elevator_get() instead of elevator_find_get()
 # (doesn't exist on 6.1), mq-deadline preserved as fallback default when
 # ADIOS default is not selected (this tree has no SSG scheduler — see the
-# patch header for how that was confirmed), and a NULL pointer fix in
+# patch header for how that was confirmed), a NULL pointer fix in
 # adios_completed_request() for UFS MCQ (rq->elv.priv[0] can be NULL for
-# requests that never went through elevator insert).
+# requests that never went through elevator insert), and adios_init()
+# moved from module_init() to subsys_initcall() so it always registers
+# before the UFS-MTK platform driver (also device_initcall-level) gets a
+# chance to probe — otherwise CONFIG_MQ_IOSCHED_DEFAULT_ADIOS is a
+# link-order coin flip per block device, not a real guarantee.
 
 ADIOS_PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios/adios-android14-6.1-v3.2.0.patch"
 
