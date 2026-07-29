@@ -189,8 +189,6 @@ run_addons() {
     ADDONS="$(echo "$ADDONS" | sed 's/^,*//;s/,*$//;s/,,*/,/g')"
     [ -z "${ADDONS}" ] && return 0
     echo "::group::⚡ Addons"
-    IFS=',' read -ra ADDON_LIST <<< "$ADDONS"
-
     # Conflict matrix — addons that patch overlapping kernel subsystems and
     # cannot be safely combined. Checked up front so a bad combo fails fast
     # instead of leaving a half-patched tree mid-build.
@@ -198,8 +196,22 @@ run_addons() {
         error "Addon conflict: 'nomount' and 'zeromount' both redirect VFS paths and cannot be combined — pick one."
     fi
     if [[ ",${ADDONS}," == *,zeromount,* ]] && [ "${SUSFS_ENABLED:-false}" != "true" ]; then
-        error "Addon conflict: 'zeromount' requires SuSFS (its readdir.c/namei.c/task_mmu.c hooks are SuSFS-baseline only, no non-SuSFS fallback) — enable SuSFS or pick a different mountless engine."
+        # zeromount's readdir.c/namei.c/task_mmu.c hooks are SuSFS-baseline
+        # only — there's no non-SuSFS fallback inside zeromount itself.
+        # ADDONS is a single string shared across the whole build matrix
+        # (see prepare-matrix in build.yml: one workflow_dispatch input
+        # for mountless_engine, fed to every variant job), so a request
+        # for zeromount reaches VANILLA (susfs always false) and any other
+        # susfs:false variant too, not just the SuSFS ones. Rather than
+        # hard-failing those jobs, fall back to 'nomount' for this job
+        # only — same "mountless" goal, no SuSFS requirement. The
+        # nomount/zeromount mutual-exclusion check above already covers
+        # the case where both were explicitly requested together.
+        warn "Addon fallback: 'zeromount' requires SuSFS, not enabled for this variant (${KERNEL_VARIANT:-unknown}) — using 'nomount' instead for this build"
+        ADDONS="${ADDONS//zeromount/nomount}"
     fi
+    IFS=',' read -ra ADDON_LIST <<< "$ADDONS"
+
     for addon in "${ADDON_LIST[@]}"; do
         addon="${addon// /}"
         [ -z "$addon" ] && continue
