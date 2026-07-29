@@ -36,3 +36,10 @@ EOF
 fi
 
 log "BORE CPU scheduler integrated ✅"
+
+# See adios.sh for why this is extracted from the filename instead of
+# hardcoded.
+BORE_VERSION=$(basename "$BORE_PATCH" | sed -n 's/.*-\(v[0-9.]*\)\.patch$/\1/p')
+if [ -n "$BORE_VERSION" ] && [ -n "${GITHUB_ENV:-}" ]; then
+    echo "BORE_VERSION=${BORE_VERSION}" >> "$GITHUB_ENV"
+fi
