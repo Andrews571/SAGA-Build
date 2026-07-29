@@ -26,6 +26,22 @@ VARIANT_DISPLAY = {
     "KSUNEXT_SUSFS":  "KernelSU\\-Next\\+SUSFS",
 }
 
+# Short-form names for the channel post's Download section — deliberately
+# not the same as VARIANT_DISPLAY above (which is still used elsewhere and
+# keeps the fuller "+SUSFS"/version-qualified names). No +SUSFS suffix and
+# no per-variant version: SuSFS is effectively always-on for the rooted
+# variants at this point, so spelling it out on every line just added
+# clutter without adding information.
+VARIANT_BASE_DISPLAY = {
+    "VANILLA":        "Vanilla",
+    "RESUKISU":       "ResukiSU",
+    "RESUKISU_SUSFS": "ResukiSU",
+    "SUKISU":         "SukiSU",
+    "SUKISU_SUSFS":   "SukiSU",
+    "KSUNEXT":        "KSUNext",
+    "KSUNEXT_SUSFS":  "KSUNext",
+}
+
 # Single source of truth for addon display names — shared by build_blocks()
 # (per-build group caption) and build_channel_caption() (channel post).
 # Adding a new addon only means adding an entry here (+ TOGGLE_ADDON_ORDER
@@ -57,6 +73,13 @@ MOUNTLESS_ADDON_TOKENS = ("nomount", "zeromount")
 # Toggle-style addons shown as explicit Enable/Disable lines in the group
 # caption, in display order.
 TOGGLE_ADDON_ORDER = ["rekernel", "bbrv3", "bbg", "droidspaces", "bore", "adios", "lz4zstd", "lz4kd", "le9uo", "kasumi", "ntsync", "kcompressd", "zram_ir"]
+
+# Channel-post-only: these four get pulled out of the normal "*Add-ons*"
+# bullet list and into their own Telegraph "Features" page instead (see
+# build_telegraph_content() and build_channel_caption() below) — they're
+# the ones worth a version number, the rest are plain on/off toggles.
+# Order here is display order on the Telegraph page.
+FEATURE_ADDON_TOKENS = ["bore", "adios", "bbrv3", "bbg"]
 
 
 def mdv2_escape(s):
@@ -201,15 +224,50 @@ def build_push_caption(env):
     return truncate("\n".join(lines), PUSH_TEXT_LIMIT)
 
 
+def build_telegraph_content(env):
+    """
+    Content for the "Features" Telegraph page, called by telegraph_page.py
+    (caption.build_telegraph_content). Only lists whichever of
+    FEATURE_ADDON_TOKENS were actually enabled this run — BORE and ADIOS
+    get their version from bore.sh/adios.sh (extracted from the patch
+    filename, see those scripts, threaded through telegram.sh's per-variant
+    JSON and channel_post.sh's aggregation). BBRv3 has no meaningful
+    version beyond "v3" — the patch is fetched by URL per kernel version,
+    nothing in it carries a semver — and BBG's setup.sh is pulled live
+    from upstream with nothing to pin a version to either, so both are
+    fixed labels rather than resolved values.
+    """
+    addon_tokens = set(t for t in env.get("ADDONS", "").split(",") if t)
+
+    lines = []
+    if "bore" in addon_tokens:
+        v = env.get("BORE_VERSION", "").strip()
+        lines.append(f"BORE - {v}" if v else "BORE")
+    if "adios" in addon_tokens:
+        v = env.get("ADIOS_VERSION", "").strip()
+        lines.append(f"ADIOS - {v}" if v else "ADIOS")
+    if "bbrv3" in addon_tokens:
+        lines.append("BBR - v3")
+    if "bbg" in addon_tokens:
+        lines.append("BBG")
+
+    if not lines:
+        lines = ["No headline features enabled for this build."]
+
+    return [
+        {"tag": "h3", "children": ["SAGA Kernel — Features"]},
+        {"tag": "ul", "children": [{"tag": "li", "children": [line]} for line in lines]},
+    ]
+
+
 def build_channel_caption(env, variant_links, variant_versions=None):
     """
     variant_links: dict { "VANILLA": "https://t.me/c/...", "RESUKISU_SUSFS": "...", ... }
     variant_versions: dict { "RESUKISU": "v4.1.0 (35002/2)", "SUKISU_SUSFS": "4.1.2 (40819/2)", ... } —
-    optional. Keys match variant_links' keys exactly (including the _SUSFS
-    suffix where applicable). All three forks resolve a version string
-    (see resukisu.sh / sukisu.sh / ksunext.sh's "Version string" step);
-    a fork only lacks an entry if that step itself failed to resolve anything.
-    Only variants present in variant_links will be listed.
+    optional. Kept as a parameter for signature stability (main() still
+    builds and passes it), but no longer rendered: the Download section
+    now shows only the short base variant name (see VARIANT_BASE_DISPLAY),
+    not a per-variant version, so this isn't read here anymore.
     """
     if variant_versions is None:
         variant_versions = {}
@@ -225,25 +283,37 @@ def build_channel_caption(env, variant_links, variant_versions=None):
         f"*GKI Kernel \\| Android {mdv2_escape(android_ver)} \\| Linux {mdv2_escape(major_minor)}*"
     ]
 
-    # Add-ons — only the ones actually enabled for this run
+    # Add-ons — only the ones actually enabled for this run. The four
+    # FEATURE_ADDON_TOKENS get pulled out into their own Telegraph
+    # "Features" link (below) instead of showing up here.
     addon_tokens = [t for t in env.get("ADDONS", "").split(",") if t]
-    if addon_tokens:
+    other_addon_tokens = [t for t in addon_tokens if t not in FEATURE_ADDON_TOKENS]
+    has_feature_addon = any(t in FEATURE_ADDON_TOKENS for t in addon_tokens)
+
+    # Features link — its own section in `sections` so the "\n\n" join
+    # below gives it a blank line above and below automatically, same as
+    # every other section. Only shown when there's actually a feature
+    # addon enabled AND the Telegraph page was created successfully
+    # (FEATURES_URL empty means either TELEGRAPH_TOKEN isn't set or the
+    # API call failed — telegraph_page.py degrades gracefully either way,
+    # so this just quietly omits the line rather than linking nowhere).
+    features_url = env.get("FEATURES_URL", "").strip()
+    if has_feature_addon and features_url:
+        sections.append(f"[*Features*]({mdv2_escape_url(features_url)})")
+
+    if other_addon_tokens:
         addon_lines = ["*Add\\-ons*"]
-        for token in addon_tokens:
+        for token in other_addon_tokens:
             name = ADDON_DISPLAY_NAMES.get(token, token)
             addon_lines.append(f"\\- {mdv2_escape(name)}")
         sections.append("\n".join(addon_lines))
 
-    # Download links
+    # Download links — short base name only (see VARIANT_BASE_DISPLAY),
+    # no +SUSFS suffix and no per-variant version number.
     download_lines = ["> 📥 *Download*"]
 
     for variant_key, link in variant_links.items():
-        display = VARIANT_DISPLAY.get(variant_key, mdv2_escape(variant_key))
-        version = variant_versions.get(variant_key, "")
-
-        if version:
-            display = f"{display} \\- {mdv2_escape(version)}"
-
+        display = VARIANT_BASE_DISPLAY.get(variant_key, mdv2_escape(variant_key))
         safe_link = mdv2_escape_url(link)
 
         download_lines.append(

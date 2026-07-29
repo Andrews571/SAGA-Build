@@ -167,7 +167,10 @@ if [ "$RUN_MODE_UPPER" = "RELEASE" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then
         LINKS_DIR="${GITHUB_WORKSPACE}/variant-links"
         mkdir -p "$LINKS_DIR"
         LINK_FILE="${LINKS_DIR}/${VARIANT_KEY}.json"
-        echo "{\"variant\":\"${VARIANT_KEY}\",\"link\":\"${GROUP_MSG_LINK}\",\"linux_ver\":\"${LINUX_VER}\",\"kernel_version\":\"${KERNEL_VERSION}\",\"ksu_version\":\"${KERNEL_VARIANT_VERSION}\"}" > "${LINK_FILE}"
+        # bore_version/adios_version: exported to $GITHUB_ENV by bore.sh/
+        # adios.sh in run_addons() earlier in this same job, only present
+        # when that addon was actually applied this build.
+        echo "{\"variant\":\"${VARIANT_KEY}\",\"link\":\"${GROUP_MSG_LINK}\",\"linux_ver\":\"${LINUX_VER}\",\"kernel_version\":\"${KERNEL_VERSION}\",\"ksu_version\":\"${KERNEL_VARIANT_VERSION}\",\"bore_version\":\"${BORE_VERSION:-}\",\"adios_version\":\"${ADIOS_VERSION:-}\"}" > "${LINK_FILE}"
         log "Variant link saved → ${LINK_FILE} ✅"
     fi
 fi

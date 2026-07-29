@@ -77,6 +77,8 @@ result = {}
 versions = {}
 linux_ver = ''
 kernel_version = ''
+bore_version = ''
+adios_version = ''
 for f in sorted(glob.glob(links_dir + '/*.json')):
     try:
         data = json.load(open(f))
@@ -88,16 +90,23 @@ for f in sorted(glob.glob(links_dir + '/*.json')):
             versions[v] = kv
         if not linux_ver: linux_ver = data.get('linux_ver','')
         if not kernel_version: kernel_version = data.get('kernel_version','')
+        # bore/adios are the same addon regardless of which KSU variant
+        # built it, so any one variant's resolved version is as good as
+        # any other's — first non-empty wins, same as linux_ver above.
+        if not bore_version: bore_version = data.get('bore_version','')
+        if not adios_version: adios_version = data.get('adios_version','')
     except Exception as e:
         print('[warn] ' + str(e), file=sys.stderr)
-print(json.dumps({'links':result,'versions':versions,'linux_ver':linux_ver,'kernel_version':kernel_version}))
+print(json.dumps({'links':result,'versions':versions,'linux_ver':linux_ver,'kernel_version':kernel_version,'bore_version':bore_version,'adios_version':adios_version}))
 ")
 
 VARIANT_LINKS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['links']))")
 VARIANT_VERSIONS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['versions']))")
 LINUX_VER=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['linux_ver'])")
 KERNEL_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['kernel_version'])")
-export LINUX_VER KERNEL_VERSION
+BORE_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['bore_version'])")
+ADIOS_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['adios_version'])")
+export LINUX_VER KERNEL_VERSION BORE_VERSION ADIOS_VERSION
 
 if [ "$VARIANT_LINKS_JSON" = "{}" ] || [ -z "$VARIANT_LINKS_JSON" ]; then
     warn "Skipping channel post: no valid variant links found"
@@ -146,6 +155,20 @@ if [ "$MISSING_VARIANTS_JSON" != "[]" ]; then
 fi
 
 # ------------------------------------------------------
+# Features Telegraph page (BORE/ADIOS/BBRv3/BBG) — best-effort, gracefully
+# degrades to no Features link if TELEGRAPH_TOKEN isn't set or the API
+# call fails (see telegraph_page.py). Must run before the caption builder
+# below, since the resulting URL (possibly empty) feeds into it.
+# ------------------------------------------------------
+FEATURES_URL=$(ADDONS="${ADDONS:-}" \
+    LINUX_VER="${LINUX_VER:-N/A}" \
+    BORE_VERSION="${BORE_VERSION:-}" \
+    ADIOS_VERSION="${ADIOS_VERSION:-}" \
+    TELEGRAPH_TOKEN="${TELEGRAPH_TOKEN:-}" \
+    python3 "${SAGA_PATCH_DIR}/release/telegram/telegraph_page.py")
+export FEATURES_URL
+
+# ------------------------------------------------------
 # Build channel caption
 # ------------------------------------------------------
 CAPTION_GROUP_DUMMY="/tmp/channel_post_group_dummy.txt"
@@ -154,6 +177,9 @@ CAPTION_CHANNEL_FILE="/tmp/channel_post_caption.txt"
 LINUX_VER="${LINUX_VER:-N/A}" \
 KERNEL_VERSION="${KERNEL_VERSION:-}" \
 ADDONS="${ADDONS:-}" \
+BORE_VERSION="${BORE_VERSION:-}" \
+ADIOS_VERSION="${ADIOS_VERSION:-}" \
+FEATURES_URL="${FEATURES_URL:-}" \
 CHANGELOG="${CHANGELOG:-}" \
 TELEGRAM_GROUP="${TELEGRAM_GROUP:-}" \
 GITHUB_SHA="${GITHUB_SHA:-}" \
