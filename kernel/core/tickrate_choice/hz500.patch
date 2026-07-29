@@ -1,0 +1,28 @@
+diff --git a/kernel/Kconfig.hz b/kernel/Kconfig.hz
+index 38ef6d0..a4539ab 100644
+--- a/kernel/Kconfig.hz
++++ b/kernel/Kconfig.hz
+@@ -40,6 +40,15 @@ choice
+ 	 on SMP and NUMA systems and exactly dividing by both PAL and
+ 	 NTSC frame rates for video and multimedia work.
+ 
++	config HZ_500
++		bool "500 HZ"
++	help
++	 500 Hz is a middle ground between 300 Hz and 1000 Hz — most of
++	 1000 Hz's finer scheduling/timer granularity (touch and audio
++	 latency) at meaningfully less timer-interrupt overhead than a
++	 full 1000 Hz. A common choice on mobile/Android kernels that
++	 don't want to pay the full 1000 Hz interrupt cost.
++
+ 	config HZ_1000
+ 		bool "1000 HZ"
+ 	help
+@@ -53,6 +62,7 @@ config HZ
+ 	default 100 if HZ_100
+ 	default 250 if HZ_250
+ 	default 300 if HZ_300
++	default 500 if HZ_500
+ 	default 1000 if HZ_1000
+ 
+ config SCHED_HRTICK
