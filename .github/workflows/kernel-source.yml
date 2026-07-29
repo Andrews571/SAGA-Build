@@ -59,7 +59,7 @@ jobs:
           # never lands directly on the production branch — it goes to a
           # "-staging" branch instead, so a merge that turns out to have
           # subtle problems (something a green CI run doesn't catch) never
-          # touches what LuminaireProtocol actually builds from. Plain ACK
+          # touches what SAGA-Build actually builds from. Plain ACK
           # fast-forward syncs (no stable tag) and adopt both still push
           # straight to the real branch — those aren't introducing new,
           # unvalidated content the way a raw stable-tag merge is.

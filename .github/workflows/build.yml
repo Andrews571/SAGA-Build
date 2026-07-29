@@ -165,7 +165,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       addons: ${{ steps.set.outputs.addons }}
-      # github.ref_name as-is (e.g. "test/luminaire-kernel-source") breaks
+      # github.ref_name as-is (e.g. "test/saga-kernel-source") breaks
       # anywhere it's used as a filesystem path component — the "/" turns
       # ccache-prefix/lto-asset-name into a bogus extra directory level tar
       # can't write to. Sanitized once here, reused by Start-Build instead
@@ -276,7 +276,7 @@ jobs:
           # at a file under $RUNNER_TEMP, not .git/config in this repo — so
           # it can't be locally unset by a later step (see kernel/checkpoint/engine.sh
           # for the fallout this caused). Nothing else in this job needs git
-          # auth against LuminaireProtocol itself: kernel/addon sources are
+          # auth against SAGA-Build itself: kernel/addon sources are
           # public clones, and kernel/checkpoint/engine.sh brings its own
           # PERSONAL_TOKEN-embedded remote for its push.
           persist-credentials: false
@@ -434,10 +434,11 @@ jobs:
       - name: "Send Channel Post"
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAPH_TOKEN:    ${{ secrets.TELEGRAPH_TOKEN }}
           TELEGRAM_CHAT_ID:           ${{ vars.TELEGRAM_CHAT_ID }}
           TELEGRAM_CHANNEL_ID:        ${{ vars.TELEGRAM_CHANNEL_ID }}
           TELEGRAM_THREAD_ID_RELEASE: ${{ vars.TELEGRAM_THREAD_ID_RELEASE }}
-          LUMINAIRE_PATCH_DIR: ${{ github.workspace }}
+          SAGA_PATCH_DIR: ${{ github.workspace }}
           LINKS_DIR:           /tmp/variant-links
           KERNEL_VERSION:      ${{ inputs.kernel_version }}
           ADDONS:              ${{ needs.prepare-matrix.outputs.addons }}
