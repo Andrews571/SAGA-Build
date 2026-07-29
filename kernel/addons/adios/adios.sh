@@ -38,3 +38,14 @@ EOF
 fi
 
 log "ADIOS I/O scheduler integrated ✅"
+
+# Extracted from the patch filename itself (e.g. "...-v3.2.0.patch" -> "v3.2.0")
+# rather than hardcoded, so it can't silently go stale if the patch is ever
+# bumped to a new ADIOS release — same reasoning as SUSFS_VER's grep in
+# telegram.sh. Only meaningful within this job (GITHUB_ENV), consumed later
+# by telegram.sh for the per-variant JSON artifact that feeds the channel
+# post's Features page.
+ADIOS_VERSION=$(basename "$ADIOS_PATCH" | sed -n 's/.*-\(v[0-9.]*\)\.patch$/\1/p')
+if [ -n "$ADIOS_VERSION" ] && [ -n "${GITHUB_ENV:-}" ]; then
+    echo "ADIOS_VERSION=${ADIOS_VERSION}" >> "$GITHUB_ENV"
+fi
