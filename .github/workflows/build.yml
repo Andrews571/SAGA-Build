@@ -54,6 +54,15 @@ on:
           - "none"
           - "nomount"
           - "zeromount"
+      tick_rate:
+        description: "Tick Rate (CONFIG_HZ)"
+        type: choice
+        default: "250"
+        options:
+          - "100"
+          - "250"
+          - "500"
+          - "1000"
       bbrv3:
         description: "BBRv3"
         type: boolean
@@ -265,6 +274,7 @@ jobs:
       DRY_RUN:                     ${{ inputs.run_mode == 'Dry Run' }}
       BUILD_SYSTEM:                ${{ inputs.build_system }}
       ADDONS:                      ${{ needs.prepare-matrix.outputs.addons }}
+      TICK_RATE:                   ${{ inputs.tick_rate }}
       CCACHE_DIR:                  ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
       CCACHE_MAXSIZE:              ${{ startsWith(inputs.build_system, 'Make') && '900M' || '' }}
 
