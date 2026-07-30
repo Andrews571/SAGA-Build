@@ -227,19 +227,25 @@ def build_push_caption(env):
 def build_telegraph_content(env):
     """
     Content for the "Features" Telegraph page, called by telegraph_page.py
-    (caption.build_telegraph_content). Only lists whichever of
-    FEATURE_ADDON_TOKENS were actually enabled this run — BORE and ADIOS
-    get their version from bore.sh/adios.sh (extracted from the patch
-    filename, see those scripts, threaded through telegram.sh's per-variant
-    JSON and channel_post.sh's aggregation). BBRv3 has no meaningful
-    version beyond "v3" — the patch is fetched by URL per kernel version,
-    nothing in it carries a semver — and BBG's setup.sh is pulled live
-    from upstream with nothing to pin a version to either, so both are
-    fixed labels rather than resolved values.
+    (caption.build_telegraph_content). CONFIG_HZ always shows — it's a
+    workflow_dispatch input (TICK_RATE, build.yml), not addon-gated, so
+    every build has one regardless of which addons were picked. The rest
+    only lists whichever of FEATURE_ADDON_TOKENS were actually enabled
+    this run — BORE and ADIOS get their version from bore.sh/adios.sh
+    (extracted from the patch filename, see those scripts, threaded
+    through telegram.sh's per-variant JSON and channel_post.sh's
+    aggregation). BBRv3 has no meaningful version beyond "v3" — the patch
+    is fetched by URL per kernel version, nothing in it carries a semver
+    — and BBG's setup.sh is pulled live from upstream with nothing to pin
+    a version to either, so both are fixed labels rather than resolved
+    values.
     """
     addon_tokens = set(t for t in env.get("ADDONS", "").split(",") if t)
 
     lines = []
+    tick_rate = env.get("TICK_RATE", "").strip()
+    if tick_rate:
+        lines.append(f"CONFIG_HZ: {tick_rate}hz")
     if "bore" in addon_tokens:
         v = env.get("BORE_VERSION", "").strip()
         lines.append(f"BORE - {v}" if v else "BORE")
@@ -288,7 +294,13 @@ def build_channel_caption(env, variant_links, variant_versions=None):
     # "Features" link (below) instead of showing up here.
     addon_tokens = [t for t in env.get("ADDONS", "").split(",") if t]
     other_addon_tokens = [t for t in addon_tokens if t not in FEATURE_ADDON_TOKENS]
-    has_feature_addon = any(t in FEATURE_ADDON_TOKENS for t in addon_tokens)
+    # CONFIG_HZ (TICK_RATE) is always set — every build has a tick rate
+    # regardless of which addons were picked — so the Features page is
+    # always worth linking now, not just when one of FEATURE_ADDON_TOKENS
+    # happens to be enabled. Kept both checks rather than relying on
+    # bbrv3/bore currently always being in ADDONS (see build.yml) staying
+    # that way forever.
+    has_feature_content = bool(env.get("TICK_RATE", "").strip()) or any(t in FEATURE_ADDON_TOKENS for t in addon_tokens)
 
     # Features link — its own section in `sections` so the "\n\n" join
     # below gives it a blank line above and below automatically, same as
@@ -298,7 +310,7 @@ def build_channel_caption(env, variant_links, variant_versions=None):
     # API call failed — telegraph_page.py degrades gracefully either way,
     # so this just quietly omits the line rather than linking nowhere).
     features_url = env.get("FEATURES_URL", "").strip()
-    if has_feature_addon and features_url:
+    if has_feature_content and features_url:
         sections.append(f"[*Features*]({mdv2_escape_url(features_url)})")
 
     if other_addon_tokens:
