@@ -63,24 +63,12 @@ on:
           - "250"
           - "500"
           - "1000"
-      bbrv3:
-        description: "BBRv3"
-        type: boolean
-        default: true
-      bbg:
-        description: "BBG"
-        type: boolean
-        default: true
       rekernel:
         description: "Re:Kernel"
         type: boolean
         default: true
       droidspaces:
         description: "Droidspaces"
-        type: boolean
-        default: true
-      bore:
-        description: "BORE (CPU scheduler)"
         type: boolean
         default: true
       adios:
@@ -91,10 +79,6 @@ on:
         description: "Kasumi (Experimental)"
         type: boolean
         default: false
-      ntsync:
-        description: "NTSync (Wine/Winlator compatibility)"
-        type: boolean
-        default: true
       lz4zstd:
         description: "LZ4 1.10.0 + ZSTD 1.5.7 (ZRAM compression bump)"
         type: boolean
@@ -223,7 +207,7 @@ jobs:
           # Single source of truth for the ADDONS list — reused by Start-Build
           # and notify-channel via this job's output, instead of each job
           # rebuilding the same string from inputs independently.
-          ADDONS="${{ inputs.bbrv3 && 'bbrv3,' || '' }}${{ inputs.bbg && 'bbg,' || '' }}${{ inputs.rekernel && 'rekernel,' || '' }}${{ inputs.droidspaces && 'droidspaces,' || '' }}${{ inputs.bore && 'bore,' || '' }}${{ inputs.adios && 'adios,' || '' }}${{ inputs.kasumi && 'kasumi,' || '' }}${{ inputs.ntsync && 'ntsync,' || '' }}${{ inputs.lz4zstd && 'lz4zstd,' || '' }}${{ inputs.lz4kd && 'lz4kd,' || '' }}${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}${{ inputs.le9uo && 'le9uo,' || '' }}${{ inputs.kcompressd && 'kcompressd,' || '' }}${{ inputs.zram_ir && 'zram_ir,' || '' }}"
+          ADDONS="bbrv3,bbg,bore,ntsync,${{ inputs.rekernel && 'rekernel,' || '' }}${{ inputs.droidspaces && 'droidspaces,' || '' }}${{ inputs.adios && 'adios,' || '' }}${{ inputs.kasumi && 'kasumi,' || '' }}${{ inputs.lz4zstd && 'lz4zstd,' || '' }}${{ inputs.lz4kd && 'lz4kd,' || '' }}${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}${{ inputs.le9uo && 'le9uo,' || '' }}${{ inputs.kcompressd && 'kcompressd,' || '' }}${{ inputs.zram_ir && 'zram_ir,' || '' }}"
           echo "addons=${ADDONS}" >> $GITHUB_OUTPUT
 
           # "/" -> "-" so this is safe to use as a filesystem path component
@@ -445,6 +429,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAPH_TOKEN:    ${{ secrets.TELEGRAPH_TOKEN }}
+          TICK_RATE:          ${{ inputs.tick_rate }}
           TELEGRAM_CHAT_ID:           ${{ vars.TELEGRAM_CHAT_ID }}
           TELEGRAM_CHANNEL_ID:        ${{ vars.TELEGRAM_CHANNEL_ID }}
           TELEGRAM_THREAD_ID_RELEASE: ${{ vars.TELEGRAM_THREAD_ID_RELEASE }}
