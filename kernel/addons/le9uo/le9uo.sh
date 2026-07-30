@@ -51,15 +51,20 @@ fi
 # on-device behavior: vm.workingset_protection=1 already active at first
 # boot with no init script, no vendor init.rc write, no user step at all.
 GKI_DEFCONFIG="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
-if ! grep -q "^CONFIG_WORKINGSET_PROTECTION_ENABLED=y" "$GKI_DEFCONFIG"; then
-    cat >> "$GKI_DEFCONFIG" << 'CONFIGS'
+# Strip-then-append rather than skip-if-already-present: on a cached
+# kernel source tree (USE_KERNEL_CACHE) that already has this block from
+# an earlier build, a skip-if-present guard on just the ENABLED line
+# would leave whatever ratio values that earlier build wrote stuck in
+# place forever, even after changing them here — same reasoning as
+# tickrate_choice.sh's defconfig handling.
+sed -i '/^# le9uo Working Set Protection — active from boot (SAGA)$/d; /^CONFIG_WORKINGSET_PROTECTION_ENABLED=y$/d; /^CONFIG_ANON_MIN_RATIO=[0-9]*$/d; /^CONFIG_CLEAN_LOW_RATIO=[0-9]*$/d; /^CONFIG_CLEAN_MIN_RATIO=[0-9]*$/d' "$GKI_DEFCONFIG"
+cat >> "$GKI_DEFCONFIG" << 'CONFIGS'
 # le9uo Working Set Protection — active from boot (SAGA)
 CONFIG_WORKINGSET_PROTECTION_ENABLED=y
-CONFIG_ANON_MIN_RATIO=15
+CONFIG_ANON_MIN_RATIO=5
 CONFIG_CLEAN_LOW_RATIO=0
-CONFIG_CLEAN_MIN_RATIO=15
+CONFIG_CLEAN_MIN_RATIO=5
 CONFIGS
-    log "le9uo: defconfig forced (protection active from first boot) ✅"
-fi
+log "le9uo: defconfig forced (protection active from first boot, anon/clean min ratio 5%) ✅"
 
 log "le9uo Working Set Protection integrated ✅"
