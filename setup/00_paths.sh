@@ -4,8 +4,8 @@
 # 📁 SETUP — PATHS & BUILD CONFIG
 # ======================================================
 
-# Build system + Clang variant — parse combined input (e.g. "Make - Cirrus")
-case "${BUILD_SYSTEM:-Make - Cirrus}" in
+# Build system + Clang variant — parse combined input (e.g. "Make - Neutron")
+case "${BUILD_SYSTEM:-Make - Neutron}" in
     Make\ -\ *)
         CLANG_VARIANT="${BUILD_SYSTEM##Make - }"
         CLANG_VARIANT="${CLANG_VARIANT,,}"
@@ -13,12 +13,12 @@ case "${BUILD_SYSTEM:-Make - Cirrus}" in
         ;;
     MAKE)
         BUILD_SYSTEM="MAKE"
-        CLANG_VARIANT="${CLANG_VARIANT:-cirrus}"
+        CLANG_VARIANT="${CLANG_VARIANT:-neutron}"
         ;;
     *)
-        warn "Unknown BUILD_SYSTEM input '${BUILD_SYSTEM}', defaulting to MAKE + cirrus"
+        warn "Unknown BUILD_SYSTEM input '${BUILD_SYSTEM}', defaulting to MAKE + neutron"
         BUILD_SYSTEM="MAKE"
-        CLANG_VARIANT="cirrus"
+        CLANG_VARIANT="neutron"
         ;;
 esac
 export BUILD_SYSTEM CLANG_VARIANT

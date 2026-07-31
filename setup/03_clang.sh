@@ -57,7 +57,6 @@ set -o pipefail
 
 case "$CLANG_VARIANT" in
     aosp)    CLANG_BRAND="AOSP Clang" ;;
-    cirrus)  CLANG_BRAND="Cirrus Clang" ;;
     neutron) CLANG_BRAND="Neutron Clang" ;;
     weebx)   CLANG_BRAND="WeebX Clang" ;;
     zyc)     CLANG_BRAND="ZyC Clang" ;;

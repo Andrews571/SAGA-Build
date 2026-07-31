@@ -49,10 +49,14 @@ export CCACHE_COMPRESSLEVEL=1
 [ -n "${CCACHE_MAXSIZE}" ] || error "ccache: CCACHE_MAXSIZE is not set!"
 
 # Write sloppiness config — allows ccache-ECS to ignore file timestamps,
-# ctime, mtime, and time macros for cache validation
+# ctime, mtime, and time macros for cache validation. .ccache persists
+# across builds (restore-caches/save-caches), so guard against appending
+# a duplicate line every single run — harmless to ccache itself (later
+# duplicate keys just override earlier ones) but grows the file forever.
 mkdir -p "${CCACHE_DIR}"
-echo "sloppiness = include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" \
-    >> "${CCACHE_DIR}/ccache.conf"
+grep -qxF "sloppiness = include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" "${CCACHE_DIR}/ccache.conf" 2>/dev/null || \
+    echo "sloppiness = include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" \
+        >> "${CCACHE_DIR}/ccache.conf"
 
 # Reset stats (not cache data) for fresh tracking
 ${TOOL_CCACHE_BIN} --zero-stats > /dev/null 2>&1 || true
