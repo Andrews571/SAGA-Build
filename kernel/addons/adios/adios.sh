@@ -10,11 +10,15 @@
 # ADIOS default is not selected (this tree has no SSG scheduler — see the
 # patch header for how that was confirmed), a NULL pointer fix in
 # adios_completed_request() for UFS MCQ (rq->elv.priv[0] can be NULL for
-# requests that never went through elevator insert), and adios_init()
-# moved from module_init() to subsys_initcall() so it always registers
-# before the UFS-MTK platform driver (also device_initcall-level) gets a
-# chance to probe — otherwise CONFIG_MQ_IOSCHED_DEFAULT_ADIOS is a
-# link-order coin flip per block device, not a real guarantee.
+# requests that never went through elevator insert), adios_init() moved
+# from module_init() to subsys_initcall() so it always registers before
+# the UFS-MTK platform driver (also device_initcall-level) gets a chance
+# to probe, and a boot-time enforcer in block/genhd.c (re-asserts "adios"
+# on every disk queue a few times during early boot, same pattern as
+# BBRv3's tcp_congestion_control enforcer) — confirmed on real hardware
+# that the subsys_initcall fix alone wasn't enough: something in this
+# device's boot (vendor init, not traced further) still overwrites the
+# scheduler back to mq-deadline after the kernel's own choice.
 
 ADIOS_PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios/adios-android14-6.1-v3.2.0.patch"
 
