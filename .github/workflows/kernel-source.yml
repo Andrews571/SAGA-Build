@@ -62,7 +62,13 @@ jobs:
 
       - name: "Resolve target repo/branch"
         run: |
-          echo "TARGET_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts" >> $GITHUB_ENV
+          # -live, not -lts: build.sh and arsenal.sh both already compute
+          # KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live" and
+          # clone/cache-key against that exact name — this has to match,
+          # not the Google-side "-lts" naming (that's LTS_BRANCH below,
+          # what we fetch FROM Google; TARGET_BRANCH is what we push TO
+          # our own repo, a different thing).
+          echo "TARGET_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-live" >> $GITHUB_ENV
 
           # mirror = pure Google ACK, no catch-up merges ever — that's the
           # entire point of having it (a clean baseline to diff the live
@@ -89,9 +95,9 @@ jobs:
           # straight to the real branch — those aren't introducing new,
           # unvalidated content the way a raw stable-tag merge is.
           if [ "${{ inputs.force_adopt }}" = "false" ] && [ -n "${{ inputs.target_stable_tag }}" ]; then
-            echo "PUSH_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts-staging" >> $GITHUB_ENV
+            echo "PUSH_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-live-staging" >> $GITHUB_ENV
           else
-            echo "PUSH_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts" >> $GITHUB_ENV
+            echo "PUSH_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-live" >> $GITHUB_ENV
           fi
 
       # force_adopt path: full (non-shallow) clone from live ACK, pushed as
