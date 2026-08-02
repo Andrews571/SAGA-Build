@@ -1,9 +1,12 @@
 name: "🌱 Kernel Source"
 run-name: "${{ inputs.force_adopt && format('🌊 Adopt fresh ACK | {0}-{1}-lts', inputs.android_version, inputs.kernel_version) || (inputs.target_stable_tag != '' && format('⚡ Catch-up | {0} | {1}-{2}-lts', inputs.target_stable_tag, inputs.android_version, inputs.kernel_version) || format('🌀 Sync live ACK | {0}-{1}-lts', inputs.android_version, inputs.kernel_version)) }}"
 
-# The target repo (LuminaireKernel-{version}) keeps real git history, so it
-# can be merged against linux-stable to catch up on subversions ACK hasn't
-# merged yet.
+# The target repo (SAGA-Kernel-{version}, or SAGA-Kernel-{version}-mirror
+# for target=mirror) keeps real git history, so it can be merged against
+# linux-stable to catch up on subversions ACK hasn't merged yet. The
+# mirror repo never gets a stable-tag catch-up (enforced below) — it's a
+# pure Google ACK mirror, kept as a clean baseline to compare the live
+# repo (and kernel/core/*_catchup) against.
 #
 # IMPORTANT: never rewrite commits from this history (no filter-repo,
 # filter-branch, rebase, etc). A previous version of this workflow used
@@ -20,6 +23,13 @@ run-name: "${{ inputs.force_adopt && format('🌊 Adopt fresh ACK | {0}-{1}-lts'
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: "Which repo to sync"
+        type: choice
+        default: "live"
+        options:
+          - "live"
+          - "mirror"
       kernel_version:
         description: "Kernel version (e.g. 6.1)"
         type: string
@@ -53,7 +63,22 @@ jobs:
       - name: "Resolve target repo/branch"
         run: |
           echo "TARGET_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts" >> $GITHUB_ENV
-          echo "TARGET_REPO=LuminaireKernel-${{ inputs.kernel_version }}" >> $GITHUB_ENV
+
+          # mirror = pure Google ACK, no catch-up merges ever — that's the
+          # entire point of having it (a clean baseline to diff the live
+          # repo and kernel/core/*_catchup against). A stable-tag catch-up
+          # landing there would defeat that purpose, so it's a hard error,
+          # not a warning.
+          if [ "${{ inputs.target }}" = "mirror" ] && [ -n "${{ inputs.target_stable_tag }}" ]; then
+            echo "::error::target=mirror can never take a target_stable_tag — the mirror repo is a pure Google ACK mirror by design. Use target=live for a linux-stable catch-up."
+            exit 1
+          fi
+
+          if [ "${{ inputs.target }}" = "mirror" ]; then
+            echo "TARGET_REPO=SAGA-Kernel-${{ inputs.kernel_version }}-mirror" >> $GITHUB_ENV
+          else
+            echo "TARGET_REPO=SAGA-Kernel-${{ inputs.kernel_version }}" >> $GITHUB_ENV
+          fi
 
           # A stable catch-up merge (target_stable_tag set, not adopting)
           # never lands directly on the production branch — it goes to a
@@ -115,8 +140,8 @@ jobs:
           git clone --branch "${ACK_BRANCH}" --progress \
             "https://android.googlesource.com/kernel/common" ack-fresh
           cd ack-fresh
-          git config user.name "chainonyourdoor"
-          git config user.email "chainonyourdoor@gmail.com"
+          git config user.name "Andrews571"
+          git config user.email "Andrews571@users.noreply.github.com"
 
           # Large-push hardening: works around the known GitHub HTTP/2
           # large-pack corruption class of issues, and gives enough buffer
@@ -125,7 +150,7 @@ jobs:
           git config http.version HTTP/1.1
 
           git remote add target \
-            "https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${TARGET_REPO}.git"
+            "https://Andrews571:${{ secrets.KERNEL_SYNC_TOKEN }}@github.com/Andrews571/${TARGET_REPO}.git"
 
           echo "Building commit list (oldest -> newest)..."
           git rev-list --reverse HEAD > /tmp/commits.txt
@@ -227,10 +252,10 @@ jobs:
 
       # Everything below only runs when NOT adopting — normal incremental
       # sync against a target repo that already has real ACK history.
-      - name: "Clone target repo (LuminaireKernel)"
+      - name: "Clone target repo (SAGA-Kernel)"
         if: ${{ inputs.force_adopt == false }}
         run: |
-          REPO_URL="https://chainonyourdoor:${{ secrets.SYNC_TOKEN }}@github.com/chainonyourdoor/${TARGET_REPO}.git"
+          REPO_URL="https://Andrews571:${{ secrets.KERNEL_SYNC_TOKEN }}@github.com/Andrews571/${TARGET_REPO}.git"
           # Full (non-shallow) clone — not depth-limited anymore. Two hard
           # requirements forced this:
           #
@@ -272,8 +297,8 @@ jobs:
             }
           fi
           cd kernel-work
-          git config user.name "chainonyourdoor"
-          git config user.email "chainonyourdoor@gmail.com"
+          git config user.name "Andrews571"
+          git config user.email "Andrews571@users.noreply.github.com"
 
       - name: "Fetch + merge live ACK (${{ inputs.android_version }}-${{ inputs.kernel_version }} + ${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts)"
         if: ${{ inputs.force_adopt == false }}
