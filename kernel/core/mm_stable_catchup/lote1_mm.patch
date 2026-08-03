@@ -342,18 +342,6 @@ index 21cd7660b..30e138816 100644
  		}
  		add_mm_counter(mm, mm_counter_file(page), -HPAGE_PMD_NR);
  		return;
-diff --git a/mm/page_alloc.c b/mm/page_alloc.c
-index 9a1382dd8..b65705260 100644
---- a/mm/page_alloc.c
-+++ b/mm/page_alloc.c
-@@ -1576,6 +1576,7 @@ static __always_inline bool free_pages_prepare(struct page *page,
- 
- 	page_cpupid_reset_last(page);
- 	page->flags &= ~PAGE_FLAGS_CHECK_AT_PREP;
-+	page->private = 0;
- 	trace_android_vh_mm_free_page(page);
- 	reset_page_owner(page, order);
- 	free_page_pinner(page, order);
 diff --git a/mm/vmscan.c b/mm/vmscan.c
 index 74a933fa0..fa69c9500 100644
 --- a/mm/vmscan.c
