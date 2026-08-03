@@ -158,12 +158,12 @@ run_core() {
         "${core_dir}/compiler_string/compiler_string.sh"
         "${core_dir}/module_bypass/module_bypass.sh"
         "${core_dir}/openssl3_compat/openssl3_compat.sh"
-#       "${core_dir}/mm_stable_catchup/mm_stable_catchup.sh"
-#       "${core_dir}/f2fs_thermal_catchup/f2fs_thermal_catchup.sh"
-#       "${core_dir}/binder_cpufreq_catchup/binder_cpufreq_catchup.sh"
-#       "${core_dir}/ufs_writebooster_catchup/ufs_writebooster_catchup.sh"
-#       "${core_dir}/workqueue_catchup/workqueue_catchup.sh"
-#       "${core_dir}/schedutil_catchup/schedutil_catchup.sh"
+        "${core_dir}/mm_stable_catchup/mm_stable_catchup.sh"
+        "${core_dir}/f2fs_thermal_catchup/f2fs_thermal_catchup.sh"
+        "${core_dir}/binder_cpufreq_catchup/binder_cpufreq_catchup.sh"
+        "${core_dir}/ufs_writebooster_catchup/ufs_writebooster_catchup.sh"
+        "${core_dir}/workqueue_catchup/workqueue_catchup.sh"
+        "${core_dir}/schedutil_catchup/schedutil_catchup.sh"
         "${core_dir}/tickrate_choice/tickrate_choice.sh"
     )
     for script in "${scripts[@]}"; do
