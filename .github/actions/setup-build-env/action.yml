@@ -6,6 +6,8 @@ inputs:
     required: true
   kernel-version:
     required: true
+  kernel-source:
+    required: true
   ref-name:
     required: true
   kernel-variant:
@@ -53,7 +55,9 @@ runs:
           ~/ak3-cache
           ~/kernel-cache
           ~/.apt-cache
-        key: arsenal-MAKE-${{ inputs.kernel-version }}
+        # Must match setup-arsenal's "Cache Arsenal" key exactly (see the
+        # comment there) or this silently misses every time.
+        key: arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}
 
     - name: "Restore ccache"
       if: startsWith(inputs.build-system, 'Make')
