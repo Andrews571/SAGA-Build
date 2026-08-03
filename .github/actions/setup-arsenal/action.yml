@@ -6,6 +6,8 @@ inputs:
     required: true
   kernel-version:
     required: true
+  kernel-source:
+    required: true
   update-arsenal:
     required: true
   gh-token:
@@ -34,7 +36,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
       run: |
-        gh cache delete "arsenal-MAKE-${{ inputs.kernel-version }}" -R "${{ github.repository }}" 2>/dev/null || true
+        gh cache delete "arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}" -R "${{ github.repository }}" 2>/dev/null || true
         if [ "${{ startsWith(inputs.build-system, 'Make') }}" = "true" ]; then
           gh cache delete "clang-${{ steps.clang-key.outputs.clang_variant }}" -R "${{ github.repository }}" 2>/dev/null || true
         fi
@@ -54,7 +56,11 @@ runs:
           ~/ak3-cache
           ~/kernel-cache
           ~/.apt-cache
-        key: arsenal-MAKE-${{ inputs.kernel-version }}
+        # kernel-source in the key too, not just kernel-version — mirror
+        # and live are different git histories entirely (same version
+        # number can mean different trees), a cached ~/kernel-cache from
+        # one must never get served for the other.
+        key: arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}
 
     - name: "Run Arsenal"
       shell: bash
