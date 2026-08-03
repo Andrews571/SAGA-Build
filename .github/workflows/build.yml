@@ -23,6 +23,13 @@ on:
           - "6.1"
           - "6.6"
           - "6.12"
+      kernel_source:
+        description: "Kernel Source"
+        type: choice
+        default: "live"
+        options:
+          - "live"
+          - "mirror"
       ksunext:
         description: "KernelSU-Next"
         type: boolean
@@ -221,6 +228,7 @@ jobs:
         with:
           build-system:   ${{ inputs.build_system }}
           kernel-version: ${{ inputs.kernel_version }}
+          kernel-source:  ${{ inputs.kernel_source }}
           update-arsenal: ${{ inputs.update_arsenal }}
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
@@ -259,6 +267,7 @@ jobs:
       BUILD_SYSTEM:                ${{ inputs.build_system }}
       ADDONS:                      ${{ needs.prepare-matrix.outputs.addons }}
       TICK_RATE:                   ${{ inputs.tick_rate }}
+      KERNEL_SOURCE:               ${{ inputs.kernel_source }}
       CCACHE_DIR:                  ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
       CCACHE_MAXSIZE:              ${{ startsWith(inputs.build_system, 'Make') && '900M' || '' }}
 
@@ -301,6 +310,7 @@ jobs:
         with:
           build-system:   ${{ inputs.build_system }}
           kernel-version: ${{ inputs.kernel_version }}
+          kernel-source:  ${{ inputs.kernel_source }}
           ref-name:       ${{ needs.prepare-matrix.outputs.safe_ref }}
           kernel-variant:  ${{ matrix.kernel_variant }}
           susfs:          ${{ matrix.susfs }}
