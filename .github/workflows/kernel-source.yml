@@ -52,6 +52,11 @@ jobs:
     name: "Sync ${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
     runs-on: ubuntu-latest
     steps:
+      - name: "Checkout SAGA-Build"  # for kernel/catchup-resolutions/ — known-good conflict resolutions, see the merge step below
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: "Free up disk space"
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -387,13 +392,34 @@ jobs:
             exit 1
           fi
 
-          # On conflict, this job FAILS on purpose — kernel source merge
-          # conflicts need human judgment, not CI auto-resolve. Resolve
-          # locally, then commit+push from there.
+          # On conflict, first check kernel/catchup-resolutions/<tag>/ for a
+          # known-good resolution per conflicted file (reviewed and tested
+          # ahead of time — see that directory's own files for what each
+          # one actually contains and why). Any conflicted file with no
+          # matching resolution there still fails the job on purpose —
+          # kernel source merge conflicts need human judgment, not silent
+          # CI auto-resolve; this only covers ground already covered.
           if ! git merge --no-edit "${{ inputs.target_stable_tag }}"; then
-            echo "::error::Merge conflict catching up to ${{ inputs.target_stable_tag }}. Resolve manually: git clone the repo, replicate these fetch steps, resolve conflicts locally, then push."
-            git merge --abort
-            exit 1
+            RESOLUTIONS_DIR="${GITHUB_WORKSPACE}/kernel/catchup-resolutions/${{ inputs.target_stable_tag }}"
+            UNRESOLVED=""
+            for f in $(git diff --name-only --diff-filter=U); do
+              if [ -f "${RESOLUTIONS_DIR}/${f}" ]; then
+                cp "${RESOLUTIONS_DIR}/${f}" "$f"
+                git add "$f"
+                echo "Resolved via kernel/catchup-resolutions: ${f}"
+              else
+                UNRESOLVED="${UNRESOLVED}${f}\n"
+              fi
+            done
+
+            if [ -n "$UNRESOLVED" ]; then
+              echo "::error::Merge conflict catching up to ${{ inputs.target_stable_tag }} in file(s) with no known resolution:%0A$(echo -e "$UNRESOLVED")Resolve manually: git clone the repo, replicate these fetch steps, resolve conflicts locally, then push. Once confirmed working, consider adding the resolution to kernel/catchup-resolutions/${{ inputs.target_stable_tag }}/ in SAGA-Build for next time."
+              git merge --abort
+              exit 1
+            fi
+
+            git commit --no-edit
+            echo "All conflicts resolved via kernel/catchup-resolutions/${{ inputs.target_stable_tag }}/ ✅"
           fi
 
           VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
