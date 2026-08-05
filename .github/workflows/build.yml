@@ -29,6 +29,7 @@ on:
         default: "live"
         options:
           - "live"
+          - "live-staging"
           - "mirror"
       ksunext:
         description: "KernelSU-Next"
