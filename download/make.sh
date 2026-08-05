@@ -10,12 +10,14 @@ if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -d "${HOME}/kernel-cache/common" ]; t
     log "Kernel source restored ✅ ($(cache_freshness_note))"
 else
     log "Cloning kernel source..."
-    # KERNEL_SOURCE ("live" or "mirror", see build.yml's kernel_source
-    # input) picks between the two repos kernel-source.yml maintains:
+    # KERNEL_SOURCE ("live", "live-staging", or "mirror", see build.yml's
+    # kernel_source input) picks between what kernel-source.yml maintains:
     # SAGA-Kernel-<ver> (Google GKI + linux-stable catch-up, what builds
-    # normally want) or SAGA-Kernel-<ver>-mirror (pure Google GKI, no
-    # catch-up — a clean baseline for comparison/bisection). Both use the
-    # same "-live" branch name (see kernel-source.yml).
+    # normally want), the same repo's "-staging" branch (a catch-up not
+    # yet promoted to production — build.sh computes the actual branch
+    # name via KERNEL_SOURCE too, see KERNEL_BRANCH there), or
+    # SAGA-Kernel-<ver>-mirror (pure Google GKI, no catch-up ever — a
+    # clean baseline for comparison/bisection).
     if [ "${KERNEL_SOURCE:-live}" = "mirror" ]; then
         KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}-mirror"
     else
