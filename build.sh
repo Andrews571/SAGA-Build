@@ -31,7 +31,7 @@ ANDROID_VERSION="$(resolve_android_version)"
 # kernel-source.yml's PUSH_BRANCH for a stable-tag catch-up); mirror and
 # live both just use "-live" — mirror on its own separate repo, handled
 # in download/make.sh's KERNEL_REPO_URL selection, not here.
-if [ "${KERNEL_SOURCE:-live}" = "live-staging" ]; then
+if [ "${KERNEL_SOURCE:-live-staging}" = "live-staging" ]; then
     KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live-staging"
 else
     KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live"
