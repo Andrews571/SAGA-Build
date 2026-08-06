@@ -69,15 +69,19 @@ ADDON_DISPLAY_NAMES = {
 MOUNTLESS_ADDON_TOKENS = ("nomount", "zeromount")
 
 # Toggle-style addons shown as explicit Enable/Disable lines in the group
-# caption, in display order.
-TOGGLE_ADDON_ORDER = ["rekernel", "bbrv3", "bbg", "droidspaces", "bore", "adios", "lz4zstd", "lz4kd", "le9uo", "kasumi", "ntsync", "kcompressd", "zram_ir"]
+# caption, in display order. bore/adios/bbrv3/bbg/ntsync are deliberately
+# NOT here — they're always-on (see build.yml) and shown instead in the
+# dedicated "Features" block (see FEATURE_ADDON_TOKENS / build_feature_lines
+# below), not duplicated as Enable/Disable toggles.
+TOGGLE_ADDON_ORDER = ["rekernel", "droidspaces", "lz4zstd", "lz4kd", "le9uo", "kasumi", "kcompressd", "zram_ir"]
 
-# Channel-post-only: these four get pulled out of the normal "*Add-ons*"
-# bullet list and into their own Telegraph "Features" page instead (see
-# build_telegraph_content() and build_channel_caption() below) — they're
-# the ones worth a version number, the rest are plain on/off toggles.
-# Order here is display order on the Telegraph page.
-FEATURE_ADDON_TOKENS = ["bore", "adios", "bbrv3", "bbg"]
+# These five get pulled out of the normal "*Add-ons*" bullet list and into
+# their own "Features" block instead (see build_feature_lines(),
+# build_blocks()'s inline block for the group/test-topic caption, and
+# build_telegraph_content() for the channel post's Telegraph page) —
+# they're the always-on, version-worth-mentioning features, the rest are
+# plain on/off toggles. Order here is display order in that block.
+FEATURE_ADDON_TOKENS = ["bore", "adios", "bbrv3", "bbg", "ntsync"]
 
 
 def mdv2_escape(s):
@@ -116,6 +120,48 @@ def truncate(caption, limit, suffix="\n\u2026\n```"):
         result.append(ch)
         current_len += ch_len
     return "".join(result) + suffix
+
+
+def build_feature_lines(env):
+    """
+    Shared "Features" content — CONFIG_HZ plus whichever of
+    FEATURE_ADDON_TOKENS are enabled this run. Used both by the group/
+    test-topic caption's inline Features block (build_blocks) and the
+    channel caption's Features content (build_telegraph_content).
+
+    CONFIG_HZ always shows — it's a workflow_dispatch input (TICK_RATE,
+    build.yml), not addon-gated, so every build has one regardless of
+    which addons were picked. BORE and ADIOS get their version from
+    bore.sh/adios.sh (extracted from the patch filename, "v" prefix
+    stripped here since the display format is "Bore - 6.8.0", not
+    "Bore - v6.8.0"), threaded through telegram.sh's per-variant JSON and
+    channel_post.sh's aggregation. BORE is specifically a KABI-safe
+    backport for android14-6.1 (see bore.sh) so it's labelled as such.
+    BBRv3, BBG and NTSync have no meaningful upstream version to pin —
+    BBRv3's patch is fetched by URL per kernel version, BBG's setup.sh and
+    NTSync's integration are pulled live from upstream, neither carries a
+    semver — so those three are fixed labels rather than resolved values.
+    """
+    addon_tokens = set(t for t in env.get("ADDONS", "").split(",") if t)
+
+    lines = []
+    tick_rate = env.get("TICK_RATE", "").strip()
+    if tick_rate:
+        lines.append(f"CONFIG_HZ: {tick_rate}hz")
+    if "bore" in addon_tokens:
+        v = env.get("BORE_VERSION", "").strip().lstrip("v")
+        lines.append(f"Bore - {v} (backport)" if v else "Bore (backport)")
+    if "adios" in addon_tokens:
+        v = env.get("ADIOS_VERSION", "").strip().lstrip("v")
+        lines.append(f"ADIOS - {v}" if v else "ADIOS")
+    if "bbrv3" in addon_tokens:
+        lines.append("BBRv3")
+    if "bbg" in addon_tokens:
+        lines.append("BBG")
+    if "ntsync" in addon_tokens:
+        lines.append("NTSync")
+
+    return lines
 
 
 def build_blocks(env):
@@ -176,6 +222,10 @@ def build_blocks(env):
         + "\n".join(addon_status_lines) +
         "```"
     )
+
+    feature_lines = build_feature_lines(env)
+    block_features = ("```Features\n" + "\n".join(feature_lines) + "```") if feature_lines else ""
+
     footer = "[{}]({}) \\| [Run \\#{}]({})".format(
         mdv2_escape(commit_short),
         mdv2_escape_url(commit_url),
@@ -183,7 +233,7 @@ def build_blocks(env):
         mdv2_escape_url(run_url),
     )
 
-    return block_saga, block_root, block_addons, footer
+    return block_saga, block_root, block_addons, block_features, footer
 
 
 CHANGELOG_MAX_LEN = 300
@@ -192,35 +242,11 @@ CHANGELOG_MAX_LEN = 300
 def build_telegraph_content(env):
     """
     Content for the "Features" Telegraph page, called by telegraph_page.py
-    (caption.build_telegraph_content). CONFIG_HZ always shows — it's a
-    workflow_dispatch input (TICK_RATE, build.yml), not addon-gated, so
-    every build has one regardless of which addons were picked. The rest
-    only lists whichever of FEATURE_ADDON_TOKENS were actually enabled
-    this run — BORE and ADIOS get their version from bore.sh/adios.sh
-    (extracted from the patch filename, see those scripts, threaded
-    through telegram.sh's per-variant JSON and channel_post.sh's
-    aggregation). BBRv3 has no meaningful version beyond "v3" — the patch
-    is fetched by URL per kernel version, nothing in it carries a semver
-    — and BBG's setup.sh is pulled live from upstream with nothing to pin
-    a version to either, so both are fixed labels rather than resolved
-    values.
+    (caption.build_telegraph_content). Lines come from the shared
+    build_feature_lines() — see that function for the CONFIG_HZ/version
+    reasoning.
     """
-    addon_tokens = set(t for t in env.get("ADDONS", "").split(",") if t)
-
-    lines = []
-    tick_rate = env.get("TICK_RATE", "").strip()
-    if tick_rate:
-        lines.append(f"CONFIG_HZ: {tick_rate}hz")
-    if "bore" in addon_tokens:
-        v = env.get("BORE_VERSION", "").strip()
-        lines.append(f"BORE - {v}" if v else "BORE")
-    if "adios" in addon_tokens:
-        v = env.get("ADIOS_VERSION", "").strip()
-        lines.append(f"ADIOS - {v}" if v else "ADIOS")
-    if "bbrv3" in addon_tokens:
-        lines.append("BBR - v3")
-    if "bbg" in addon_tokens:
-        lines.append("BBG")
+    lines = build_feature_lines(env)
 
     if not lines:
         lines = ["No headline features enabled for this build."]
@@ -254,29 +280,12 @@ def build_channel_caption(env, variant_links, variant_versions=None):
         f"*GKI Kernel \\| Android {mdv2_escape(android_ver)} \\| Linux {mdv2_escape(major_minor)}*"
     ]
 
-    # Add-ons — only the ones actually enabled for this run. The four
+    # Add-ons — only the ones actually enabled for this run. The five
     # FEATURE_ADDON_TOKENS get pulled out into their own Telegraph
-    # "Features" link (below) instead of showing up here.
+    # "Features" link (right below, between Add-ons and Download) instead
+    # of showing up here.
     addon_tokens = [t for t in env.get("ADDONS", "").split(",") if t]
     other_addon_tokens = [t for t in addon_tokens if t not in FEATURE_ADDON_TOKENS]
-    # CONFIG_HZ (TICK_RATE) is always set — every build has a tick rate
-    # regardless of which addons were picked — so the Features page is
-    # always worth linking now, not just when one of FEATURE_ADDON_TOKENS
-    # happens to be enabled. Kept both checks rather than relying on
-    # bbrv3/bore currently always being in ADDONS (see build.yml) staying
-    # that way forever.
-    has_feature_content = bool(env.get("TICK_RATE", "").strip()) or any(t in FEATURE_ADDON_TOKENS for t in addon_tokens)
-
-    # Features link — its own section in `sections` so the "\n\n" join
-    # below gives it a blank line above and below automatically, same as
-    # every other section. Only shown when there's actually a feature
-    # addon enabled AND the Telegraph page was created successfully
-    # (FEATURES_URL empty means either TELEGRAPH_TOKEN isn't set or the
-    # API call failed — telegraph_page.py degrades gracefully either way,
-    # so this just quietly omits the line rather than linking nowhere).
-    features_url = env.get("FEATURES_URL", "").strip()
-    if has_feature_content and features_url:
-        sections.append(f"[*Features*]({mdv2_escape_url(features_url)})")
 
     if other_addon_tokens:
         addon_lines = ["*Add\\-ons*"]
@@ -284,6 +293,21 @@ def build_channel_caption(env, variant_links, variant_versions=None):
             name = ADDON_DISPLAY_NAMES.get(token, token)
             addon_lines.append(f"\\- {mdv2_escape(name)}")
         sections.append("\n".join(addon_lines))
+
+    # Features link — sits between Add-ons and Download. CONFIG_HZ
+    # (TICK_RATE) is always set — every build has a tick rate regardless
+    # of which addons were picked — so the Features page is always worth
+    # linking, not just when one of FEATURE_ADDON_TOKENS happens to be
+    # enabled. Kept both checks rather than relying on bbrv3/bore/ntsync
+    # currently always being in ADDONS (see build.yml) staying that way
+    # forever. FEATURES_URL empty means either TELEGRAPH_TOKEN isn't set
+    # or the API call failed — telegraph_page.py degrades gracefully
+    # either way, so this just quietly omits the line rather than linking
+    # nowhere.
+    has_feature_content = bool(env.get("TICK_RATE", "").strip()) or any(t in FEATURE_ADDON_TOKENS for t in addon_tokens)
+    features_url = env.get("FEATURES_URL", "").strip()
+    if has_feature_content and features_url:
+        sections.append(f"[*Features*]({mdv2_escape_url(features_url)})")
 
     # Download links — short base name only (see VARIANT_BASE_DISPLAY),
     # no +SUSFS suffix and no per-variant version number.
@@ -351,9 +375,15 @@ def main():
 
     env = os.environ
 
-    block_saga, block_root, block_addons, footer = build_blocks(env)
+    block_saga, block_root, block_addons, block_features, footer = build_blocks(env)
 
-    caption_group = "\n".join([block_saga, block_root, block_addons, footer])
+    # Order: SAGA -> Add-ons -> Features -> Root-solution (variant) -> footer.
+    # Features sits between Add-ons and the variant/Root-solution block
+    # since bore/adios/bbrv3/bbg/ntsync used to be listed as Add-ons and
+    # are now surfaced here instead.
+    caption_group = "\n".join(
+        b for b in [block_saga, block_addons, block_features, block_root, footer] if b
+    )
     caption_group = truncate(caption_group, CAPTION_LIMIT)
 
     # Channel caption — built from VARIANT_LINKS_JSON (provided by channel_post.sh)
