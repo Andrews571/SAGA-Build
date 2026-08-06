@@ -18,7 +18,7 @@ else
     # name via KERNEL_SOURCE too, see KERNEL_BRANCH there), or
     # SAGA-Kernel-<ver>-mirror (pure Google GKI, no catch-up ever — a
     # clean baseline for comparison/bisection).
-    if [ "${KERNEL_SOURCE:-live}" = "staging" ]; then
+    if [ "${KERNEL_SOURCE:-live-staging}" = "staging" ]; then
         KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}-staging"
     else
         KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}"
