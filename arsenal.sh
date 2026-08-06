@@ -22,7 +22,7 @@ source "$(cd "$(dirname "$0")" && pwd)/functions.sh"
 KERNEL_VERSION="${KERNEL_VERSION:?KERNEL_VERSION is not set}"
 
 ANDROID_VERSION="$(resolve_android_version)"
-if [ "${KERNEL_SOURCE:-live-staging}" = "staging" ]; then
+if [ "${KERNEL_SOURCE:-live-staging}" = "live-staging" ]; then
     KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live-staging"
 else
     KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live"
