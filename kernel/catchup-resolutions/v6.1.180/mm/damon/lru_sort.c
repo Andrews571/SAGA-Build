@@ -255,6 +255,7 @@ static bool damon_lru_sort_enabled(void)
 	return damon_is_running(ctx);
 }
 
+
 static int damon_lru_sort_enabled_store(const char *val,
 		const struct kernel_param *kp)
 {
