@@ -1,0 +1,96 @@
+name: "🪞 Mirror Reference Kernel"
+run-name: "🪞 Mirror ${{ inputs.reference_repo }}@${{ inputs.reference_branch }} → ${{ inputs.target_branch }}"
+
+# No merge, no conflict resolution — this is a full wholesale replace.
+# For when you've got a complete, already-coherent kernel tree from
+# somewhere (a reference repo someone else built and tested) and just
+# want SAGA-Kernel-6.1 to BE that tree, instead of trying to reconstruct
+# it via kernel-source.yml's merge-against-linux-stable + resolve-conflicts
+# path. Use that path when you want to independently catch up against
+# linux-stable yourself; use this one when someone else already did that
+# work and you just want to mirror the result.
+#
+# Manual only — this force-pushes and overwrites the target branch's
+# history outright, so it's a deliberate action every time, never
+# automatic.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reference_repo:
+        description: "Reference repo (owner/name)"
+        type: string
+        default: "ramabondanp/android_kernel_common-6.1"
+      reference_branch:
+        description: "Reference branch"
+        type: string
+        default: "not-tested"
+      target_branch:
+        description: "Branch to overwrite on SAGA-Kernel-6.1"
+        type: choice
+        default: "android14-6.1-live-staging"
+        options:
+          - "android14-6.1-live-staging"
+          - "android14-6.1-live"
+
+jobs:
+  mirror:
+    name: "Mirror ${{ inputs.reference_repo }} → ${{ inputs.target_branch }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Free up disk space"
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+            /usr/share/swift /usr/local/.ghcup
+          sudo apt-get clean
+          df -h
+
+      - name: "Clone reference tree"
+        run: |
+          git clone --depth 1 -b "${{ inputs.reference_branch }}" \
+            "https://github.com/${{ inputs.reference_repo }}.git" ref-tree
+
+      - name: "Sanity-check it's a real kernel tree before pushing anything"
+        run: |
+          cd ref-tree
+          # Cheap, fast checks that this is genuinely a kernel source tree
+          # and not something malformed — a bad push here would silently
+          # break every future build until someone notices.
+          for f in Makefile arch/arm64/configs/gki_defconfig kernel/Kconfig.hz; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Reference tree is missing '$f' — this doesn't look like a real kernel source tree. Refusing to push."
+              exit 1
+            fi
+          done
+          VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
+          PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
+          SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
+          FILE_COUNT=$(find . -type f -not -path './.git/*' | wc -l)
+          echo "Reference tree: Linux ${VERSION}.${PATCHLEVEL}.${SUBLEVEL}, ${FILE_COUNT} files"
+          if [ "$FILE_COUNT" -lt 50000 ]; then
+            echo "::error::Only ${FILE_COUNT} files found — a real kernel tree has 70k+. Refusing to push what looks like a partial/broken clone."
+            exit 1
+          fi
+
+      - name: "Push to SAGA-Kernel-6.1"
+        run: |
+          cd ref-tree
+          git config user.name "Andrews571"
+          git config user.email "Andrews571@users.noreply.github.com"
+
+          # Squash to a single commit — we don't want/need the reference
+          # repo's own history, just its current tree state. Keeps
+          # SAGA-Kernel-6.1's own history clean instead of grafting on a
+          # second, unrelated repo's full commit history.
+          rm -rf .git
+          git init -q -b "${{ inputs.target_branch }}"
+          git config user.name "Andrews571"
+          git config user.email "Andrews571@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Mirror ${{ inputs.reference_repo }}@${{ inputs.reference_branch }} ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+
+          git remote add target "https://Andrews571:${{ secrets.KERNEL_SYNC_TOKEN }}@github.com/Andrews571/SAGA-Kernel-6.1.git"
+          git push --force target "HEAD:${{ inputs.target_branch }}"
+
+          echo "✅ ${{ inputs.target_branch }} now mirrors ${{ inputs.reference_repo }}@${{ inputs.reference_branch }}"
