@@ -159,6 +159,21 @@ jobs:
   prepare-matrix:
     name: "Prepare Arsenal"
     runs-on: ubuntu-latest
+    # Scoped ONLY to this job, not the workflow (see the no-workflow-lock
+    # comment above) — Start-Build still runs fully parallel always.
+    # update_arsenal="yes" deletes+rebuilds a *shared* cache key
+    # (arsenal-MAKE-<version>-<source>, clang-<variant>) — if a second
+    # dispatch's restore lands in the delete->rebuild->save window of a
+    # concurrent refresh, it gets a spurious miss, rebuilds redundantly,
+    # and both jobs race to save the same key (last save silently wins,
+    # possibly discarding the refresh you asked for — no error, just a
+    # cache that isn't what you expected). Refreshes are rare/manual, so
+    # queuing all of them behind one single-slot group ('arsenal-refresh')
+    # costs nothing in practice and removes the whole race. Non-refresh
+    # runs get a unique group (their own run_id) — i.e. never blocked.
+    concurrency:
+      group: ${{ inputs.update_arsenal == 'yes' && 'arsenal-refresh' || format('arsenal-noop-{0}', github.run_id) }}
+      cancel-in-progress: false
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       addons: ${{ steps.set.outputs.addons }}
@@ -218,6 +233,27 @@ jobs:
           # (cache asset filenames) wherever ref_name is needed downstream.
           SAFE_REF="$(echo '${{ github.ref_name }}' | tr '/' '-')"
           echo "safe_ref=${SAFE_REF}" >> $GITHUB_OUTPUT
+
+      - name: "Preflight — Validate Addons"
+        # Catches a folder/token mismatch (e.g. the zram_ir/zram-ir bug)
+        # in ~1 second, before Setup Arsenal spends real runner time on
+        # cache restore/rebuild for a build that would silently skip an
+        # addon later. Convention this enforces: the addon's folder name,
+        # its script name, and the token used in ADDONS above must all be
+        # identical — kernel/addons/<name>/<name>.sh.
+        run: |
+          IFS=',' read -ra addon_list <<< "${{ steps.set.outputs.addons }}"
+          missing=()
+          for addon in "${addon_list[@]}"; do
+            [ -z "$addon" ] && continue
+            [ -f "kernel/addons/${addon}/${addon}.sh" ] || missing+=("$addon")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Addon(s) selected but no matching script found: ${missing[*]}"
+            echo "Expected kernel/addons/<name>/<name>.sh for each. This usually means the folder name and the ADDONS token (build.yml) drifted apart — check kernel/addons/ against the 'Build Variant Matrix' step above."
+            exit 1
+          fi
+          echo "✅ All addons OK: ${{ steps.set.outputs.addons }}"
 
       - name: "Setup Arsenal"  # restores clang+arsenal cache (auto-saved if missing), then runs arsenal.sh
         id: setup-arsenal
