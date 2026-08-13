@@ -22,11 +22,7 @@ source "$(cd "$(dirname "$0")" && pwd)/functions.sh"
 KERNEL_VERSION="${KERNEL_VERSION:?KERNEL_VERSION is not set}"
 
 ANDROID_VERSION="$(resolve_android_version)"
-if [ "${KERNEL_SOURCE:-live-staging}" = "live-staging" ]; then
-    KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live-staging"
-else
-    KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live"
-fi
+resolve_kernel_source  # sets KERNEL_REPO_URL + KERNEL_BRANCH — see functions.sh
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SAGA_PATCH_DIR="${ROOT_DIR}"

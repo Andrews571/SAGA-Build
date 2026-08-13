@@ -27,15 +27,7 @@ KERNEL_VERSION="${KERNEL_VERSION:?KERNEL_VERSION is not set}"
 # with RUN_MODE by the time it reaches here.
 
 ANDROID_VERSION="$(resolve_android_version)"
-# live-staging uses its own branch (android14-6.1-live-staging, see
-# kernel-source.yml's PUSH_BRANCH for a stable-tag catch-up); mirror and
-# live both just use "-live" — mirror on its own separate repo, handled
-# in download/make.sh's KERNEL_REPO_URL selection, not here.
-if [ "${KERNEL_SOURCE:-live-staging}" = "live-staging" ]; then
-    KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live-staging"
-else
-    KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live"
-fi
+resolve_kernel_source  # sets KERNEL_REPO_URL + KERNEL_BRANCH — see functions.sh
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Bootstrap path — needed before run_setup() sources 00_paths.sh

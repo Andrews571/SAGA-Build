@@ -86,6 +86,56 @@ resolve_android_version() {
     esac
 }
 
+# Maps KERNEL_SOURCE ("live" | "live-staging" | "mirror", see build.yml's
+# kernel_source input) to the actual repo + branch to clone from. Single
+# source of truth — shared by build.sh, arsenal.sh, and download/make.sh —
+# so the three can never drift out of sync again. (Fixed 2026-08-12:
+# download/make.sh used to resolve its own repo URL independently and
+# never actually pointed at the "-mirror" repo — selecting "mirror" in the
+# dropdown silently cloned "live" instead, with no error of any kind.)
+# Sets KERNEL_REPO_URL and KERNEL_BRANCH as globals. ANDROID_VERSION and
+# KERNEL_VERSION must already be set before calling this.
+#
+#   live         Google GKI + linux-stable catch-up, maintained by
+#                kernel-source.yml. The default — what normal builds want.
+#                Repo: SAGA-Kernel-<ver>        Branch: <android>-<ver>-live
+#
+#   live-staging A catch-up not yet promoted to "live" — either an
+#                automated stable-tag run from kernel-source.yml, or a
+#                manual push of someone's upstream merge work (e.g. the
+#                6.1.175->6.1.180 catch-up). Lives in the SAME repo as
+#                "live", on its own branch, until it's judged stable
+#                enough to promote.
+#                Repo: SAGA-Kernel-<ver>        Branch: <android>-<ver>-live-staging
+#
+#   mirror       Pure Google GKI, no catch-up ever applied — a clean,
+#                untouched baseline kept for comparison/bisection against
+#                "live" (e.g. "is this regression from our catch-up, or
+#                already present upstream?"). Its own separate repo with
+#                its own git history — never share a kernel-cache between
+#                this and "live" (see the cache key comment in
+#                setup-arsenal/action.yml).
+#                Repo: SAGA-Kernel-<ver>-mirror Branch: <android>-<ver>-live
+resolve_kernel_source() {
+    case "${KERNEL_SOURCE:-live}" in
+        live)
+            KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}"
+            KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live"
+            ;;
+        live-staging)
+            KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}"
+            KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live-staging"
+            ;;
+        mirror)
+            KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}-mirror"
+            KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live"
+            ;;
+        *)
+            error "Unknown KERNEL_SOURCE: '${KERNEL_SOURCE}' — expected 'live', 'live-staging', or 'mirror'. Refusing to silently fall back (this is exactly how the mirror bug happened)."
+            ;;
+    esac
+}
+
 # Sources every *.sh in setup/, in order. Shared by build.sh and arsenal.sh.
 run_setup() {
     echo "::group::📦 Setup"
