@@ -10,19 +10,13 @@ if [ "${USE_KERNEL_CACHE}" = "true" ] && [ -d "${HOME}/kernel-cache/common" ]; t
     log "Kernel source restored ✅ ($(cache_freshness_note))"
 else
     log "Cloning kernel source..."
-    # KERNEL_SOURCE ("live", "live-staging", or "mirror", see build.yml's
-    # kernel_source input) picks between what kernel-source.yml maintains:
-    # SAGA-Kernel-<ver> (Google GKI + linux-stable catch-up, what builds
-    # normally want), the same repo's "-staging" branch (a catch-up not
-    # yet promoted to production — build.sh computes the actual branch
-    # name via KERNEL_SOURCE too, see KERNEL_BRANCH there), or
-    # SAGA-Kernel-<ver>-mirror (pure Google GKI, no catch-up ever — a
-    # clean baseline for comparison/bisection).
-    if [ "${KERNEL_SOURCE:-live-staging}" = "staging" ]; then
-        KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}-staging"
-    else
-        KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}"
-    fi
+    # KERNEL_REPO_URL and KERNEL_BRANCH are resolved once by
+    # resolve_kernel_source() (functions.sh), called from build.sh/
+    # arsenal.sh before this script runs — see that function for what
+    # each KERNEL_SOURCE value ("live"/"live-staging"/"mirror") maps to.
+    # Do not re-derive them here: that duplication is exactly what let
+    # the "mirror" option silently clone "live" for months undetected.
+    : "${KERNEL_REPO_URL:?KERNEL_REPO_URL not set — resolve_kernel_source() must run before download/make.sh}"
     log "Source: ${KERNEL_REPO_URL} @ ${KERNEL_BRANCH}"
     # This clones a full kernel source tree (~1.5GB working tree, ~240MB
     # of packed objects even at --depth=1) — a transfer that legitimately
