@@ -20,6 +20,18 @@ run-name: "${{ inputs.force_adopt && format('🌊 Adopt fresh ACK | {0}-{1}-lts'
 # Manual only for now (workflow_dispatch, no cron) — merge conflicts here
 # need human judgment, not something safe to auto-resolve in CI.
 
+# Two dispatches targeting the same repo+branch (e.g. a double-click, or
+# firing this again before a long catch-up finishes) would force-push
+# over each other mid-way through the adaptive chunked push below —
+# worse than the arsenal-cache race in build.yml, since this one can
+# actually corrupt/drop history, not just serve stale content. Scoped to
+# target+kernel_version+android_version (the actual repo+branch touched),
+# so unrelated combos (e.g. kernel_version 6.1 vs 6.6) still run fine in
+# parallel — only genuine collisions queue.
+concurrency:
+  group: kernel-source-${{ inputs.target }}-${{ inputs.kernel_version }}-${{ inputs.android_version }}
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:

@@ -13,6 +13,23 @@ run-name: "🪞 Mirror ${{ inputs.reference_repo }}@${{ inputs.reference_branch 
 # Manual only — this force-pushes and overwrites the target branch's
 # history outright, so it's a deliberate action every time, never
 # automatic.
+#
+# WARNING — interacts with kernel-source.yml: both target_branch options
+# here are branches kernel-source.yml also maintains and depends on
+# having continuous, unrewritten history for its merge-base lookups
+# against linux-stable (see that workflow's header comment). This job's
+# "rm -rf .git; git init" wipes that ancestry outright on whichever
+# branch you pick — after running this, kernel-source.yml's next
+# stable-tag catch-up on that same branch has no shared history to merge
+# against and will need force_adopt again to re-establish one. That's
+# sometimes exactly what you want (the reference tree IS the new base)
+# — just never a surprise. The confirm input below exists so this is
+# never a stray click; the concurrency group is shared with
+# kernel-source.yml's own naming so the two can't race on the same
+# branch either.
+concurrency:
+  group: kernel-source-live-6.1-android14
+  cancel-in-progress: false
 
 on:
   workflow_dispatch:
@@ -32,12 +49,23 @@ on:
         options:
           - "android14-6.1-live-staging"
           - "android14-6.1-live"
+      confirm:
+        description: "Type CONFIRM — this wipes the target branch's git history (kernel-source.yml will need force_adopt on it again for a future catch-up)"
+        type: string
+        default: ""
 
 jobs:
   mirror:
     name: "Mirror ${{ inputs.reference_repo }} → ${{ inputs.target_branch }}"
     runs-on: ubuntu-latest
     steps:
+      - name: "Check confirmation"
+        run: |
+          if [ "${{ inputs.confirm }}" != "CONFIRM" ]; then
+            echo "::error::Type CONFIRM in the 'confirm' input to proceed — this wipes ${{ inputs.target_branch }}'s git history, which kernel-source.yml depends on for its linux-stable merge-base."
+            exit 1
+          fi
+
       - name: "Free up disk space"
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
