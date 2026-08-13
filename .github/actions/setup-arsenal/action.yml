@@ -65,4 +65,15 @@ runs:
     - name: "Run Arsenal"
       shell: bash
       working-directory: ${{ github.workspace }}
+      # Composite action inputs (inputs.*) are usable inside this action.yml
+      # but are NOT auto-exposed as env vars to a `run:` step's shell — that
+      # gap is exactly why arsenal.sh ran with KERNEL_SOURCE unset for as
+      # long as it did (silently masked by its own fallback default, which
+      # is why it went undetected: every run "worked", just sometimes
+      # against the wrong branch). Every var arsenal.sh/functions.sh reads
+      # from the environment must be listed here explicitly — the job-level
+      # `env:` in build.yml's prepare-matrix does NOT reach into this
+      # composite action's steps.
+      env:
+        KERNEL_SOURCE: ${{ inputs.kernel-source }}
       run: bash arsenal.sh
