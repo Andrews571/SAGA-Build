@@ -1,58 +1,63 @@
 From: ADIOS scheduler analysis
-Subject: [PATCH] adios: adds #5, BFQ-inspired interactive-boost heuristic
+Subject: [PATCH] adios: adds #6, Kyber-inspired adaptive depth controller
 
 Applies ON TOP of adios-android14-6.1-v3.2.0.patch. Same base as the
-previous revision (confidence-gated ordering, auto queue-depth scaling,
-self-detected degradation decay, tunable LM constants, SAGA defaults --
-see that revision's own commit message for those). This adds ONE new
-mechanism on top:
+previous revision (parts 1-5: confidence-gated ordering, auto
+queue-depth scaling, self-detected degradation decay, tunable LM
+constants, device-class window heuristic, interactive-boost -- see
+that revision's commit message for those, unchanged here). Adds:
 
-5. Interactive-boost heuristic (task_was_idle_and_gets_boost(), used in
-   add_to_dl_tree()). Inspired by BFQ's core insight for desktop/mobile
-   responsiveness -- a task that was idle and just issued I/O is likely
-   interactive (foreground touch response, app resuming) and benefits
-   from a temporary priority bump -- WITHOUT implementing BFQ's full
-   per-process fair-queuing machinery (that's thousands of lines and a
-   different architecture). Scoped down to: a small fixed 16-slot
-   recency table (tgid -> last seen time) in struct adios_data, checked
-   at insert time. A sync READ from a tgid whose last I/O was more than
-   lm_interactive_idle_ms ago (default 100ms) -- or has no entry at all
-   -- gets its deadline reduced by lm_interactive_boost_ns (default
-   20ms), letting it jump the Tier-2 FIFO ahead of continuously-active
-   readers. Deliberately READ-only and SYNC-only: that's the pattern of
-   a UI thread blocking on a resource read, the case that actually
-   shows up as jank. Async writes are untouched -- boosting them would
-   fight the write-deprioritization the rest of ADIOS already does on
-   purpose.
+6. Adaptive depth controller (adapt_depth_controller(), used from
+   adios_completed_request(); effective_batch_limit(), used at the
+   admission check in fill_batch_queues()). This is the piece
+   explicitly requested as "the more sophisticated one" -- Kyber's
+   real mechanism is a live feedback controller that continuously
+   adjusts admitted queue depth based on measured latency, not a
+   fixed static limit. Ported the CONCEPT, not Kyber's exact
+   implementation (which needs its own blk-stat latency-histogram
+   infrastructure); this version reuses machinery ADIOS already has:
 
-Design notes / honesty about limitations:
-- Uses task_tgid_nr(current) at insert time. This assumes
-  adios_insert_requests() runs in the issuing thread's own context
-  (true for the normal blk-mq submit_bio path; if a given request
-  reaches insert via a plug-list flush on a different thread/workqueue,
-  the tgid captured could be wrong -- worst case is a missed or
-  misattributed boost, not a correctness bug, since it only ever
-  shifts a deadline earlier by a bounded amount).
-- The 16-slot table is a hint structure, not accounting: collisions
-  between unrelated tgids just mean a missed boost occasionally, never
-  incorrect ordering. No claim of exactness.
-- Needed one new #include (linux/sched.h, for task_tgid_nr) -- verified
-  not already pulled in by this file's existing includes, added
-  explicitly rather than assumed transitive.
-- 100ms idle / 20ms boost are reasoned starting points, NOT validated
-  by benchmark, same as every other new constant in this patch series.
+   - Classifies every completed READ/WRITE as GOOD (latency <=
+     rd->pred_lat, met/beat the model's own prediction), BAD (same
+     overrun definition #3 already computes: latency > pred_lat *
+     lm_overrun_ratio_pct/100), or neither (hysteresis dead zone) --
+     a 3-bucket classification, same idea Kyber uses to avoid
+     oscillating on borderline samples.
+   - #3 and #6 now share one overrun computation per completion
+     (computed once, fed to both) instead of duplicating the
+     comparison.
+   - Every lm_adapt_window_samples completions (default 128) per
+     optype, evaluates the window's bad/good ratio: >=15% bad steps
+     the multiplier down, >=90% good steps it up, otherwise no change.
+     Step size (+/-10% default) and multiplier bounds ([0.25x, 2.0x]
+     default) are all sysfs-tunable.
+   - The multiplier is layered ON TOP of the existing batch_limit[]
+     array (itself already auto-scaled by #2) via effective_batch_limit(),
+     which is what fill_batch_queues() now checks against instead of
+     the raw batch_limit[] directly. batch_limit[] itself is left
+     untouched by the controller -- a manual sysfs write to it still
+     means exactly what it says; only the live multiplier moves.
+   - Key design departure from Kyber: compares against the model's
+     OWN prediction (rd->pred_lat) rather than a fixed configured
+     target latency. Inherits the model's existing per-device/
+     per-workload self-calibration instead of needing a second,
+     separately-tuned target -- arguably more adapted to this
+     specific codebase than a literal Kyber port would have been.
+   - New RO sysfs `depth_controller` shows live multiplier + effective
+     limit for read/write, so the mechanism's behavior is observable
+     from userspace (echo/cat), not just trust-me-it-works.
+   - Only READ/WRITE are controlled, matching Kyber's practical scope;
+     DISCARD/OTHER always use their static (auto-scaled) batch_limit.
 
 NOT submitted upstream. NOT compiled/tested against a real
-android14-6.1 tree by me -- the PREVIOUS revision of this patch (parts
-1-4 + SAGA defaults) WAS built, flashed, and confirmed running on the
-user's real device (adios_version sysfs reads 3.2.0-tunable-lm.2, and
-the batch_limit auto-scale in part #2 visibly fired: read/write scaled
-from the 64/128 base to 123/247, consistent 1.93x on both, implying a
-real q->nr_requests of ~62 on that UFS 2.2 device). This revision's new
-part (#5) has NOT yet been through that same real-build verification.
+android14-6.1 tree -- parts 1-4 + SAGA defaults from an EARLIER
+revision of this patch series WERE built, flashed, and confirmed
+running (see that revision's own notes). Parts 5 and 6, including this
+one, have NOT yet been through that same real-build verification. Test
+before trusting, same as everything before it in this series.
 ---
 --- a/block/adios.c	2026-08-11 01:54:07.045164366 +0000
-+++ b/block/adios.c	2026-08-13 10:25:20.564898593 +0000
++++ b/block/adios.c	2026-08-13 21:07:21.948247972 +0000
 @@ -20,13 +20,14 @@
  #include <linux/string.h>
  #include <linux/list_sort.h>
@@ -69,7 +74,7 @@ part (#5) has NOT yet been through that same real-build verification.
  
  /* Request Types:
   *
-@@ -81,12 +82,37 @@
+@@ -81,12 +82,50 @@
   */
  
  // Global variable to control the latency
@@ -106,10 +111,23 @@ part (#5) has NOT yet been through that same real-build verification.
 +// huge. Neither validated by benchmark.
 +static u32 default_lm_interactive_idle_ms = 100;
 +static u64 default_lm_interactive_boost_ns = 20 * NSEC_PER_MSEC;
++// SAGA #6: adaptive depth controller defaults. Window of 128 completions
++// per evaluation (independent per optype -- read and write each get
++// their own window/multiplier). >=15% bad in a window throttles down;
++// >=90% good opens up; the 15-90 range is the hysteresis dead zone.
++// +/-10% (100 permille) step per adjustment, multiplier bounded to
++// [0.25x, 2.0x] of the statically-scaled batch_limit from #2. All
++// reasoned starting points, NOT validated by benchmark.
++static u32 default_lm_adapt_window_samples = 128;
++static u32 default_lm_adapt_bad_threshold_pct = 15;
++static u32 default_lm_adapt_good_threshold_pct = 90;
++static u32 default_lm_adapt_step_permille = 100;
++static u32 default_lm_adapt_min_permille = 250;
++static u32 default_lm_adapt_max_permille = 2000;
  // Batch ordering strategy
  static u64 default_batch_order = 0;
  
-@@ -98,7 +124,12 @@
+@@ -98,7 +137,12 @@
  };
  
  // Flags to control compliance with block layer constraints
@@ -123,7 +141,7 @@ part (#5) has NOT yet been through that same real-build verification.
  
  // Dynamic thresholds for shrinkage
  static u32 default_lm_shrink_at_kreqs  =  5000;
-@@ -122,9 +153,10 @@
+@@ -122,9 +166,10 @@
  };
  
  // Maximum batch size limits for each operation type
@@ -136,7 +154,7 @@ part (#5) has NOT yet been through that same real-build verification.
  	[ADIOS_DISCARD] =  1,
  	[ADIOS_OTHER]   =  1,
  };
-@@ -135,15 +167,24 @@
+@@ -135,15 +180,24 @@
  };
  
  // Thresholds for latency model control
@@ -164,7 +182,7 @@ part (#5) has NOT yet been through that same real-build verification.
  
  static u32 default_dl_prio[ADIOS_DL_TYPES] = {8, 0};
  
-@@ -212,6 +253,17 @@
+@@ -212,6 +266,17 @@
  	u32 lm_shrink_at_kreqs;
  	u32 lm_shrink_at_gbytes;
  	u8  lm_shrink_resist;
@@ -182,7 +200,7 @@ part (#5) has NOT yet been through that same real-build verification.
  };
  
  struct adios_pcpu_completion {
-@@ -251,6 +303,30 @@
+@@ -251,6 +316,49 @@
  	u32 batch_actual_max_total;
  	u32 async_depth;
  	u32 lat_model_latency_limit;
@@ -210,10 +228,29 @@ part (#5) has NOT yet been through that same real-build verification.
 +	} iactv_table[ADIOS_IACTV_SLOTS];
 +	u32 lm_interactive_idle_ms;   // gap since last I/O to count as "was idle"
 +	u64 lm_interactive_boost_ns;  // deadline reduction applied on boost
++
++	// SAGA #6: Kyber-inspired adaptive depth controller. Unlike Kyber,
++	// which compares against a fixed configured latency target, this
++	// compares each completion against the model's OWN prediction
++	// (rd->pred_lat) -- inheriting the model's per-device/per-workload
++	// self-calibration instead of needing a second, separately-tuned
++	// target. Only READ and WRITE are controlled (mirrors Kyber's
++	// practical focus on those two domains); DISCARD/OTHER always run
++	// at their statically-scaled batch_limit (from #2).
++	atomic_t window_good[ADIOS_OPTYPES];
++	atomic_t window_bad[ADIOS_OPTYPES];
++	atomic_t window_total[ADIOS_OPTYPES];
++	atomic_t depth_multiplier_permille[ADIOS_OPTYPES]; // 1000 == 1.0x
++	u32 lm_adapt_window_samples;   // completions per evaluation window
++	u32 lm_adapt_bad_threshold_pct;  // >= this %% bad -> throttle down
++	u32 lm_adapt_good_threshold_pct; // >= this %% good -> open up
++	u32 lm_adapt_step_permille;    // adjustment step per evaluation
++	u32 lm_adapt_min_permille;     // floor for the multiplier
++	u32 lm_adapt_max_permille;     // ceiling for the multiplier
  	u8  bq_refill_below_ratio;
  	u8  is_rotational;
  	u8  batch_order;
-@@ -333,7 +409,7 @@
+@@ -333,7 +441,7 @@
  	u64 sum_weight = 0;
  	u64 cumulative_weight = 0, threshold_weight = 0;
  	u8  outlier_threshold_bucket = 0;
@@ -222,7 +259,7 @@ part (#5) has NOT yet been through that same real-build verification.
  	u8  reduction;
  
  	if (count_all)
-@@ -406,7 +482,7 @@
+@@ -406,7 +514,7 @@
  	u64 cumulative_weight = 0, threshold_weight = 0;
  	u64 sum_weight = 0;
  	u8  outlier_threshold_bucket = 0;
@@ -231,7 +268,7 @@ part (#5) has NOT yet been through that same real-build verification.
  	u8  reduction;
  
  	if (count_all)
-@@ -549,7 +625,7 @@
+@@ -549,7 +657,7 @@
  	now = jiffies;
  	time_elapsed = unlikely(!new_params->base) ||
  		new_params->last_update_jiffies +
@@ -240,7 +277,7 @@ part (#5) has NOT yet been through that same real-build verification.
  
  	// Update small buckets
  	if (small_weight && (time_elapsed ||
-@@ -621,7 +697,7 @@
+@@ -621,7 +729,7 @@
  	current_base = params->base;
  	rcu_read_unlock();
  
@@ -249,7 +286,7 @@ part (#5) has NOT yet been through that same real-build verification.
  		// Handle small requests
  		bucket_index = lm_input_bucket_index(latency, current_base ?: 1);
  
-@@ -663,9 +739,9 @@
+@@ -663,9 +771,9 @@
  	params = rcu_dereference(model->params);
  
  	result = params->base;
@@ -261,7 +298,7 @@ part (#5) has NOT yet been through that same real-build verification.
  
  	rcu_read_unlock();
  
-@@ -712,6 +788,103 @@
+@@ -712,6 +820,179 @@
  static inline u32 eval_adios_state(struct adios_data *ad, u32 shift)
  { return eval_this_adios_state(get_adios_state(ad), shift); }
  
@@ -285,6 +322,82 @@ part (#5) has NOT yet been through that same real-build verification.
 +	rcu_read_unlock();
 +
 +	return small_count >= ad->lm_confidence_samples;
++}
++
++// SAGA #6: effective admission limit for this optype right now --
++// the statically-scaled batch_limit[] (base, from #2, sysfs-visible)
++// times the live depth_multiplier_permille adjusted by the controller
++// below. batch_limit[] itself is left untouched by the controller so
++// a manual sysfs write to it always means what it says; the multiplier
++// is the only thing the feedback loop moves.
++static inline u32 effective_batch_limit(struct adios_data *ad, u8 optype) {
++	u32 base = ad->batch_limit[optype];
++	s32 mult = atomic_read(&ad->depth_multiplier_permille[optype]);
++
++	if (optype != ADIOS_READ && optype != ADIOS_WRITE)
++		return base; // controller only manages read/write, see struct comment
++	return max_t(u32, 1, (base * (u32)mult) / 1000);
++}
++
++// SAGA #6: windowed good/bad classification + hysteresis adjustment,
++// the actual control loop. Called from adios_completed_request() for
++// every completed READ/WRITE. Reuses the SAME overrun definition as #3
++// (actual latency vs rd->pred_lat) as its classification input, so the
++// two mechanisms agree on what "bad" means instead of each having its
++// own separately-tuned notion of it.
++//   BAD:  actual > pred_lat * lm_overrun_ratio_pct/100 (same as #3)
++//   GOOD: actual <= pred_lat (met or beat the prediction outright)
++//   (anything between GOOD and BAD is the hysteresis dead zone --
++//    counted in window_total but neither good nor bad, same 3-bucket
++//    idea Kyber uses to avoid oscillating on borderline samples)
++// Every lm_adapt_window_samples completions, evaluate the window's
++// bad/good ratio and step the multiplier up, down, or leave it (dead
++// zone), then reset the window. Step size and floor/ceiling are all
++// sysfs-tunable.
++static void adapt_depth_controller(struct adios_data *ad, u8 optype,
++		u64 latency, u64 pred_lat, bool is_overrun) {
++	u32 total, good_ratio, bad_ratio;
++
++	if (optype != ADIOS_READ && optype != ADIOS_WRITE)
++		return;
++	if (pred_lat == 0)
++		return; // model not warmed up yet, nothing to compare against
++
++	if (is_overrun)
++		atomic_inc(&ad->window_bad[optype]);
++	else if (latency <= pred_lat)
++		atomic_inc(&ad->window_good[optype]);
++	// else: dead zone, counts toward total only
++
++	total = atomic_inc_return(&ad->window_total[optype]);
++	if (total < ad->lm_adapt_window_samples)
++		return;
++
++	{
++		u32 good = atomic_xchg(&ad->window_good[optype], 0);
++		u32 bad  = atomic_xchg(&ad->window_bad[optype], 0);
++		atomic_set(&ad->window_total[optype], 0);
++
++		good_ratio = (good * 100) / total;
++		bad_ratio  = (bad  * 100) / total;
++
++		if (bad_ratio >= ad->lm_adapt_bad_threshold_pct) {
++			s32 cur = atomic_read(&ad->depth_multiplier_permille[optype]);
++			s32 next = cur - (s32)ad->lm_adapt_step_permille;
++			if (next < (s32)ad->lm_adapt_min_permille)
++				next = ad->lm_adapt_min_permille;
++			atomic_set(&ad->depth_multiplier_permille[optype], next);
++		} else if (good_ratio >= ad->lm_adapt_good_threshold_pct) {
++			s32 cur = atomic_read(&ad->depth_multiplier_permille[optype]);
++			s32 next = cur + (s32)ad->lm_adapt_step_permille;
++			if (next > (s32)ad->lm_adapt_max_permille)
++				next = ad->lm_adapt_max_permille;
++			atomic_set(&ad->depth_multiplier_permille[optype], next);
++		}
++		// else: dead zone, multiplier unchanged -- this is the
++		// hysteresis that keeps the controller from oscillating on
++		// every window when the ratio sits between the two thresholds.
++	}
 +}
 +
 +// SAGA: forces an out-of-band shrink of the model's accumulated stats,
@@ -365,7 +478,7 @@ part (#5) has NOT yet been through that same real-build verification.
  // Add a request to the deadline-sorted red-black tree
  static void add_to_dl_tree(
  		struct adios_data *ad, bool dl_idx, struct request *rq) {
-@@ -729,11 +902,38 @@
+@@ -729,11 +1010,38 @@
  	 * - basically needs to be processed in early time */
  	rd->deadline = rq->start_time_ns;
  
@@ -405,7 +518,16 @@ part (#5) has NOT yet been through that same real-build verification.
  			rd->deadline += rd->pred_lat;
  	}
  
-@@ -1462,6 +1662,27 @@
+@@ -1134,7 +1442,7 @@
+ 
+ 		// Check batch size and total predicted latency
+ 		if (count && (!has_base ||
+-				ad->batch_count[page][optype] >= ad->batch_limit[optype] ||
++				ad->batch_count[page][optype] >= effective_batch_limit(ad, optype) ||
+ 				(tpl + added_lat + rd->pred_lat) > ad->global_latency_window)) {
+ 			stop = true;
+ 			break;
+@@ -1462,6 +1770,32 @@
  
  	local_irq_restore(flags);
  
@@ -415,11 +537,14 @@ part (#5) has NOT yet been through that same real-build verification.
 +	// should still be allowed to trigger "something changed, forget
 +	// stale history faster" -- that's a different concern than average
 +	// accuracy, and outliers are exactly the signal we want here.
++	// Also feeds the #6 depth controller below with the SAME overrun
++	// classification, so both mechanisms agree on what "bad" means.
 +	if (rd->pred_lat > 0) {
 +		struct latency_model *lm = &ad->latency_model[optype];
 +		u64 threshold = (rd->pred_lat * ad->lm_overrun_ratio_pct) / 100;
++		bool is_overrun = latency > threshold;
 +
-+		if (latency > threshold) {
++		if (is_overrun) {
 +			if (atomic_inc_return(&lm->consec_overruns) >=
 +					ad->lm_overrun_trigger_count) {
 +				atomic_set(&lm->consec_overruns, 0);
@@ -428,12 +553,14 @@ part (#5) has NOT yet been through that same real-build verification.
 +		} else {
 +			atomic_set(&lm->consec_overruns, 0);
 +		}
++
++		adapt_depth_controller(ad, optype, latency, rd->pred_lat, is_overrun);
 +	}
 +
  	if (latency > ad->lat_model_latency_limit)
  		return;
  
-@@ -1594,11 +1815,40 @@
+@@ -1594,11 +1928,40 @@
  		model->lm_shrink_at_kreqs  = default_lm_shrink_at_kreqs;
  		model->lm_shrink_at_gbytes = default_lm_shrink_at_gbytes;
  		model->lm_shrink_resist    = default_lm_shrink_resist;
@@ -478,7 +605,7 @@ part (#5) has NOT yet been through that same real-build verification.
  	}
  
  	eq->elevator_data = ad;
-@@ -1607,8 +1857,37 @@
+@@ -1607,8 +1970,50 @@
  	ad->global_latency_window = (ad->is_rotational)?
  		default_global_latency_window_rotational:
  		default_global_latency_window;
@@ -513,10 +640,49 @@ part (#5) has NOT yet been through that same real-build verification.
 +	ad->lm_interactive_boost_ns = default_lm_interactive_boost_ns;
 +	spin_lock_init(&ad->iactv_lock);
 +	memset(ad->iactv_table, 0, sizeof(ad->iactv_table));
++
++	ad->lm_adapt_window_samples = default_lm_adapt_window_samples;
++	ad->lm_adapt_bad_threshold_pct = default_lm_adapt_bad_threshold_pct;
++	ad->lm_adapt_good_threshold_pct = default_lm_adapt_good_threshold_pct;
++	ad->lm_adapt_step_permille = default_lm_adapt_step_permille;
++	ad->lm_adapt_min_permille = default_lm_adapt_min_permille;
++	ad->lm_adapt_max_permille = default_lm_adapt_max_permille;
++	for (optype = 0; optype < ADIOS_OPTYPES; optype++) {
++		atomic_set(&ad->window_good[optype], 0);
++		atomic_set(&ad->window_bad[optype], 0);
++		atomic_set(&ad->window_total[optype], 0);
++		atomic_set(&ad->depth_multiplier_permille[optype], 1000);
++	}
  	ad->batch_order = default_batch_order;
  	ad->compliance_flags = default_compliance_flags;
  
-@@ -1855,6 +2134,11 @@
+@@ -1813,6 +2218,25 @@
+ 		total_count, discard_count, read_count, write_count);
+ }
+ 
++// SAGA #6: observability for the depth controller -- without this
++// there's no way to tell from userspace whether it's ever actually
++// adjusting anything. Shows live multiplier (permille) and the
++// resulting effective limit for read/write.
++static ssize_t adios_depth_controller_show(
++		struct elevator_queue *e, char *page) {
++	struct adios_data *ad = e->elevator_data;
++	s32 rmult = atomic_read(&ad->depth_multiplier_permille[ADIOS_READ]);
++	s32 wmult = atomic_read(&ad->depth_multiplier_permille[ADIOS_WRITE]);
++
++	return sprintf(page,
++		"read : multiplier=%d.%03dx effective_limit=%u (base=%u)\n"
++		"write: multiplier=%d.%03dx effective_limit=%u (base=%u)\n",
++		rmult / 1000, rmult % 1000, effective_batch_limit(ad, ADIOS_READ),
++		ad->batch_limit[ADIOS_READ],
++		wmult / 1000, wmult % 1000, effective_batch_limit(ad, ADIOS_WRITE),
++		ad->batch_limit[ADIOS_WRITE]);
++}
++
+ #define SYSFS_ULL_DECL(field, min_val, max_val) \
+ static ssize_t adios_##field##_show( \
+ 		struct elevator_queue *e, char *page) { \
+@@ -1855,6 +2279,17 @@
  SYSFS_INT_DECL(bq_refill_below_ratio, 0, 100)
  SYSFS_INT_DECL(lat_model_latency_limit, 0, 2*NSEC_PER_SEC)
  SYSFS_INT_DECL(batch_order, ADIOS_BO_OPTYPE, !!ad->is_rotational)
@@ -525,10 +691,16 @@ part (#5) has NOT yet been through that same real-build verification.
 +SYSFS_INT_DECL(lm_overrun_trigger_count, 1, 10000)
 +SYSFS_INT_DECL(lm_interactive_idle_ms, 0, 60000)
 +SYSFS_INT_DECL(lm_interactive_boost_ns, 0, 2*NSEC_PER_SEC)
++SYSFS_INT_DECL(lm_adapt_window_samples, 4, 100000)
++SYSFS_INT_DECL(lm_adapt_bad_threshold_pct, 1, 100)
++SYSFS_INT_DECL(lm_adapt_good_threshold_pct, 1, 100)
++SYSFS_INT_DECL(lm_adapt_step_permille, 10, 1000)
++SYSFS_INT_DECL(lm_adapt_min_permille, 50, 1000)
++SYSFS_INT_DECL(lm_adapt_max_permille, 1000, 10000)
  
  // Show the read priority
  static ssize_t adios_read_priority_show(
-@@ -1987,6 +2271,48 @@
+@@ -1987,6 +2422,48 @@
  SHRINK_THRESHOLD_ATTR_RW(at_gbytes, lm_shrink_at_gbytes, 1,   1000)
  SHRINK_THRESHOLD_ATTR_RW(resist,    lm_shrink_resist,    1,      3)
  
@@ -577,7 +749,7 @@ part (#5) has NOT yet been through that same real-build verification.
  // Define sysfs attributes
  #define AD_ATTR(name, show_func, store_func) \
  	__ATTR(name, 0644, show_func, store_func)
-@@ -2003,6 +2329,11 @@
+@@ -2003,6 +2480,19 @@
  	AD_ATTR_RW(bq_refill_below_ratio),
  	AD_ATTR_RW(global_latency_window),
  	AD_ATTR_RW(lat_model_latency_limit),
@@ -586,10 +758,18 @@ part (#5) has NOT yet been through that same real-build verification.
 +	AD_ATTR_RW(lm_overrun_trigger_count),
 +	AD_ATTR_RW(lm_interactive_idle_ms),
 +	AD_ATTR_RW(lm_interactive_boost_ns),
++
++	AD_ATTR_RW(lm_adapt_window_samples),
++	AD_ATTR_RW(lm_adapt_bad_threshold_pct),
++	AD_ATTR_RW(lm_adapt_good_threshold_pct),
++	AD_ATTR_RW(lm_adapt_step_permille),
++	AD_ATTR_RW(lm_adapt_min_permille),
++	AD_ATTR_RW(lm_adapt_max_permille),
++	AD_ATTR_RO(depth_controller),
  	AD_ATTR_RW(batch_order),
  	AD_ATTR_RW(compliance_flags),
  
-@@ -2022,6 +2353,10 @@
+@@ -2022,6 +2512,10 @@
  	AD_ATTR_RW(shrink_at_gbytes),
  	AD_ATTR_RW(shrink_resist),
  
