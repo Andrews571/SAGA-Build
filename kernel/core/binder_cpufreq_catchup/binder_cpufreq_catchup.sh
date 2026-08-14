@@ -62,6 +62,19 @@
 #     doesn't have. The lock's origin commit hasn't been traced yet, so
 #     applying just these two would give a false sense of safety without
 #     the real prerequisite. Top priority for the next batch, not this one.
+#
+# Re-verified 2026-08-13 against the real 6.1.180 live-staging tree
+# (after the manual linux-stable upstream catch-up): the binder UAF fix
+# flagged above IS now present — spin_lock(&t->lock) around the
+# target_thread pin in binder_free_transaction() is there, prerequisite
+# and all. Came in through the real upstream sync, not through this
+# patch. binder.c's other hunks (current_euid, cpufreq_suspend's
+# cpus_read_lock) were also already native and dropped from the patch —
+# same "already applied" pattern as mm_stable_catchup. binder_alloc.c,
+# cpufreq_governor.c, and mediatek-cpufreq.c's fixes were all still
+# genuinely missing and remain in the trimmed lote3_binder_cpufreq.patch
+# below, confirmed via `git apply --reject` + manually diffing every
+# rejected hunk against the tree, not just re-running --check.
 
 PATCH_FILE="$(dirname "${BASH_SOURCE[0]}")/lote3_binder_cpufreq.patch"
 
