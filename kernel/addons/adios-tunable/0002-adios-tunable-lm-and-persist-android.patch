@@ -1,72 +1,54 @@
 From: ADIOS scheduler analysis
-Subject: [PATCH] adios: add diagnostic counters to find why the model
- never learns (REVERTS the QUEUE_FLAG_IO_STAT guess -- disproven)
+Subject: [PATCH] adios: add fn_entry/rd_null diagnostics -- ALL counters
+ read 0 on device, need to isolate whether the callback fires at all
 
 Applies ON TOP of adios-android14-6.1-v3.2.0.patch. Same base as the
-previous revision (parts 1-6 + fixes -- see prior commit messages).
+previous revision (parts 1-6 + diagnostic counters -- see prior commit
+messages).
 
-REVERTED: the previous revision's QUEUE_FLAG_IO_STAT fix. User checked
-`cat /sys/block/<dev>/queue/iostats` BEFORE rebuilding, on the
-currently-running build -- it read 1, meaning that flag was already
-on. That hypothesis is disproven; forcing an already-set flag would
-have been a no-op. Removed rather than left in as dead weight.
+ESCALATION: after building/flashing the previous revision's
+dbg_reached/dbg_outlier_reject/dbg_model_fed counters and running a
+real workload, `lm_debug_counts` read ALL ZEROS across every optype --
+not just model_fed, but dbg_reached too. That's a stronger signal than
+"one of the two gates is discarding everything": it means execution
+never even got past the VERY FIRST early-return check in
+adios_completed_request() (the io_start_time_ns/block_size gate), for
+literally every single completion, the entire time.
 
-FOUND A SECOND, DIFFERENT early-return gate on the same investigation
-(still trying to explain why lat_model_read/lat_model_write read
-base:0/slope:0 after full real benchmark sessions): in
-adios_completed_request(), AFTER the io_start_time_ns check, there's
-another gate:
-    if (latency > ad->lat_model_latency_limit)  // default 500ms
-        return;
-    latency_model_input(...);  // only reached if the above doesn't fire
-`latency` here is computed from a per-CPU "last completed time"
-pointer (pc->last_completed_time), not a direct per-request
-start/end delta -- plausible that CPU migration (common on a mobile
-SoC under power-management core switching) could make this value
-spike well past 500ms routinely, causing every sample to be discarded
-as a bogus "outlier" before ever reaching the model. This is a
-hypothesis, NOT confirmed -- rather than guess again and burn another
-build cycle, this patch ONLY adds instrumentation to check it:
+This raises a more fundamental question: is adios_completed_request()
+being called by the block layer for this device AT ALL? Added two more
+counters to isolate that specifically:
 
-  dbg_reached[optype]:        passed the io_start_time_ns/block_size
-                               gate (first early-return)
-  dbg_outlier_reject[optype]: bailed at the lat_model_latency_limit
-                               gate (second early-return, the new
-                               suspect)
-  dbg_model_fed[optype]:      actually reached latency_model_input()
+  dbg_fn_entry: incremented as the LITERAL FIRST statement of
+                adios_completed_request(), before any other code runs
+  dbg_rd_null:  incremented if get_rq_data(rq) returns NULL (would
+                also explain zeros everywhere without needing the
+                io_start_time_ns theory at all)
 
-All three are plain atomic64_t counters, purely additive, zero
-behavioral effect (kzalloc_node-allocated struct, so they start at 0
-with no explicit init needed -- consistent with how the rest of
-struct adios_data is already handled). New RO sysfs `lm_debug_counts`
-prints all three per optype in one read.
+Both now included in the `lm_debug_counts` sysfs output (appended as a
+final "fn_entry=N rd_null=N" line).
 
-HOW TO USE: build, flash, run a real I/O workload (CPDT or otherwise),
-then:
-  cat /sys/block/<dev>/queue/iosched/lm_debug_counts
-Read the three columns for read/write:
-  - reached ~0 across the board -> the FIRST gate (io_start_time_ns/
-    block_size) is still the blocker, despite iostats=1 -- something
-    else is off (maybe rd->block_size, worth checking next).
-  - reached high, model_fed ~0, outlier_reject climbing with it ->
-    the SECOND gate (lat_model_latency_limit / the per-CPU latency
-    computation) is the real blocker -- confirms the CPU-migration
-    hypothesis, and the next patch would target lct computation
-    directly (e.g. switch away from the per-CPU tracking to a direct
-    rq->io_start_time_ns delta) instead of guessing further.
-  - model_fed climbing roughly with reached -> samples ARE reaching
-    the model successfully, and the "stuck at 0" mystery is somewhere
-    else entirely (inside latency_model_input/lm_update_*_buckets
-    themselves, or in how sideload/shrink interact with it) -- would
-    need a different investigation path than either gate.
+HOW TO READ THE NEXT RESULT:
+  - fn_entry still 0 -> the completed_request callback itself is never
+    invoked for this device/kernel config. Would need to check how
+    this android14-6.1 backport wires up elevator_type's
+    .completed_request op (different init_hctx/subsys_initcall
+    structure than mainline was already noted earlier in this series --
+    plausible something else differs here too).
+  - fn_entry nonzero but dbg_reached still 0 and rd_null also 0 ->
+    confirms it's specifically the io_start_time_ns/block_size check,
+    contradicting the iostats=1 result -- would need to add rd->block_size
+    to the diagnostic separately to split which half of that
+    OR-condition is actually firing.
+  - fn_entry nonzero, rd_null nonzero -> get_rq_data() returning NULL
+    is the real cause, a completely different code path than anything
+    investigated so far.
 
-NOT submitted upstream. This patch changes NOTHING about scheduling
-behavior -- it only adds read-only counters. Safe to build/flash purely
-for the diagnostic value regardless of what the previous hypotheses
-turn out to be.
+Still purely additive, zero behavioral change, safe to build/flash for
+diagnostic value alone.
 ---
 --- a/block/adios.c	2026-08-11 01:54:07.045164366 +0000
-+++ b/block/adios.c	2026-08-14 21:10:36.219464630 +0000
++++ b/block/adios.c	2026-08-15 23:05:22.478917764 +0000
 @@ -20,13 +20,14 @@
  #include <linux/string.h>
  #include <linux/list_sort.h>
@@ -219,7 +201,7 @@ turn out to be.
  };
  
  struct adios_pcpu_completion {
-@@ -251,6 +326,67 @@
+@@ -251,6 +326,74 @@
  	u32 batch_actual_max_total;
  	u32 async_depth;
  	u32 lat_model_latency_limit;
@@ -284,10 +266,17 @@ turn out to be.
 +	atomic64_t dbg_reached[ADIOS_OPTYPES];        // got past io_start_time_ns/block_size gate
 +	atomic64_t dbg_outlier_reject[ADIOS_OPTYPES]; // bailed at lat_model_latency_limit gate
 +	atomic64_t dbg_model_fed[ADIOS_OPTYPES];      // actually reached latency_model_input()
++	// SAGA: even more upstream diagnostics, added after dbg_reached
++	// ALSO read 0/0/0 across the board (before AND after a real test
++	// run) -- meaning the blocker might be even earlier than the gates
++	// already instrumented. These two are NOT per-optype (rd isn't
++	// guaranteed available yet when dbg_fn_entry increments).
++	atomic64_t dbg_fn_entry;  // literal first statement of adios_completed_request()
++	atomic64_t dbg_rd_null;   // incremented right before "if (!rd) return;" returns
  	u8  bq_refill_below_ratio;
  	u8  is_rotational;
  	u8  batch_order;
-@@ -333,7 +469,7 @@
+@@ -333,7 +476,7 @@
  	u64 sum_weight = 0;
  	u64 cumulative_weight = 0, threshold_weight = 0;
  	u8  outlier_threshold_bucket = 0;
@@ -296,7 +285,7 @@ turn out to be.
  	u8  reduction;
  
  	if (count_all)
-@@ -406,7 +542,7 @@
+@@ -406,7 +549,7 @@
  	u64 cumulative_weight = 0, threshold_weight = 0;
  	u64 sum_weight = 0;
  	u8  outlier_threshold_bucket = 0;
@@ -305,7 +294,7 @@ turn out to be.
  	u8  reduction;
  
  	if (count_all)
-@@ -549,7 +685,7 @@
+@@ -549,7 +692,7 @@
  	now = jiffies;
  	time_elapsed = unlikely(!new_params->base) ||
  		new_params->last_update_jiffies +
@@ -314,7 +303,7 @@ turn out to be.
  
  	// Update small buckets
  	if (small_weight && (time_elapsed ||
-@@ -621,7 +757,7 @@
+@@ -621,7 +764,7 @@
  	current_base = params->base;
  	rcu_read_unlock();
  
@@ -323,7 +312,7 @@ turn out to be.
  		// Handle small requests
  		bucket_index = lm_input_bucket_index(latency, current_base ?: 1);
  
-@@ -663,9 +799,9 @@
+@@ -663,9 +806,9 @@
  	params = rcu_dereference(model->params);
  
  	result = params->base;
@@ -335,7 +324,7 @@ turn out to be.
  
  	rcu_read_unlock();
  
-@@ -712,6 +848,195 @@
+@@ -712,6 +855,195 @@
  static inline u32 eval_adios_state(struct adios_data *ad, u32 shift)
  { return eval_this_adios_state(get_adios_state(ad), shift); }
  
@@ -531,7 +520,7 @@ turn out to be.
  // Add a request to the deadline-sorted red-black tree
  static void add_to_dl_tree(
  		struct adios_data *ad, bool dl_idx, struct request *rq) {
-@@ -729,11 +1054,38 @@
+@@ -729,11 +1061,38 @@
  	 * - basically needs to be processed in early time */
  	rd->deadline = rq->start_time_ns;
  
@@ -571,7 +560,7 @@ turn out to be.
  			rd->deadline += rd->pred_lat;
  	}
  
-@@ -1134,7 +1486,7 @@
+@@ -1134,7 +1493,7 @@
  
  		// Check batch size and total predicted latency
  		if (count && (!has_base ||
@@ -580,7 +569,22 @@ turn out to be.
  				(tpl + added_lat + rd->pred_lat) > ad->global_latency_window)) {
  			stop = true;
  			break;
-@@ -1445,6 +1797,7 @@
+@@ -1404,10 +1763,13 @@
+ // Handle the completion of a request
+ static void adios_completed_request(struct request *rq, u64 now) {
+ 	struct adios_data *ad = rq->q->elevator->elevator_data;
++	atomic64_inc(&ad->dbg_fn_entry);
+ 	struct adios_rq_data *rd = get_rq_data(rq);
+ 
+-	if (!rd)
++	if (!rd) {
++		atomic64_inc(&ad->dbg_rd_null);
+ 		return;
++	}
+ 
+ 	union adios_in_flight_rqs ifr = { .scalar = 0 };
+ 
+@@ -1445,6 +1807,7 @@
  	}
  
  	u64 latency = now - lct;
@@ -588,7 +592,7 @@ turn out to be.
  
  	u32 weight = 1;
  	if (ad->is_rotational) {
-@@ -1462,9 +1815,38 @@
+@@ -1462,9 +1825,38 @@
  
  	local_irq_restore(flags);
  
@@ -628,7 +632,7 @@ turn out to be.
  	latency_model_input(ad, &ad->latency_model[optype],
  		rd->block_size, latency, rd->pred_lat, weight);
  	timer_reduce(&ad->update_timer, jiffies + msecs_to_jiffies(100));
-@@ -1594,11 +1976,40 @@
+@@ -1594,11 +1986,40 @@
  		model->lm_shrink_at_kreqs  = default_lm_shrink_at_kreqs;
  		model->lm_shrink_at_gbytes = default_lm_shrink_at_gbytes;
  		model->lm_shrink_resist    = default_lm_shrink_resist;
@@ -673,7 +677,7 @@ turn out to be.
  	}
  
  	eq->elevator_data = ad;
-@@ -1607,8 +2018,52 @@
+@@ -1607,8 +2028,52 @@
  	ad->global_latency_window = (ad->is_rotational)?
  		default_global_latency_window_rotational:
  		default_global_latency_window;
@@ -726,7 +730,7 @@ turn out to be.
  	ad->batch_order = default_batch_order;
  	ad->compliance_flags = default_compliance_flags;
  
-@@ -1813,6 +2268,52 @@
+@@ -1813,6 +2278,55 @@
  		total_count, discard_count, read_count, write_count);
  }
  
@@ -758,6 +762,9 @@ turn out to be.
 +			atomic64_read(&ad->dbg_outlier_reject[i]),
 +			atomic64_read(&ad->dbg_model_fed[i]));
 +	}
++	n += sprintf(page + n, "fn_entry=%lld rd_null=%lld\n",
++		atomic64_read(&ad->dbg_fn_entry),
++		atomic64_read(&ad->dbg_rd_null));
 +	return n;
 +}
 +
@@ -779,7 +786,7 @@ turn out to be.
  #define SYSFS_ULL_DECL(field, min_val, max_val) \
  static ssize_t adios_##field##_show( \
  		struct elevator_queue *e, char *page) { \
-@@ -1855,6 +2356,19 @@
+@@ -1855,6 +2369,19 @@
  SYSFS_INT_DECL(bq_refill_below_ratio, 0, 100)
  SYSFS_INT_DECL(lat_model_latency_limit, 0, 2*NSEC_PER_SEC)
  SYSFS_INT_DECL(batch_order, ADIOS_BO_OPTYPE, !!ad->is_rotational)
@@ -799,7 +806,7 @@ turn out to be.
  
  // Show the read priority
  static ssize_t adios_read_priority_show(
-@@ -1987,6 +2501,48 @@
+@@ -1987,6 +2514,48 @@
  SHRINK_THRESHOLD_ATTR_RW(at_gbytes, lm_shrink_at_gbytes, 1,   1000)
  SHRINK_THRESHOLD_ATTR_RW(resist,    lm_shrink_resist,    1,      3)
  
@@ -848,7 +855,7 @@ turn out to be.
  // Define sysfs attributes
  #define AD_ATTR(name, show_func, store_func) \
  	__ATTR(name, 0644, show_func, store_func)
-@@ -2003,6 +2559,22 @@
+@@ -2003,6 +2572,22 @@
  	AD_ATTR_RW(bq_refill_below_ratio),
  	AD_ATTR_RW(global_latency_window),
  	AD_ATTR_RW(lat_model_latency_limit),
@@ -871,7 +878,7 @@ turn out to be.
  	AD_ATTR_RW(batch_order),
  	AD_ATTR_RW(compliance_flags),
  
-@@ -2022,6 +2594,10 @@
+@@ -2022,6 +2607,10 @@
  	AD_ATTR_RW(shrink_at_gbytes),
  	AD_ATTR_RW(shrink_resist),
  
