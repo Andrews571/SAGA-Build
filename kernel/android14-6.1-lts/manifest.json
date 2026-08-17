@@ -1,53 +1,54 @@
 {
-  "resukisu": {
-    "good": "829f61fb008c895841b98aca5833c18daae6f145",
-    "bad": [
-      "0b4f56fd92bcc47a24bd4add8d7125239531c4f5",
-      "3147432478d825a94eb44bd3f69f2d9f30cbac1f",
-      "59c99fdf1735c37681ff18c7ffd7834741dcccbf",
-      "a70ed67f260ea28dcf53263222863f23bdb8736a",
-      "a9216b04e29cc973ddbf845342f2cbf85b47b460",
-      "beaaea0eb895dc41e7b9bf5e3f39e57aa9635bab",
-      "f56219d2998dc00aa2a80eda8c2280b1455a3519"
-    ]
-  },
-  "susfs_resukisu": {
-    "good": "e287d59066380bf6de4396532d4a42edf4408701",
-    "bad": [
-      "8eade9cd4aed3efddc9ff30b2e48d2d9667ad77d"
-    ]
-  },
-  "sukisu": {
-    "good": "0ca744a88835144c58d8256ebb32c279edabfcde",
-    "bad": []
-  },
-  "sukisu_builtin": {
-    "good": "5a2bb7e5813002ccaabe02fa864cfb2dde6b5109",
-    "bad": []
-  },
-  "susfs_sukisu": {
-    "good": "e287d59066380bf6de4396532d4a42edf4408701",
-    "bad": [
-      "8eade9cd4aed3efddc9ff30b2e48d2d9667ad77d"
-    ]
-  },
-  "ksunext": {
-    "good": "3b18216f71df189ab3d1b1ce0bdb21be1268e771",
-    "bad": []
-  },
-  "ksunext_susfs_fork": {
-    "good": "34daec54efb7b110336d14e1807a28efd3d91d2e",
-    "bad": [
-      "1dec76ef97ca046ca617431dbf9d67f0dd57913a",
-      "22c53df37637cab4ae48c65e31d092aefdb3c670",
-      "a16c61fb8f886378c762468cb288233b03cb396a",
-      "beb69066b8fa644ac4e04d47d730c5bf88ad759c",
-      "daf1347b3ca1b8bd78d37a9024e6e7de6863534c",
-      "fb7906839b0ea7cadfc571ad31cef34705e36431"
-    ]
-  },
-  "susfs_ksunext": {
-    "good": "2cb496baeaa7c9f31adac112eca270f56e1f1f07",
-    "bad": []
-  }
+    "resukisu": {
+        "good": "ca62a37fc328e6cb836ea6d77b7eab0c073104a6",
+        "bad": [
+            "0b4f56fd92bcc47a24bd4add8d7125239531c4f5",
+            "3147432478d825a94eb44bd3f69f2d9f30cbac1f",
+            "59c99fdf1735c37681ff18c7ffd7834741dcccbf",
+            "a70ed67f260ea28dcf53263222863f23bdb8736a",
+            "beaaea0eb895dc41e7b9bf5e3f39e57aa9635bab",
+            "f56219d2998dc00aa2a80eda8c2280b1455a3519"
+        ]
+    },
+    "susfs_resukisu": {
+        "good": "e287d59066380bf6de4396532d4a42edf4408701",
+        "bad": [
+            "8eade9cd4aed3efddc9ff30b2e48d2d9667ad77d"
+        ]
+    },
+    "sukisu": {
+        "good": "0ca744a88835144c58d8256ebb32c279edabfcde",
+        "bad": []
+    },
+    "sukisu_builtin": {
+        "good": "b1d534bc41941b2c818d7a1a1dac341e4aabfc2d",
+        "bad": []
+    },
+    "susfs_sukisu": {
+        "good": "e287d59066380bf6de4396532d4a42edf4408701",
+        "bad": [
+            "8eade9cd4aed3efddc9ff30b2e48d2d9667ad77d"
+        ]
+    },
+    "ksunext": {
+        "good": "3b18216f71df189ab3d1b1ce0bdb21be1268e771",
+        "bad": []
+    },
+    "ksunext_susfs_fork": {
+        "good": "409f0f68c0557cbee7ed29b51088b1df1050db22",
+        "bad": [
+            "1dec76ef97ca046ca617431dbf9d67f0dd57913a",
+            "22c53df37637cab4ae48c65e31d092aefdb3c670",
+            "a16c61fb8f886378c762468cb288233b03cb396a",
+            "beb69066b8fa644ac4e04d47d730c5bf88ad759c",
+            "daf1347b3ca1b8bd78d37a9024e6e7de6863534c",
+            "fb7906839b0ea7cadfc571ad31cef34705e36431"
+        ]
+    },
+    "susfs_ksunext": {
+        "good": "",
+        "bad": [
+            "2cb496baeaa7c9f31adac112eca270f56e1f1f07"
+        ]
+    }
 }
