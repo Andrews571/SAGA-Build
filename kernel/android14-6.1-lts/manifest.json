@@ -46,9 +46,7 @@
     ]
   },
   "susfs_ksunext": {
-    "good": "",
-    "bad": [
-      "2cb496baeaa7c9f31adac112eca270f56e1f1f07"
-    ]
+    "good": "2cb496baeaa7c9f31adac112eca270f56e1f1f07",
+    "bad": []
   }
 }
