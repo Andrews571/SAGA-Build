@@ -108,8 +108,26 @@ resolve_component() {
         ref="$good"; candidate="false"
         log "${prefix}: no candidate available — using pinned ${good:0:12}"
     elif [ "$latest" = "$good" ]; then
-        ref="$good"; candidate="false"
-        log "${prefix}: up to date at ${good:0:12}"
+        # Normally "nothing new upstream, keep the pinned value" is exactly
+        # right — but if $good has ALSO been added to the bad list (a
+        # manual correction after discovering a pin was wrong despite
+        # never having a newer candidate to replace it with — see
+        # ksunext_susfs_fork/susfs_ksunext, a linked pair where only one
+        # side kept getting new upstream candidates to blame, leaving the
+        # other side's stale pin never re-examined even though it was
+        # part of every failing combination), blind trust here means it
+        # can NEVER be dislodged: this same branch fires every run,
+        # forever, since upstream genuinely has nothing newer to offer.
+        # Route through the same deadlock-breaking retry as the
+        # no-good-pin-exists case below instead.
+        is_bad=$(echo "$bad_list" | jq --arg sha "$good" 'any(. == $sha)')
+        if [ "$is_bad" = "true" ]; then
+            ref="$good"; candidate="true"
+            warn "${prefix}: pinned ${good:0:12} was manually flagged bad and upstream has nothing newer — retrying it as a last-resort candidate to force re-verification"
+        else
+            ref="$good"; candidate="false"
+            log "${prefix}: up to date at ${good:0:12}"
+        fi
     else
         is_bad=$(echo "$bad_list" | jq --arg sha "$latest" 'any(. == $sha)')
         if [ "$is_bad" = "true" ]; then
