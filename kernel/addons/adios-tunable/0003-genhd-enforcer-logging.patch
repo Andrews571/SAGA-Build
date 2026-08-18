@@ -1,0 +1,113 @@
+From: ADIOS scheduler analysis
+Subject: [PATCH] genhd: add real logging to the SAGA ADIOS default-scheduler
+ enforcer (was completely silent)
+
+Applies ON TOP of adios-android14-6.1-v3.2.0.patch's block/genhd.c hunk
+(the "SAGA: ADIOS default-scheduler enforcer" addition -- the delayed_work
+that re-asserts "adios" on every disk queue up to 5 times during boot).
+
+WHY: found while reviewing every file this patch series touches, not
+just adios.c. The enforcer is genuinely useful (it explains, in
+hindsight, why sda/sdb/sdc all showed "[adios]" as active scheduler
+during this project's earlier investigation -- it forces adios onto
+EVERY block device system-wide during boot, unconditionally), but it
+ran completely silent: no way to tell from userspace which disks
+actually got set, or whether any failed, without checking each one by
+hand. That is exactly the class of confusion that cost hours of manual
+investigation earlier in this project (chasing why a scheduler seemed
+to have no effect, before finding the actual disk in use was different
+from the one being checked).
+
+CHANGE: adds pr_info per pass (seen/skipped/attempted/ok/failed counts,
+always, one line, at 20/40/60/80/100s after boot) and pr_warn per disk
+on any elv_iosched_store() failure (disk name + return code). Zero
+runtime cost when everything is fine (5 log lines total over the whole
+boot), genuinely useful the moment something isn't. Also logs a final
+"done" line on the last pass so it's unambiguous in dmesg/logcat when
+the enforcer has stopped running.
+
+No change to WHEN or HOW OFTEN it runs, no change to which disks it
+targets -- purely additive logging.
+
+NOT submitted upstream (this is SAGA's own file, not upstream ADIOS).
+NOT compiled/tested against a real android14-6.1 tree yet.
+---
+--- a/block/genhd.c
++++ b/block/genhd.c
+@@ -13,6 +13,17 @@
+  * net/ipv4/tcp_cong.c) — re-asserts "adios" on every disk queue a handful
+  * of times during early-to-mid boot so it wins that race too, then stops
+  * for good.
++ *
++ * SAGA (tunable revision): added real logging. The ORIGINAL version of
++ * this enforcer ran completely silently — success or failure, there was
++ * no way to tell from userspace which disks actually got "adios" without
++ * checking each one by hand. That's exactly the kind of confusion that
++ * cost hours of manual investigation in this project before the real
++ * culprit (checking the wrong block device entirely, sda instead of the
++ * one /data actually lives on) was found. Now logs a per-pass summary
++ * always, and a per-disk warning on any failure, via pr_info/pr_warn --
++ * visible in dmesg/logcat, zero cost when nothing's wrong (one line per
++ * pass), genuinely useful the moment something IS wrong.
+  */
+ #ifdef CONFIG_MQ_IOSCHED_DEFAULT_ADIOS
+ #include <linux/workqueue.h>
+@@ -26,27 +37,50 @@
+ {
+ 	struct class_dev_iter iter;
+ 	struct device *dev;
++	int pass = saga_adios_enforce_count + 1;
++	int seen = 0, skipped = 0, attempted = 0, ok = 0, failed = 0;
+ 
+ 	class_dev_iter_init(&iter, &block_class, NULL, &disk_type);
+ 	while ((dev = class_dev_iter_next(&iter))) {
+ 		struct gendisk *disk = dev_to_disk(dev);
+ 		struct request_queue *q = disk->queue;
++		ssize_t ret;
++
++		seen++;
+ 
+ 		/* elv_iosched_store() itself already no-ops safely on a
+ 		 * queue that doesn't support scheduling (elv_support_iosched()
+ 		 * check inside it) — only need to skip not-yet-populated
+ 		 * disks here. */
+-		if (!q || get_capacity(disk) == 0)
++		if (!q || get_capacity(disk) == 0) {
++			skipped++;
+ 			continue;
++		}
+ 
++		attempted++;
+ 		mutex_lock(&q->sysfs_lock);
+-		elv_iosched_store(q, "adios", 5);
++		ret = elv_iosched_store(q, "adios", 5);
+ 		mutex_unlock(&q->sysfs_lock);
++
++		if (ret < 0) {
++			failed++;
++			pr_warn("saga_adios_enforce: pass %d/%d: %s failed (%zd)\n",
++				pass, SAGA_ADIOS_ENFORCE_TRIES, disk->disk_name, ret);
++		} else {
++			ok++;
++		}
+ 	}
+ 	class_dev_iter_exit(&iter);
+ 
+-	if (++saga_adios_enforce_count < SAGA_ADIOS_ENFORCE_TRIES)
++	pr_info("saga_adios_enforce: pass %d/%d: seen=%d skipped=%d attempted=%d ok=%d failed=%d\n",
++		pass, SAGA_ADIOS_ENFORCE_TRIES, seen, skipped, attempted, ok, failed);
++
++	if (++saga_adios_enforce_count < SAGA_ADIOS_ENFORCE_TRIES) {
+ 		schedule_delayed_work(&saga_adios_enforce_work, 20 * HZ);
++	} else {
++		pr_info("saga_adios_enforce: done, no further passes -- last result stands "
++			"(check above for any per-disk failures)\n");
++	}
+ }
+ 
+ static int __init saga_adios_enforce_init(void)
+@@ -61,4 +95,4 @@
+ 	return 0;
+ }
+ late_initcall(saga_adios_enforce_init);
+-#endif /* CONFIG_MQ_IOSCHED_DEFAULT_ADIOS */+#endif /* CONFIG_MQ_IOSCHED_DEFAULT_ADIOS */
