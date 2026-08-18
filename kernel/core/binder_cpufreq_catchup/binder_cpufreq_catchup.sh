@@ -81,10 +81,10 @@ PATCH_FILE="$(dirname "${BASH_SOURCE[0]}")/lote3_binder_cpufreq.patch"
 log "🩹 Applying binder/cpufreq stable catch-up (lote 3)..."
 cd "${KERNEL_SRC}"
 
-if git apply --check --reverse "$PATCH_FILE" > /dev/null 2>&1; then
+if patch -p1 --fuzz=3 --dry-run --reverse < "$PATCH_FILE" > /dev/null 2>&1; then
     log "binder/cpufreq stable catch-up: already applied, skipping."
-elif git apply --check "$PATCH_FILE" > /dev/null 2>&1; then
-    git apply "$PATCH_FILE" || error "binder/cpufreq stable catch-up: apply failed!"
+elif patch -p1 --fuzz=3 --dry-run --forward < "$PATCH_FILE" > /dev/null 2>&1; then
+    patch -p1 --fuzz=3 --forward < "$PATCH_FILE" || error "binder/cpufreq stable catch-up: apply failed!"
     log "binder/cpufreq stable catch-up: applied ✅"
 else
     error "binder/cpufreq stable catch-up: does not apply cleanly — kernel source may have changed since this was written, needs re-verification!"
