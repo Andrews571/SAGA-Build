@@ -54,10 +54,10 @@ PATCH_FILE="$(dirname "${BASH_SOURCE[0]}")/lote4_ufs_writebooster.patch"
 log "🩹 Applying UFS/WriteBooster stable catch-up (lote 4)..."
 cd "${KERNEL_SRC}"
 
-if git apply --check --reverse "$PATCH_FILE" > /dev/null 2>&1; then
+if patch -p1 --fuzz=3 --dry-run --reverse < "$PATCH_FILE" > /dev/null 2>&1; then
     log "UFS/WriteBooster stable catch-up: already applied, skipping."
-elif git apply --check "$PATCH_FILE" > /dev/null 2>&1; then
-    git apply "$PATCH_FILE" || error "UFS/WriteBooster stable catch-up: apply failed!"
+elif patch -p1 --fuzz=3 --dry-run --forward < "$PATCH_FILE" > /dev/null 2>&1; then
+    patch -p1 --fuzz=3 --forward < "$PATCH_FILE" || error "UFS/WriteBooster stable catch-up: apply failed!"
     log "UFS/WriteBooster stable catch-up: applied ✅"
 else
     error "UFS/WriteBooster stable catch-up: does not apply cleanly — kernel source may have changed since this was written, needs re-verification!"
