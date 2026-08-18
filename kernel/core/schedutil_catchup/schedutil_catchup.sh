@@ -32,10 +32,10 @@ PATCH_FILE="$(dirname "${BASH_SOURCE[0]}")/lote6_schedutil.patch"
 log "🩹 Applying schedutil stable catch-up (lote 6)..."
 cd "${KERNEL_SRC}"
 
-if git apply --check --reverse "$PATCH_FILE" > /dev/null 2>&1; then
+if patch -p1 --fuzz=3 --dry-run --reverse < "$PATCH_FILE" > /dev/null 2>&1; then
     log "schedutil stable catch-up: already applied, skipping."
-elif git apply --check "$PATCH_FILE" > /dev/null 2>&1; then
-    git apply "$PATCH_FILE" || error "schedutil stable catch-up: apply failed!"
+elif patch -p1 --fuzz=3 --dry-run --forward < "$PATCH_FILE" > /dev/null 2>&1; then
+    patch -p1 --fuzz=3 --forward < "$PATCH_FILE" || error "schedutil stable catch-up: apply failed!"
     log "schedutil stable catch-up: applied ✅"
 else
     error "schedutil stable catch-up: does not apply cleanly — kernel source may have changed since this was written, needs re-verification!"
