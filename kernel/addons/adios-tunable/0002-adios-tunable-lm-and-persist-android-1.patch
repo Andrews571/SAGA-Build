@@ -1,0 +1,910 @@
+From: ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.0-SAGA -- 4 refinements found on full review
+ (batch_limit discard/other scope fix, discard batching room,
+ read_priority default, lm_samples_threshold exposed) + version bump
+
+Applies ON TOP of adios-android14-6.1-v3.2.0.patch. Same base as the
+previous revision (parts 1-6 + fixes + compliance_flags revert -- see
+prior commit messages). Version string bumped to "3.3.0-SAGA" to mark
+this as the first revision that came out of a full-file review rather
+than a single targeted fix, and because a full standalone adios.c
+(not just this incremental diff) is now also provided separately as
+adios-3.3.0.c for direct drop-in use.
+
+FOUR changes, all low-risk / additive, found by reviewing every sysfs
+this series has touched end to end:
+
+1. FIX: #2's batch_limit auto-scale loop was scaling ALL FOUR optypes
+   (READ/WRITE/DISCARD/OTHER) by queue-depth-derived scale_permille,
+   but the rest of the design (see #6's own comments) deliberately
+   scopes auto-management to READ/WRITE only. Harmless on THIS device
+   only by integer-truncation coincidence at its ~1.93x scale; would
+   NOT stay harmless on a device with a deeper queue (e.g. a 4x
+   ceiling would inflate batch_limit_discard from 1 to 4 for no
+   reason). DISCARD/OTHER now always keep their static base value,
+   matching #6's scope.
+
+2. default_batch_limit[DISCARD] raised 1 -> 4. This device's f2fs
+   mount uses real-time small-unit discard (confirmed via
+   /proc/mounts: "discard, discard_unit=block"), so background
+   GC/discard traffic is live during normal use, not just at unmount.
+   batch_limit=1 dispatches each discard nearly synchronously; a
+   little batching room lets a few coalesce instead of each one
+   individually contending with concurrent random writes. Deliberately
+   kept small (discards aren't latency-critical), and NOT subject to
+   the queue-depth auto-scale (see fix #1 above).
+
+3. default_read_priority set to -3 (nice-scale, was un-initialized /
+   implicitly 0 via kzalloc). Only matters when reads and writes
+   genuinely compete for dispatch at the same time -- which NONE of
+   this session's synthetic single-optype-at-a-time benchmarks (CPDT,
+   miniio) ever exercised, so this lever is untested by any data
+   collected so far. Reasoning: real phone usage is dominated by
+   foreground reads (opening an app, loading a resource) contending
+   against background writes (autosave, sync, logging); biasing
+   dispatch toward reads under that real contention is a
+   scheduling-order choice layered on top of already-good throughput,
+   not a hardware capability change -- shouldn't affect any
+   measured randwrite/randread number from this session (which never
+   saw read/write contention), while plausibly helping real-world
+   responsiveness. Modest value chosen on purpose -- not maxed out,
+   since starving writes creates its own problems (stalled autosave,
+   GC/discard backing up).
+
+4. lm_samples_threshold exposed as a new per-optype-model sysfs
+   tunable (was the hardcoded LM_SAMPLES_THRESHOLD #define, 1024).
+   Completes the set alongside lm_block_size_threshold/
+   lm_outlier_percentile/lm_interval_threshold_ms from earlier in this
+   series -- this was the one hardcoded LM constant left untouched.
+   Default unchanged (1024) so behavior doesn't shift until someone
+   deliberately tunes it.
+
+NOT submitted upstream. NOT compiled/tested against a real
+android14-6.1 tree yet -- verified only for brace/paren balance and
+absence of dangling references to removed/renamed symbols, same
+standard as every patch before it in this series. The PREVIOUS
+revision (parts 1-6 + compliance_flags=0 default) WAS built, flashed,
+and benchmarked for real (5-round protocol): ADIOS won seqwrite
+(+21%) and seqread (+9.5%) against Kyber, tied on randwrite/randread.
+This revision's 4 new changes have NOT yet been through that same
+real-build verification.
+---
+--- a/block/adios.c	2026-08-11 01:54:07.045164366 +0000
++++ b/block/adios.c	2026-08-18 10:18:23.231107611 +0000
+@@ -20,13 +20,14 @@
+ #include <linux/string.h>
+ #include <linux/list_sort.h>
+ #include <linux/rcupdate.h>
++#include <linux/sched.h>
+ 
+ #include "elevator.h"
+ #include "blk.h"
+ #include "blk-mq.h"
+ #include "blk-mq-sched.h"
+ 
+-#define ADIOS_VERSION "3.2.0"
++#define ADIOS_VERSION "3.3.0-SAGA"
+ 
+ /* Request Types:
+  *
+@@ -81,14 +82,79 @@
+  */
+ 
+ // Global variable to control the latency
+-static u64 default_global_latency_window            = 16000000ULL;
++// SAGA: tuned defaults, validated empirically on UFS 2.2 (see SAGA-Build
++// integration notes) — was 16000000ULL / 22000000ULL upstream.
++static u64 default_global_latency_window            = 30000000ULL;
+ static u64 default_global_latency_window_rotational = 22000000ULL;
+ // Ratio below which batch queues should be refilled
+-static u8  default_bq_refill_below_ratio = 20;
++// SAGA: was 20 upstream.
++static u8  default_bq_refill_below_ratio = 50;
+ // Maximum latency sample to input
+ static u64 default_lat_model_latency_limit = 500 * NSEC_PER_MSEC;
++// SAGA: default confidence threshold -- 64 small-bucket samples per
++// optype before predictive reordering is trusted for it. Chosen as a
++// conservative starting point (LM_SAMPLES_THRESHOLD upstream is 1024
++// for a full model *update*, but ordering decisions can reasonably
++// trust a smaller running sample than a full recalculation needs).
++// NOT benchmarked -- a reasonable guess, tune via lm_confidence_samples.
++static u32 default_lm_confidence_samples = 64;
++// SAGA: defaults for self-detected degradation (see force_shrink_model).
++// 150% = actual latency 1.5x what the model predicted counts as an
++// overrun; 20 consecutive overruns before forcing an out-of-band shrink.
++// Neither validated by benchmark -- reasonable starting guesses.
++static u32 default_lm_overrun_ratio_pct = 150;
++static u32 default_lm_overrun_trigger_count = 20;
++// SAGA: interactive-boost defaults. 100ms idle gap to count as "was
++// idle" (roughly: if you haven't touched storage in 1/10s, your next
++// read is probably a fresh user-facing action, not a continuation of
++// background work). Boost of 20ms shaves off the deadline for that one
++// read -- enough to jump ahead of typical background async writes
++// (latency_target[write] default is 2000ms) without needing it to be
++// huge. Neither validated by benchmark.
++static u32 default_lm_interactive_idle_ms = 100;
++static u64 default_lm_interactive_boost_ns = 20 * NSEC_PER_MSEC;
++// SAGA #6: adaptive depth controller defaults. Window of 128 completions
++// per evaluation (independent per optype -- read and write each get
++// their own window/multiplier). >=15% bad in a window throttles down;
++// >=90% good opens up; the 15-90 range is the hysteresis dead zone.
++// +/-10% (100 permille) step per adjustment, multiplier bounded to
++// [0.25x, 2.0x] of the statically-scaled batch_limit from #2. All
++// reasoned starting points, NOT validated by benchmark.
++static u32 default_lm_adapt_window_samples = 128;
++// SAGA: CORRECTED defaults after real telemetry showed the original
++// 90%/15% thresholds (paired with the old shared-with-#3 bound) left
++// the controller stuck at 1.000x. good_ratio_pct/bad_ratio_pct are the
++// NEW per-sample classification bounds (see adapt_depth_controller's
++// docstring); threshold_pct below are how much of a window needs to
++// land in each bucket to actually move the multiplier -- also loosened
++// from the original 90/15 since requiring 90% of ANY real-world sample
++// window to be strictly good is an unreasonably high bar in practice.
++static u32 default_lm_adapt_good_ratio_pct = 110;  // <=110% of prediction = good
++static u32 default_lm_adapt_bad_ratio_pct = 130;   // >130% of prediction = bad
++static u32 default_lm_adapt_bad_threshold_pct = 20;
++static u32 default_lm_adapt_good_threshold_pct = 65;
++static u32 default_lm_adapt_step_permille = 100;
++static u32 default_lm_adapt_min_permille = 250;
++static u32 default_lm_adapt_max_permille = 2000;
+ // Batch ordering strategy
+ static u64 default_batch_order = 0;
++// SAGA: modest read-priority bias. Nice-scale (-20..19), matches the
++// CFS prio_to_wmult table reused for dl_bias weighting. Only matters
++// when reads and writes are genuinely competing for dispatch at the
++// same time -- which none of today's single-optype-at-a-time synthetic
++// benchmarks (CPDT, miniio) ever exercised, so this is untested by
++// anything in this session's data. Reasoning: real phone usage is
++// dominated by foreground reads (opening an app, loading a resource)
++// contending against background writes (autosave, sync, logging) --
++// biasing dispatch toward reads under that real contention is a
++// scheduling-order choice on top of already-good throughput, not a
++// hardware capability change, so it shouldn't cost measured
++// randwrite/randread numbers (which never see contention in this
++// session's tests) while plausibly helping real-world responsiveness.
++// Modest value chosen deliberately -- not maxed out, since writes
++// still need to make progress and starving them creates its own
++// problems (stalled autosave, GC/discard backing up, etc).
++static s32 default_read_priority = -3;
+ 
+ /* Compliance Flags:
+  * 0x1: Async requests will not be reordered based on the predicted latency
+@@ -98,6 +164,19 @@
+ };
+ 
+ // Flags to control compliance with block layer constraints
++// SAGA: CORRECTED. Was ADIOS_CF_FIXORDER (predictive reordering OFF)
++// based on informal testing that turned out to be pointed at the
++// wrong block device (sda, which never received real I/O -- see
++// adios-tunable patch history). Retested with compliance_flags=0 on
++// the correct device (sdc, /data's real disk) with a model that
++// actually learns: ADIOS won meaningfully in seqwrite/seqread/
++// randwrite, lost only slightly in randread. Reverted to upstream's
++// own default (0x0, predictive reordering ON) based on that result.
++// NOTE: comparison was against only 1 round at compliance_flags=0
++// before Termux's scheduler-switch behavior reset it back to default
++// -- directionally solid, but not the same 5-round protocol used for
++// other conclusions in this series. Worth a fuller multi-round
++// re-confirmation later if time allows.
+ static u64 default_compliance_flags = 0x0;
+ 
+ // Dynamic thresholds for shrinkage
+@@ -122,10 +201,22 @@
+ };
+ 
+ // Maximum batch size limits for each operation type
++// SAGA: tuned defaults — was 36/72 upstream.
+ static u32 default_batch_limit[ADIOS_OPTYPES] = {
+-	[ADIOS_READ]    = 36,
+-	[ADIOS_WRITE]   = 72,
+-	[ADIOS_DISCARD] =  1,
++	[ADIOS_READ]    = 64,
++	[ADIOS_WRITE]   = 128,
++	// SAGA: modest bump from upstream's 1. This device's f2fs mount
++	// uses real-time small-unit discard (mount opts include "discard,
++	// discard_unit=block", confirmed via /proc/mounts on-device) --
++	// background GC/discard traffic is live during normal use, not
++	// just at unmount. batch_limit=1 means each discard is dispatched
++	// almost synchronously; a small amount of batching room lets a
++	// few coalesce instead of each one individually contending with
++	// concurrent random writes. Kept deliberately small (discards
++	// aren't latency-critical the way reads are, and this is NOT
++	// auto-scaled by queue depth like read/write -- see the fix in
++	// init_sched below).
++	[ADIOS_DISCARD] =  4,
+ 	[ADIOS_OTHER]   =  1,
+ };
+ 
+@@ -135,15 +226,24 @@
+ };
+ 
+ // Thresholds for latency model control
+-#define LM_BLOCK_SIZE_THRESHOLD 4096
+-#define LM_SAMPLES_THRESHOLD    1024
+-#define LM_INTERVAL_THRESHOLD   1500
+-#define LM_OUTLIER_PERCENTILE     99
++// NOTE: block size / outlier / interval thresholds were hardcoded #defines
++// upstream (ADIOS 3.2.0). They are now per-model runtime fields, tunable
++// via sysfs, defaulting to the original upstream values below.
++#define LM_BLOCK_SIZE_THRESHOLD_DEFAULT 4096
++#define LM_SAMPLES_THRESHOLD_DEFAULT    1024
++#define LM_INTERVAL_THRESHOLD_DEFAULT   1500
++#define LM_OUTLIER_PERCENTILE_DEFAULT     99
+ #define LM_LAT_BUCKET_COUNT       64
+ 
+ #define ADIOS_PQ_LEVELS 2
+ #define ADIOS_DL_TYPES  2
+ #define ADIOS_BQ_PAGES  2
++// SAGA: fixed-size recency table for the interactive-boost heuristic.
++// Small on purpose -- this is a hint mechanism, not a per-process
++// accounting structure. Collisions just mean two recently-active tasks
++// share a slot and both look "not idle" to each other; worst case is a
++// missed boost, never incorrect ordering or a correctness issue.
++#define ADIOS_IACTV_SLOTS 16
+ 
+ static u32 default_dl_prio[ADIOS_DL_TYPES] = {8, 0};
+ 
+@@ -212,6 +312,18 @@
+ 	u32 lm_shrink_at_kreqs;
+ 	u32 lm_shrink_at_gbytes;
+ 	u8  lm_shrink_resist;
++
++	// SAGA: self-detected degradation counter (see force_shrink_model
++	// and its use in adios_completed_request). Counts consecutive
++	// completions whose actual latency overran the model's own
++	// prediction by more than lm_overrun_ratio_pct.
++	atomic_t consec_overruns;
++
++	// Formerly hardcoded #defines, now tunable at runtime (see sysfs below)
++	u32 lm_block_size_threshold;   // bytes; small vs large bucket boundary
++	u8  lm_outlier_percentile;     // 1-100; percentile used to cut outliers
++	u32 lm_interval_threshold_ms;  // ms; min interval between forced updates
++	u32 lm_samples_threshold;      // sample count that forces an update
+ };
+ 
+ struct adios_pcpu_completion {
+@@ -251,6 +363,57 @@
+ 	u32 batch_actual_max_total;
+ 	u32 async_depth;
+ 	u32 lat_model_latency_limit;
++	// SAGA: confidence-gated predictive reordering. Below this many
++	// accumulated small-bucket samples for a given optype's model,
++	// predictive reordering auto-falls-back to FIXORDER-like behavior
++	// for THAT optype only, regardless of the global compliance_flags
++	// switch. See model_is_confident() and its use in add_to_dl_tree().
++	u32 lm_confidence_samples;
++	// SAGA: self-detected degradation thresholds (see force_shrink_model).
++	u32 lm_overrun_ratio_pct;    // % of pred_lat that counts as "overrun"
++	u32 lm_overrun_trigger_count; // consecutive overruns before forced shrink
++
++	// SAGA: BFQ-inspired interactive-boost heuristic, scoped down.
++	// BFQ's core insight for desktop/mobile responsiveness: a task that
++	// was idle and just issued I/O is likely interactive (foreground
++	// touch response, app cold-start reading resources) and deserves a
++	// temporary priority bump. Full BFQ implements this via per-process
++	// fair queuing (thousands of lines); this is the heuristic alone,
++	// as a small fixed-size recency table -- not a queuing redesign.
++	spinlock_t iactv_lock;
++	struct {
++		pid_t tgid;
++		u64   last_seen_ns;
++	} iactv_table[ADIOS_IACTV_SLOTS];
++	u32 lm_interactive_idle_ms;   // gap since last I/O to count as "was idle"
++	u64 lm_interactive_boost_ns;  // deadline reduction applied on boost
++
++	// SAGA #6: Kyber-inspired adaptive depth controller. Unlike Kyber,
++	// which compares against a fixed configured latency target, this
++	// compares each completion against the model's OWN prediction
++	// (rd->pred_lat) -- inheriting the model's per-device/per-workload
++	// self-calibration instead of needing a second, separately-tuned
++	// target. Only READ and WRITE are controlled (mirrors Kyber's
++	// practical focus on those two domains); DISCARD/OTHER always run
++	// at their statically-scaled batch_limit (from #2).
++	atomic_t window_good[ADIOS_OPTYPES];
++	atomic_t window_bad[ADIOS_OPTYPES];
++	atomic_t window_total[ADIOS_OPTYPES];
++	atomic_t depth_multiplier_permille[ADIOS_OPTYPES]; // 1000 == 1.0x
++	u32 lm_adapt_window_samples;   // completions per evaluation window
++	u32 lm_adapt_bad_threshold_pct;  // >= this %% bad -> throttle down
++	// SAGA: decoupled from #3's lm_overrun_ratio_pct on purpose -- #3
++	// stays conservative (rare, discards real history when it fires);
++	// #6 needs its own, more sensitive classification bar to ever
++	// actually move (see commit notes: 90%/150% reusing #3's threshold
++	// left the controller permanently stuck at 1.000x in real testing).
++	u32 lm_adapt_good_ratio_pct;   // latency <= pred_lat * this/100 -> good
++	u32 lm_adapt_bad_ratio_pct;    // latency >  pred_lat * this/100 -> bad
++	u32 lm_adapt_good_threshold_pct; // >= this %% good -> open up
++	u32 lm_adapt_step_permille;    // adjustment step per evaluation
++	u32 lm_adapt_min_permille;     // floor for the multiplier
++	u32 lm_adapt_max_permille;     // ceiling for the multiplier
++
+ 	u8  bq_refill_below_ratio;
+ 	u8  is_rotational;
+ 	u8  batch_order;
+@@ -333,7 +496,7 @@
+ 	u64 sum_weight = 0;
+ 	u64 cumulative_weight = 0, threshold_weight = 0;
+ 	u8  outlier_threshold_bucket = 0;
+-	u8  outlier_percentile = LM_OUTLIER_PERCENTILE;
++	u8  outlier_percentile = model->lm_outlier_percentile;
+ 	u8  reduction;
+ 
+ 	if (count_all)
+@@ -406,7 +569,7 @@
+ 	u64 cumulative_weight = 0, threshold_weight = 0;
+ 	u64 sum_weight = 0;
+ 	u8  outlier_threshold_bucket = 0;
+-	u8  outlier_percentile = LM_OUTLIER_PERCENTILE;
++	u8  outlier_percentile = model->lm_outlier_percentile;
+ 	u8  reduction;
+ 
+ 	if (count_all)
+@@ -549,18 +712,18 @@
+ 	now = jiffies;
+ 	time_elapsed = unlikely(!new_params->base) ||
+ 		new_params->last_update_jiffies +
+-		msecs_to_jiffies(LM_INTERVAL_THRESHOLD) <= now;
++		msecs_to_jiffies(model->lm_interval_threshold_ms) <= now;
+ 
+ 	// Update small buckets
+ 	if (small_weight && (time_elapsed ||
+-			LM_SAMPLES_THRESHOLD <= small_weight || !new_params->base)) {
++			model->lm_samples_threshold <= small_weight || !new_params->base)) {
+ 		small_processed = lm_update_small_buckets(model, new_params,
+ 			aggr->small_bucket, small_weight, !new_params->base);
+ 		memset(&aggr->small_bucket[0], 0, sizeof(aggr->small_bucket));
+ 	}
+ 	// Update large buckets
+ 	if (large_weight && (time_elapsed ||
+-			LM_SAMPLES_THRESHOLD <= large_weight || !new_params->slope)) {
++			model->lm_samples_threshold <= large_weight || !new_params->slope)) {
+ 		large_processed = lm_update_large_buckets(model, new_params,
+ 			aggr->large_bucket, large_weight, !new_params->slope);
+ 		memset(&aggr->large_bucket[0], 0, sizeof(aggr->large_bucket));
+@@ -621,7 +784,7 @@
+ 	current_base = params->base;
+ 	rcu_read_unlock();
+ 
+-	if (block_size <= LM_BLOCK_SIZE_THRESHOLD) {
++	if (block_size <= model->lm_block_size_threshold) {
+ 		// Handle small requests
+ 		bucket_index = lm_input_bucket_index(latency, current_base ?: 1);
+ 
+@@ -663,9 +826,9 @@
+ 	params = rcu_dereference(model->params);
+ 
+ 	result = params->base;
+-	if (block_size > LM_BLOCK_SIZE_THRESHOLD)
++	if (block_size > model->lm_block_size_threshold)
+ 		result += params->slope *
+-			DIV_ROUND_UP_ULL(block_size - LM_BLOCK_SIZE_THRESHOLD, 1024);
++			DIV_ROUND_UP_ULL(block_size - model->lm_block_size_threshold, 1024);
+ 
+ 	rcu_read_unlock();
+ 
+@@ -712,6 +875,195 @@
+ static inline u32 eval_adios_state(struct adios_data *ad, u32 shift)
+ { return eval_this_adios_state(get_adios_state(ad), shift); }
+ 
++// SAGA: confidence gate for predictive reordering. Reads the current
++// small_count (exact, already tracked upstream in latency_model_params)
++// for the given optype's model via RCU and compares against the
++// configured threshold. Returns true once the model has absorbed enough
++// real samples for its prediction to be trusted for ordering decisions.
++// This is the automatic, per-optype counterpart to the manual, global
++// compliance_flags/FIXORDER switch: instead of the operator guessing
++// when the model is "warm enough", each optype gates itself based on
++// what it has actually learned so far.
++static inline bool model_is_confident(struct adios_data *ad, u8 optype) {
++	struct latency_model *model = &ad->latency_model[optype];
++	struct latency_model_params *params;
++	u64 small_count;
++
++	rcu_read_lock();
++	params = rcu_dereference(model->params);
++	small_count = params->small_count;
++	rcu_read_unlock();
++
++	return small_count >= ad->lm_confidence_samples;
++}
++
++// SAGA #6: effective admission limit for this optype right now --
++// the statically-scaled batch_limit[] (base, from #2, sysfs-visible)
++// times the live depth_multiplier_permille adjusted by the controller
++// below. batch_limit[] itself is left untouched by the controller so
++// a manual sysfs write to it always means what it says; the multiplier
++// is the only thing the feedback loop moves.
++static inline u32 effective_batch_limit(struct adios_data *ad, u8 optype) {
++	u32 base = ad->batch_limit[optype];
++	s32 mult = atomic_read(&ad->depth_multiplier_permille[optype]);
++
++	if (optype != ADIOS_READ && optype != ADIOS_WRITE)
++		return base; // controller only manages read/write, see struct comment
++	return max_t(u32, 1, (base * (u32)mult) / 1000);
++}
++
++// SAGA #6: windowed good/bad classification + hysteresis adjustment,
++// the actual control loop. Called from adios_completed_request() for
++// every completed READ/WRITE.
++//
++// CORRECTED after real telemetry: the first version reused #3's
++// overrun definition (150% bound) for BAD and "latency <= pred_lat"
++// (i.e. 100%) for GOOD. On the real device, depth_controller sat
++// permanently at 1.000x across multiple full CPDT runs -- a
++// well-calibrated regression naturally has ~50% of samples land above
++// its own prediction, so a 100%-bound GOOD bar rarely reached the 90%
++// threshold, and 150%-overrun BAD events are naturally rare too. The
++// controller had no real chance to move. Now uses its OWN, more
++// forgiving bounds (lm_adapt_good_ratio_pct default 110%,
++// lm_adapt_bad_ratio_pct default 130%), decoupled from #3's threshold
++// (#3 stays conservative on purpose -- it discards real history when
++// it fires, so it should stay rare).
++//   BAD:  actual > pred_lat * lm_adapt_bad_ratio_pct/100
++//   GOOD: actual <= pred_lat * lm_adapt_good_ratio_pct/100
++//   (anything between GOOD and BAD is the hysteresis dead zone --
++//    counted in window_total but neither good nor bad, same 3-bucket
++//    idea Kyber uses to avoid oscillating on borderline samples)
++// Every lm_adapt_window_samples completions, evaluate the window's
++// bad/good ratio and step the multiplier up, down, or leave it (dead
++// zone), then reset the window. Step size, bounds, and floor/ceiling
++// are all sysfs-tunable.
++static void adapt_depth_controller(struct adios_data *ad, u8 optype,
++		u64 latency, u64 pred_lat) {
++	u32 total, good_ratio, bad_ratio;
++	u64 good_bound, bad_bound;
++
++	if (optype != ADIOS_READ && optype != ADIOS_WRITE)
++		return;
++	if (pred_lat == 0)
++		return; // model not warmed up yet, nothing to compare against
++
++	// SAGA: own classification bar, decoupled from #3 (see struct
++	// comment on lm_adapt_good_ratio_pct/lm_adapt_bad_ratio_pct).
++	good_bound = (pred_lat * ad->lm_adapt_good_ratio_pct) / 100;
++	bad_bound  = (pred_lat * ad->lm_adapt_bad_ratio_pct) / 100;
++
++	if (latency > bad_bound)
++		atomic_inc(&ad->window_bad[optype]);
++	else if (latency <= good_bound)
++		atomic_inc(&ad->window_good[optype]);
++	// else: dead zone, counts toward total only
++
++	total = atomic_inc_return(&ad->window_total[optype]);
++	if (total < ad->lm_adapt_window_samples)
++		return;
++
++	{
++		u32 good = atomic_xchg(&ad->window_good[optype], 0);
++		u32 bad  = atomic_xchg(&ad->window_bad[optype], 0);
++		atomic_set(&ad->window_total[optype], 0);
++
++		good_ratio = (good * 100) / total;
++		bad_ratio  = (bad  * 100) / total;
++
++		if (bad_ratio >= ad->lm_adapt_bad_threshold_pct) {
++			s32 cur = atomic_read(&ad->depth_multiplier_permille[optype]);
++			s32 next = cur - (s32)ad->lm_adapt_step_permille;
++			if (next < (s32)ad->lm_adapt_min_permille)
++				next = ad->lm_adapt_min_permille;
++			atomic_set(&ad->depth_multiplier_permille[optype], next);
++		} else if (good_ratio >= ad->lm_adapt_good_threshold_pct) {
++			s32 cur = atomic_read(&ad->depth_multiplier_permille[optype]);
++			s32 next = cur + (s32)ad->lm_adapt_step_permille;
++			if (next > (s32)ad->lm_adapt_max_permille)
++				next = ad->lm_adapt_max_permille;
++			atomic_set(&ad->depth_multiplier_permille[optype], next);
++		}
++		// else: dead zone, multiplier unchanged -- this is the
++		// hysteresis that keeps the controller from oscillating on
++		// every window when the ratio sits between the two thresholds.
++	}
++}
++
++// SAGA: forces an out-of-band shrink of the model's accumulated stats,
++// same shift-based "forget a fraction of the history" logic the
++// upstream volume-triggered shrink already uses (lm_shrink_resist),
++// just triggered by adios_completed_request() noticing sustained
++// misprediction instead of waiting for lm_shrink_at_kreqs/gbytes to be
++// crossed. See its use below in adios_completed_request().
++static void force_shrink_model(struct latency_model *model) {
++	struct latency_model_params *old_params, *new_params;
++	unsigned long flags;
++	u8 reduction = model->lm_shrink_resist;
++
++	spin_lock_irqsave(&model->update_lock, flags);
++	old_params = rcu_dereference_protected(model->params,
++				lockdep_is_held(&model->update_lock));
++	new_params = kmemdup(old_params, sizeof(*new_params), GFP_ATOMIC);
++	if (!new_params) {
++		spin_unlock_irqrestore(&model->update_lock, flags);
++		return;
++	}
++	if (new_params->small_count >> reduction) {
++		new_params->small_sum_delay -= new_params->small_sum_delay >> reduction;
++		new_params->small_count     -= new_params->small_count     >> reduction;
++	}
++	if (new_params->large_sum_bsize >> reduction) {
++		new_params->large_sum_delay -= new_params->large_sum_delay >> reduction;
++		new_params->large_sum_bsize -= new_params->large_sum_bsize >> reduction;
++	}
++	rcu_assign_pointer(model->params, new_params);
++	spin_unlock_irqrestore(&model->update_lock, flags);
++	kfree_rcu(old_params, rcu);
++}
++
++// SAGA: interactive-boost check. Looks up (and updates) the current
++// task's tgid in the small recency table. If its last I/O was longer
++// ago than lm_interactive_idle_ms (or it has no entry at all -- first
++// I/O ever seen from it), it's treated as "was idle, just woke up" and
++// the caller applies a one-off deadline reduction to its SYNC read.
++// Deliberately only for REQ_SYNC reads: that's the pattern of a UI
++// thread blocking on a file/resource read, which is the case that
++// actually shows up as jank if delayed. Async writes are unaffected --
++// boosting them would fight the write-deprioritization the rest of
++// ADIOS already does on purpose.
++static bool task_was_idle_and_gets_boost(struct adios_data *ad) {
++	pid_t tgid = task_tgid_nr(current);
++	u64 now = ktime_get_ns();
++	u64 idle_threshold_ns = (u64)ad->lm_interactive_idle_ms * NSEC_PER_MSEC;
++	unsigned long flags;
++	int i, oldest_idx = 0;
++	u64 oldest_seen = U64_MAX;
++	bool boost = false;
++
++	spin_lock_irqsave(&ad->iactv_lock, flags);
++	for (i = 0; i < ADIOS_IACTV_SLOTS; i++) {
++		if (ad->iactv_table[i].tgid == tgid) {
++			if (now - ad->iactv_table[i].last_seen_ns >= idle_threshold_ns)
++				boost = true;
++			ad->iactv_table[i].last_seen_ns = now;
++			spin_unlock_irqrestore(&ad->iactv_lock, flags);
++			return boost;
++		}
++		if (ad->iactv_table[i].last_seen_ns < oldest_seen) {
++			oldest_seen = ad->iactv_table[i].last_seen_ns;
++			oldest_idx = i;
++		}
++	}
++	// tgid not found: no history, evict the table's oldest entry for it.
++	// Being unseen is itself "was idle" (nothing recorded = never
++	// recently active), so this also boosts -- first read of a
++	// freshly-launched process/thread.
++	ad->iactv_table[oldest_idx].tgid = tgid;
++	ad->iactv_table[oldest_idx].last_seen_ns = now;
++	spin_unlock_irqrestore(&ad->iactv_lock, flags);
++	return true;
++}
++
+ // Add a request to the deadline-sorted red-black tree
+ static void add_to_dl_tree(
+ 		struct adios_data *ad, bool dl_idx, struct request *rq) {
+@@ -729,11 +1081,38 @@
+ 	 * - basically needs to be processed in early time */
+ 	rd->deadline = rq->start_time_ns;
+ 
++	// SAGA: interactive-boost. Deliberately breaks the "FIFO within
++	// optype" rule stated above, on purpose, only for this case: a
++	// sync READ from a task that appears to have just woken up from
++	// idle jumps ahead of other already-queued sync reads from
++	// continuously-active tasks (e.g. a background scan). That's
++	// exactly the BFQ-style bet -- the newly-active task is more
++	// likely to be blocking a user-visible UI thread right now than
++	// a task that's been steadily reading all along.
++	if ((rq->cmd_flags & REQ_SYNC) && adios_optype(rq) == ADIOS_READ &&
++			task_was_idle_and_gets_boost(ad)) {
++		if (rd->deadline > ad->lm_interactive_boost_ns)
++			rd->deadline -= ad->lm_interactive_boost_ns;
++		else
++			rd->deadline = 0;
++	}
++
+ 	/* Tier-3: Aynchronous Requests
+ 	 * - Can be reordered and delayed freely */
+ 	if (!(rq->cmd_flags & REQ_SYNC)) {
+ 		rd->deadline += ad->latency_target[adios_optype(rq)];
+-		if (!compliant(ad, ADIOS_CF_FIXORDER))
++		// SAGA: gate predictive reordering on both the manual switch
++		// (compliance_flags/FIXORDER, operator-controlled) AND the
++		// automatic per-optype confidence check (model_is_confident).
++		// Either one alone can fall back to non-predictive ordering;
++		// both must allow it for pred_lat to actually influence the
++		// deadline. This directly targets the cold-start regressions
++		// observed empirically: a freshly loaded/reset model no
++		// longer gets to mis-order requests based on near-zero-sample
++		// predictions -- it behaves like FIXORDER until it has earned
++		// the right not to, per optype, independently.
++		if (!compliant(ad, ADIOS_CF_FIXORDER) &&
++				model_is_confident(ad, adios_optype(rq)))
+ 			rd->deadline += rd->pred_lat;
+ 	}
+ 
+@@ -1134,7 +1513,7 @@
+ 
+ 		// Check batch size and total predicted latency
+ 		if (count && (!has_base ||
+-				ad->batch_count[page][optype] >= ad->batch_limit[optype] ||
++				ad->batch_count[page][optype] >= effective_batch_limit(ad, optype) ||
+ 				(tpl + added_lat + rd->pred_lat) > ad->global_latency_window)) {
+ 			stop = true;
+ 			break;
+@@ -1462,6 +1841,32 @@
+ 
+ 	local_irq_restore(flags);
+ 
++	// SAGA: self-detected degradation check -- runs BEFORE the outlier
++	// exclusion below on purpose. A run of genuine bad-latency outliers
++	// (excluded from polluting the smooth average, which is correct)
++	// should still be allowed to trigger "something changed, forget
++	// stale history faster" -- that's a different concern than average
++	// accuracy, and outliers are exactly the signal we want here.
++	// Also feeds the #6 depth controller below with the SAME overrun
++	// classification, so both mechanisms agree on what "bad" means.
++	if (rd->pred_lat > 0) {
++		struct latency_model *lm = &ad->latency_model[optype];
++		u64 threshold = (rd->pred_lat * ad->lm_overrun_ratio_pct) / 100;
++		bool is_overrun = latency > threshold;
++
++		if (is_overrun) {
++			if (atomic_inc_return(&lm->consec_overruns) >=
++					ad->lm_overrun_trigger_count) {
++				atomic_set(&lm->consec_overruns, 0);
++				force_shrink_model(lm);
++			}
++		} else {
++			atomic_set(&lm->consec_overruns, 0);
++		}
++
++		adapt_depth_controller(ad, optype, latency, rd->pred_lat);
++	}
++
+ 	if (latency > ad->lat_model_latency_limit)
+ 		return;
+ 
+@@ -1594,11 +1999,58 @@
+ 		model->lm_shrink_at_kreqs  = default_lm_shrink_at_kreqs;
+ 		model->lm_shrink_at_gbytes = default_lm_shrink_at_gbytes;
+ 		model->lm_shrink_resist    = default_lm_shrink_resist;
+-	}
+ 
+-	for (optype = 0; optype < ADIOS_OPTYPES; optype++) {
+-		ad->latency_target[optype] = default_latency_target[optype];
+-		ad->batch_limit[optype] = default_batch_limit[optype];
++		model->lm_block_size_threshold  = LM_BLOCK_SIZE_THRESHOLD_DEFAULT;
++		model->lm_outlier_percentile    = LM_OUTLIER_PERCENTILE_DEFAULT;
++		model->lm_interval_threshold_ms = LM_INTERVAL_THRESHOLD_DEFAULT;
++		model->lm_samples_threshold     = LM_SAMPLES_THRESHOLD_DEFAULT;
++		atomic_set(&model->consec_overruns, 0);
++	}
++
++	// SAGA: auto-scale batch_limit defaults by the device's actual
++	// configured queue depth (q->nr_requests, set by the block driver
++	// at queue init -- portable across UFS/NVMe/SATA, no device-specific
++	// probing needed). Baseline of 32 matches the original upstream
++	// defaults (36 read / 72 write), which were tuned assuming roughly
++	// that depth. Scale is clamped to [0.5x, 4x] so a very shallow or
++	// very deep queue can't push batch_limit to a degenerate extreme.
++	// This directly targets the batch_limit=128-on-a-QD32-device
++	// regression observed empirically on UFS 2.2 today -- with this,
++	// that specific misconfiguration can't happen from the default
++	// path again (manual sysfs override still can, deliberately).
++	{
++		const u32 baseline_qd = 32;
++		u32 scale_permille = (q->nr_requests * 1000) / baseline_qd;
++
++		if (scale_permille < 500)  scale_permille = 500;   // floor 0.5x
++		if (scale_permille > 4000) scale_permille = 4000;  // ceil 4x
++
++		for (optype = 0; optype < ADIOS_OPTYPES; optype++) {
++			ad->latency_target[optype] = default_latency_target[optype];
++			// SAGA: only READ/WRITE are auto-scaled by real queue depth --
++			// DISCARD/OTHER keep their conservative upstream base value
++			// unconditionally. Matches the same read/write-only scope
++			// used by #6's depth controller; discards don't benefit from
++			// deep batching (they're not latency-critical the way reads
++			// are) and inflating batch_limit_discard on a very deep
++			// queue device serves no purpose. Fixes an inconsistency
++			// found on review -- the scaling loop previously applied to
++			// all 4 optypes, silently harmless on this device only
++			// because integer truncation happened to floor it back to 1
++			// at this device's ~1.93x scale; would NOT stay harmless on
++			// a device with a deeper queue (e.g. 4x ceiling -> discard
++			// limit of 4 instead of 1).
++			if (optype == ADIOS_READ || optype == ADIOS_WRITE) {
++				ad->batch_limit[optype] = max_t(u32, 1,
++					(default_batch_limit[optype] * scale_permille) / 1000);
++			} else {
++				ad->batch_limit[optype] = default_batch_limit[optype];
++			}
++		}
++		pr_info("adios: nr_requests=%u -> batch_limit scale=%u.%03ux "
++			"(read=%u write=%u)\n",
++			q->nr_requests, scale_permille / 1000, scale_permille % 1000,
++			ad->batch_limit[ADIOS_READ], ad->batch_limit[ADIOS_WRITE]);
+ 	}
+ 
+ 	eq->elevator_data = ad;
+@@ -1607,9 +2059,54 @@
+ 	ad->global_latency_window = (ad->is_rotational)?
+ 		default_global_latency_window_rotational:
+ 		default_global_latency_window;
++
++	// SAGA: device-class heuristic adjustment of global_latency_window.
++	// Honest scope note: this does NOT identify UFS generation (2.2 vs
++	// 3.1 vs 4.0) -- doing that reliably would need SCSI/NVMe-specific
++	// inquiry-string parsing that varies by driver stack and couldn't
++	// be verified without the real device's kernel tree, so it's not
++	// attempted here. What IS safely available and portable across
++	// UFS/NVMe/SATA is the queue depth the block driver already
++	// configured (q->nr_requests, same signal #2 uses) -- deeper queues
++	// generally correlate with newer/faster interfaces (e.g. UFS with
++	// MCQ), and can profitably use a *smaller* window (each batch page
++	// fills with real requests faster, so it doesn't need to wait as
++	// long to reach a useful size); shallow queues get more window to
++	// compensate for higher per-op latency variance. Purely a shift on
++	// top of the rotational-based default above, not a replacement.
++	if (!ad->is_rotational) {
++		if (q->nr_requests >= 128)
++			ad->global_latency_window = ad->global_latency_window * 3 / 4;
++		else if (q->nr_requests <= 16)
++			ad->global_latency_window = ad->global_latency_window * 3 / 2;
++	}
++
+ 	ad->bq_refill_below_ratio = default_bq_refill_below_ratio;
+ 	ad->lat_model_latency_limit = default_lat_model_latency_limit;
++	ad->lm_confidence_samples = default_lm_confidence_samples;
++	ad->lm_overrun_ratio_pct = default_lm_overrun_ratio_pct;
++	ad->lm_overrun_trigger_count = default_lm_overrun_trigger_count;
++	ad->lm_interactive_idle_ms = default_lm_interactive_idle_ms;
++	ad->lm_interactive_boost_ns = default_lm_interactive_boost_ns;
++	spin_lock_init(&ad->iactv_lock);
++	memset(ad->iactv_table, 0, sizeof(ad->iactv_table));
++
++	ad->lm_adapt_window_samples = default_lm_adapt_window_samples;
++	ad->lm_adapt_bad_threshold_pct = default_lm_adapt_bad_threshold_pct;
++	ad->lm_adapt_good_ratio_pct = default_lm_adapt_good_ratio_pct;
++	ad->lm_adapt_bad_ratio_pct = default_lm_adapt_bad_ratio_pct;
++	ad->lm_adapt_good_threshold_pct = default_lm_adapt_good_threshold_pct;
++	ad->lm_adapt_step_permille = default_lm_adapt_step_permille;
++	ad->lm_adapt_min_permille = default_lm_adapt_min_permille;
++	ad->lm_adapt_max_permille = default_lm_adapt_max_permille;
++	for (optype = 0; optype < ADIOS_OPTYPES; optype++) {
++		atomic_set(&ad->window_good[optype], 0);
++		atomic_set(&ad->window_bad[optype], 0);
++		atomic_set(&ad->window_total[optype], 0);
++		atomic_set(&ad->depth_multiplier_permille[optype], 1000);
++	}
+ 	ad->batch_order = default_batch_order;
++	ad->dl_prio[0] = default_read_priority;
+ 	ad->compliance_flags = default_compliance_flags;
+ 
+ 	ad->models_stable = false;
+@@ -1813,6 +2310,25 @@
+ 		total_count, discard_count, read_count, write_count);
+ }
+ 
++// SAGA #6: observability for the depth controller -- without this
++// there's no way to tell from userspace whether it's ever actually
++// adjusting anything. Shows live multiplier (permille) and the
++// resulting effective limit for read/write.
++static ssize_t adios_depth_controller_show(
++		struct elevator_queue *e, char *page) {
++	struct adios_data *ad = e->elevator_data;
++	s32 rmult = atomic_read(&ad->depth_multiplier_permille[ADIOS_READ]);
++	s32 wmult = atomic_read(&ad->depth_multiplier_permille[ADIOS_WRITE]);
++
++	return sprintf(page,
++		"read : multiplier=%d.%03dx effective_limit=%u (base=%u)\n"
++		"write: multiplier=%d.%03dx effective_limit=%u (base=%u)\n",
++		rmult / 1000, rmult % 1000, effective_batch_limit(ad, ADIOS_READ),
++		ad->batch_limit[ADIOS_READ],
++		wmult / 1000, wmult % 1000, effective_batch_limit(ad, ADIOS_WRITE),
++		ad->batch_limit[ADIOS_WRITE]);
++}
++
+ #define SYSFS_ULL_DECL(field, min_val, max_val) \
+ static ssize_t adios_##field##_show( \
+ 		struct elevator_queue *e, char *page) { \
+@@ -1855,6 +2371,19 @@
+ SYSFS_INT_DECL(bq_refill_below_ratio, 0, 100)
+ SYSFS_INT_DECL(lat_model_latency_limit, 0, 2*NSEC_PER_SEC)
+ SYSFS_INT_DECL(batch_order, ADIOS_BO_OPTYPE, !!ad->is_rotational)
++SYSFS_INT_DECL(lm_confidence_samples, 0, 100000)
++SYSFS_INT_DECL(lm_overrun_ratio_pct, 100, 1000)
++SYSFS_INT_DECL(lm_overrun_trigger_count, 1, 10000)
++SYSFS_INT_DECL(lm_interactive_idle_ms, 0, 60000)
++SYSFS_INT_DECL(lm_interactive_boost_ns, 0, 2*NSEC_PER_SEC)
++SYSFS_INT_DECL(lm_adapt_window_samples, 4, 100000)
++SYSFS_INT_DECL(lm_adapt_bad_threshold_pct, 1, 100)
++SYSFS_INT_DECL(lm_adapt_good_ratio_pct, 100, 500)
++SYSFS_INT_DECL(lm_adapt_bad_ratio_pct, 100, 500)
++SYSFS_INT_DECL(lm_adapt_good_threshold_pct, 1, 100)
++SYSFS_INT_DECL(lm_adapt_step_permille, 10, 1000)
++SYSFS_INT_DECL(lm_adapt_min_permille, 50, 1000)
++SYSFS_INT_DECL(lm_adapt_max_permille, 1000, 10000)
+ 
+ // Show the read priority
+ static ssize_t adios_read_priority_show(
+@@ -1987,6 +2516,49 @@
+ SHRINK_THRESHOLD_ATTR_RW(at_gbytes, lm_shrink_at_gbytes, 1,   1000)
+ SHRINK_THRESHOLD_ATTR_RW(resist,    lm_shrink_resist,    1,      3)
+ 
++/* Formerly hardcoded #defines, now runtime-tunable per-model fields.
++ * Reuses the same macro pattern as SHRINK_THRESHOLD_ATTR_RW: one sysfs
++ * knob applies uniformly to all optype models (read/write/discard/other). */
++#define LM_CONST_ATTR_RW(name, model_field, min_value, max_value) \
++static ssize_t adios_##name##_store( \
++		struct elevator_queue *e, const char *page, size_t count) { \
++	struct adios_data *ad = e->elevator_data; \
++	unsigned long val; \
++	int ret; \
++	ret = kstrtoul(page, 10, &val); \
++	if (ret || val < (min_value) || val > (max_value)) \
++		return -EINVAL; \
++	for (u8 i = 0; i < ADIOS_OPTYPES; i++) { \
++		struct latency_model *model = &ad->latency_model[i]; \
++		unsigned long flags; \
++		spin_lock_irqsave(&model->update_lock, flags); \
++		model->model_field = val; \
++		spin_unlock_irqrestore(&model->update_lock, flags); \
++	} \
++	return count; \
++} \
++static ssize_t adios_##name##_show( \
++		struct elevator_queue *e, char *page) { \
++	struct adios_data *ad = e->elevator_data; \
++	u32 val = 0; \
++	unsigned long flags; \
++	struct latency_model *model = &ad->latency_model[0]; \
++	spin_lock_irqsave(&model->update_lock, flags); \
++	val = model->model_field; \
++	spin_unlock_irqrestore(&model->update_lock, flags); \
++	return sprintf(page, "%u\n", val); \
++}
++
++LM_CONST_ATTR_RW(lm_block_size_threshold,  lm_block_size_threshold,   512, 1048576)
++LM_CONST_ATTR_RW(lm_outlier_percentile,    lm_outlier_percentile,       1,     100)
++LM_CONST_ATTR_RW(lm_interval_threshold_ms, lm_interval_threshold_ms,    50,   60000)
++LM_CONST_ATTR_RW(lm_samples_threshold,     lm_samples_threshold,        16, 100000)
++
++// NOTE: model save/restore across boots does NOT need a custom attr --
++// lat_model_read / lat_model_write already exist upstream (see
++// sideload_latency_model() below) and do exactly this. Removed the
++// redundant lm_seed_read/lm_seed_write that duplicated them.
++
+ // Define sysfs attributes
+ #define AD_ATTR(name, show_func, store_func) \
+ 	__ATTR(name, 0644, show_func, store_func)
+@@ -2003,6 +2575,21 @@
+ 	AD_ATTR_RW(bq_refill_below_ratio),
+ 	AD_ATTR_RW(global_latency_window),
+ 	AD_ATTR_RW(lat_model_latency_limit),
++	AD_ATTR_RW(lm_confidence_samples),
++	AD_ATTR_RW(lm_overrun_ratio_pct),
++	AD_ATTR_RW(lm_overrun_trigger_count),
++	AD_ATTR_RW(lm_interactive_idle_ms),
++	AD_ATTR_RW(lm_interactive_boost_ns),
++
++	AD_ATTR_RW(lm_adapt_window_samples),
++	AD_ATTR_RW(lm_adapt_bad_threshold_pct),
++	AD_ATTR_RW(lm_adapt_good_ratio_pct),
++	AD_ATTR_RW(lm_adapt_bad_ratio_pct),
++	AD_ATTR_RW(lm_adapt_good_threshold_pct),
++	AD_ATTR_RW(lm_adapt_step_permille),
++	AD_ATTR_RW(lm_adapt_min_permille),
++	AD_ATTR_RW(lm_adapt_max_permille),
++	AD_ATTR_RO(depth_controller),
+ 	AD_ATTR_RW(batch_order),
+ 	AD_ATTR_RW(compliance_flags),
+ 
+@@ -2022,6 +2609,11 @@
+ 	AD_ATTR_RW(shrink_at_gbytes),
+ 	AD_ATTR_RW(shrink_resist),
+ 
++	AD_ATTR_RW(lm_block_size_threshold),
++	AD_ATTR_RW(lm_outlier_percentile),
++	AD_ATTR_RW(lm_interval_threshold_ms),
++	AD_ATTR_RW(lm_samples_threshold),
++
+ 	AD_ATTR_RW(read_priority),
+ 
+ 	AD_ATTR_WO(reset_bq_stats),
