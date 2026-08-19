@@ -1,76 +1,45 @@
 From: ADIOS scheduler analysis
-Subject: [PATCH] adios: v3.3.0-SAGA -- 4 refinements found on full review
- (batch_limit discard/other scope fix, discard batching room,
- read_priority default, lm_samples_threshold exposed) + version bump
+Subject: [PATCH] adios: use trylock instead of blocking lock in the
+ interactive-boost hot path (#5)
 
 Applies ON TOP of adios-android14-6.1-v3.2.0.patch. Same base as the
-previous revision (parts 1-6 + fixes + compliance_flags revert -- see
-prior commit messages). Version string bumped to "3.3.0-SAGA" to mark
-this as the first revision that came out of a full-file review rather
-than a single targeted fix, and because a full standalone adios.c
-(not just this incremental diff) is now also provided separately as
-adios-3.3.0.c for direct drop-in use.
+previous revision (v3.3.0-SAGA, parts 1-6 + all prior fixes -- see
+commit history). Single, targeted efficiency change found by
+re-reviewing the hottest code paths specifically (every sync read
+insert), not by adding new mechanism.
 
-FOUR changes, all low-risk / additive, found by reviewing every sysfs
-this series has touched end to end:
+CHANGE: task_was_idle_and_gets_boost() (used from add_to_dl_tree() for
+every synchronous READ insert -- the single most frequent call in the
+whole scheduler on a read-heavy workload) now uses
+spin_trylock_irqsave() instead of a blocking spin_lock_irqsave() to
+access the small interactive-boost recency table.
 
-1. FIX: #2's batch_limit auto-scale loop was scaling ALL FOUR optypes
-   (READ/WRITE/DISCARD/OTHER) by queue-depth-derived scale_permille,
-   but the rest of the design (see #6's own comments) deliberately
-   scopes auto-management to READ/WRITE only. Harmless on THIS device
-   only by integer-truncation coincidence at its ~1.93x scale; would
-   NOT stay harmless on a device with a deeper queue (e.g. a 4x
-   ceiling would inflate batch_limit_discard from 1 to 4 for no
-   reason). DISCARD/OTHER now always keep their static base value,
-   matching #6's scope.
+WHY: #5 is explicitly documented as a best-effort HINT already --
+missing a boost is never a correctness problem, only a missed
+optimization (see the function's own comments). A blocking lock on
+this exact path means one thread's read insert can stall waiting for
+another CPU's read insert to finish touching the same small table --
+pure added latency for zero benefit, on precisely the path this whole
+patch series has been trying to speed up. None of this session's
+benchmarks (miniio, CPDT) are multi-threaded, so this contention was
+never exercised or visible in any measured number so far -- but real
+Android usage has many concurrent app threads reading at once, where
+this would matter. Uncontended case (the common one, including
+everything measured this session) is completely unchanged: trylock
+succeeds immediately, identical behavior to the blocking version.
+Contended case now returns "no boost" immediately instead of waiting.
 
-2. default_batch_limit[DISCARD] raised 1 -> 4. This device's f2fs
-   mount uses real-time small-unit discard (confirmed via
-   /proc/mounts: "discard, discard_unit=block"), so background
-   GC/discard traffic is live during normal use, not just at unmount.
-   batch_limit=1 dispatches each discard nearly synchronously; a
-   little batching room lets a few coalesce instead of each one
-   individually contending with concurrent random writes. Deliberately
-   kept small (discards aren't latency-critical), and NOT subject to
-   the queue-depth auto-scale (see fix #1 above).
-
-3. default_read_priority set to -3 (nice-scale, was un-initialized /
-   implicitly 0 via kzalloc). Only matters when reads and writes
-   genuinely compete for dispatch at the same time -- which NONE of
-   this session's synthetic single-optype-at-a-time benchmarks (CPDT,
-   miniio) ever exercised, so this lever is untested by any data
-   collected so far. Reasoning: real phone usage is dominated by
-   foreground reads (opening an app, loading a resource) contending
-   against background writes (autosave, sync, logging); biasing
-   dispatch toward reads under that real contention is a
-   scheduling-order choice layered on top of already-good throughput,
-   not a hardware capability change -- shouldn't affect any
-   measured randwrite/randread number from this session (which never
-   saw read/write contention), while plausibly helping real-world
-   responsiveness. Modest value chosen on purpose -- not maxed out,
-   since starving writes creates its own problems (stalled autosave,
-   GC/discard backing up).
-
-4. lm_samples_threshold exposed as a new per-optype-model sysfs
-   tunable (was the hardcoded LM_SAMPLES_THRESHOLD #define, 1024).
-   Completes the set alongside lm_block_size_threshold/
-   lm_outlier_percentile/lm_interval_threshold_ms from earlier in this
-   series -- this was the one hardcoded LM constant left untouched.
-   Default unchanged (1024) so behavior doesn't shift until someone
-   deliberately tunes it.
+spin_trylock_irqsave is already used elsewhere in this exact file
+(the pre-existing bq_lock trylock), so this isn't introducing a new
+API pattern to the codebase.
 
 NOT submitted upstream. NOT compiled/tested against a real
 android14-6.1 tree yet -- verified only for brace/paren balance and
-absence of dangling references to removed/renamed symbols, same
-standard as every patch before it in this series. The PREVIOUS
-revision (parts 1-6 + compliance_flags=0 default) WAS built, flashed,
-and benchmarked for real (5-round protocol): ADIOS won seqwrite
-(+21%) and seqread (+9.5%) against Kyber, tied on randwrite/randread.
-This revision's 4 new changes have NOT yet been through that same
-real-build verification.
+that spin_unlock_irqrestore (unchanged) is valid regardless of how
+the lock was acquired, which it is.
 ---
 --- a/block/adios.c	2026-08-11 01:54:07.045164366 +0000
-+++ b/block/adios.c	2026-08-18 10:18:23.231107611 +0000
++++ b/block/adios.c	2026-08-19 22:53:09.333057503 +0000
 @@ -20,13 +20,14 @@
  #include <linux/string.h>
  #include <linux/list_sort.h>
@@ -382,7 +351,7 @@ real-build verification.
  
  	rcu_read_unlock();
  
-@@ -712,6 +875,195 @@
+@@ -712,6 +875,213 @@
  static inline u32 eval_adios_state(struct adios_data *ad, u32 shift)
  { return eval_this_adios_state(get_adios_state(ad), shift); }
  
@@ -551,7 +520,25 @@ real-build verification.
 +	u64 oldest_seen = U64_MAX;
 +	bool boost = false;
 +
-+	spin_lock_irqsave(&ad->iactv_lock, flags);
++	// SAGA: trylock instead of a blocking lock. This runs on EVERY sync
++	// read insert -- the hottest path in the scheduler for a read-heavy
++	// workload, which is exactly what we're trying to optimize. Under
++	// real concurrent multi-thread I/O (not exercised by any of this
++	// session's single-threaded synthetic benchmarks, but very real in
++	// normal Android usage with many apps/threads reading at once), a
++	// blocking spin_lock_irqsave here means one thread's read insert
++	// can stall waiting for another CPU's read insert to finish updating
++	// this same small table -- pure added latency with no benefit, on
++	// the exact path we want fast. This mechanism is explicitly a
++	// best-effort HINT already (see the struct/function comments above:
++	// "missed boost, never incorrect ordering"), so skipping the boost
++	// under contention instead of waiting for it is the correct
++	// trade-off: never adds hot-path latency, occasionally misses a
++	// boost it would have otherwise given. Uncontended case (by far the
++	// common one) is unchanged -- trylock succeeds immediately, same as
++	// before.
++	if (!spin_trylock_irqsave(&ad->iactv_lock, flags))
++		return false;
 +	for (i = 0; i < ADIOS_IACTV_SLOTS; i++) {
 +		if (ad->iactv_table[i].tgid == tgid) {
 +			if (now - ad->iactv_table[i].last_seen_ns >= idle_threshold_ns)
@@ -578,7 +565,7 @@ real-build verification.
  // Add a request to the deadline-sorted red-black tree
  static void add_to_dl_tree(
  		struct adios_data *ad, bool dl_idx, struct request *rq) {
-@@ -729,11 +1081,38 @@
+@@ -729,11 +1099,38 @@
  	 * - basically needs to be processed in early time */
  	rd->deadline = rq->start_time_ns;
  
@@ -618,7 +605,7 @@ real-build verification.
  			rd->deadline += rd->pred_lat;
  	}
  
-@@ -1134,7 +1513,7 @@
+@@ -1134,7 +1531,7 @@
  
  		// Check batch size and total predicted latency
  		if (count && (!has_base ||
@@ -627,7 +614,7 @@ real-build verification.
  				(tpl + added_lat + rd->pred_lat) > ad->global_latency_window)) {
  			stop = true;
  			break;
-@@ -1462,6 +1841,32 @@
+@@ -1462,6 +1859,32 @@
  
  	local_irq_restore(flags);
  
@@ -660,7 +647,7 @@ real-build verification.
  	if (latency > ad->lat_model_latency_limit)
  		return;
  
-@@ -1594,11 +1999,58 @@
+@@ -1594,11 +2017,58 @@
  		model->lm_shrink_at_kreqs  = default_lm_shrink_at_kreqs;
  		model->lm_shrink_at_gbytes = default_lm_shrink_at_gbytes;
  		model->lm_shrink_resist    = default_lm_shrink_resist;
@@ -723,7 +710,7 @@ real-build verification.
  	}
  
  	eq->elevator_data = ad;
-@@ -1607,9 +2059,54 @@
+@@ -1607,9 +2077,54 @@
  	ad->global_latency_window = (ad->is_rotational)?
  		default_global_latency_window_rotational:
  		default_global_latency_window;
@@ -778,7 +765,7 @@ real-build verification.
  	ad->compliance_flags = default_compliance_flags;
  
  	ad->models_stable = false;
-@@ -1813,6 +2310,25 @@
+@@ -1813,6 +2328,25 @@
  		total_count, discard_count, read_count, write_count);
  }
  
@@ -804,7 +791,7 @@ real-build verification.
  #define SYSFS_ULL_DECL(field, min_val, max_val) \
  static ssize_t adios_##field##_show( \
  		struct elevator_queue *e, char *page) { \
-@@ -1855,6 +2371,19 @@
+@@ -1855,6 +2389,19 @@
  SYSFS_INT_DECL(bq_refill_below_ratio, 0, 100)
  SYSFS_INT_DECL(lat_model_latency_limit, 0, 2*NSEC_PER_SEC)
  SYSFS_INT_DECL(batch_order, ADIOS_BO_OPTYPE, !!ad->is_rotational)
@@ -824,7 +811,7 @@ real-build verification.
  
  // Show the read priority
  static ssize_t adios_read_priority_show(
-@@ -1987,6 +2516,49 @@
+@@ -1987,6 +2534,49 @@
  SHRINK_THRESHOLD_ATTR_RW(at_gbytes, lm_shrink_at_gbytes, 1,   1000)
  SHRINK_THRESHOLD_ATTR_RW(resist,    lm_shrink_resist,    1,      3)
  
@@ -874,7 +861,7 @@ real-build verification.
  // Define sysfs attributes
  #define AD_ATTR(name, show_func, store_func) \
  	__ATTR(name, 0644, show_func, store_func)
-@@ -2003,6 +2575,21 @@
+@@ -2003,6 +2593,21 @@
  	AD_ATTR_RW(bq_refill_below_ratio),
  	AD_ATTR_RW(global_latency_window),
  	AD_ATTR_RW(lat_model_latency_limit),
@@ -896,7 +883,7 @@ real-build verification.
  	AD_ATTR_RW(batch_order),
  	AD_ATTR_RW(compliance_flags),
  
-@@ -2022,6 +2609,11 @@
+@@ -2022,6 +2627,11 @@
  	AD_ATTR_RW(shrink_at_gbytes),
  	AD_ATTR_RW(shrink_resist),
  
