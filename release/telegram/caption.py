@@ -61,6 +61,7 @@ ADDON_DISPLAY_NAMES = {
     "le9uo":       "LE9UO",
     "kcompressd":  "Kcompressd",
     "zram_ir":     "Zram_ir",
+    "schedutil":   "Schedutil",
 }
 
 # Mountless-engine addons are mutually exclusive (only one, or none, active
@@ -73,7 +74,7 @@ MOUNTLESS_ADDON_TOKENS = ("nomount", "zeromount")
 # NOT here — they're always-on (see build.yml) and shown instead in the
 # dedicated "Features" block (see FEATURE_ADDON_TOKENS / build_feature_lines
 # below), not duplicated as Enable/Disable toggles.
-TOGGLE_ADDON_ORDER = ["rekernel", "droidspaces", "lz4zstd", "lz4kd", "le9uo", "kasumi", "kcompressd", "zram_ir"]
+TOGGLE_ADDON_ORDER = ["rekernel", "droidspaces", "lz4zstd", "lz4kd", "le9uo", "kasumi", "kcompressd", "zram_ir", "schedutil"]
 
 # These five get pulled out of the normal "*Add-ons*" bullet list and into
 # their own "Features" block instead (see build_feature_lines(),
