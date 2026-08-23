@@ -88,3 +88,20 @@ if [ "${BBG_ENABLED:-false}" = "true" ]; then
         log "BBG: baseband_guard appended to CONFIG_LSM ✅"
     fi
 fi
+
+# SCHEDUTIL: lock in the compile-time default governor explicitly (not
+# just relying on the ARM64 Kconfig choice default), and enable the
+# CONFIG_SAGA_FORCE_SCHEDUTIL guard that makes cpufreq_init_policy()
+# re-apply it on every online/hotplug/resume instead of restoring
+# last_governor — see kernel/addons/schedutil/schedutil.sh for why.
+if [ "${SCHEDUTIL_ENABLED:-false}" = "true" ]; then
+    config --enable CONFIG_CPU_FREQ_GOV_SCHEDUTIL
+    config --enable CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+    config --disable CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND
+    config --disable CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE
+    config --disable CONFIG_CPU_FREQ_DEFAULT_GOV_POWERSAVE
+    config --disable CONFIG_CPU_FREQ_DEFAULT_GOV_CONSERVATIVE
+    config --enable CONFIG_SAGA_FORCE_SCHEDUTIL
+    SCHEDUTIL_STATE=$(config --state CONFIG_SAGA_FORCE_SCHEDUTIL 2>/dev/null || echo "unknown")
+    log "SCHEDUTIL: CONFIG_SAGA_FORCE_SCHEDUTIL state after scripts/config --enable: ${SCHEDUTIL_STATE}"
+fi
