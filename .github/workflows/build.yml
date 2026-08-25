@@ -342,9 +342,18 @@ jobs:
           mkdir -p /dev/shm/ldcache
 
       - name: "Setup Swap Space"
-        uses: thejerrybao/setup-swap-space@v1
-        with:
-          swap-size-gb: 12
+        run: |
+          # Was thejerrybao/setup-swap-space@v1 — that repo now 404s
+          # (deleted/renamed upstream), so this is inline now instead:
+          # one less external action this workflow depends on staying up.
+          SWAP_SIZE_GB=12
+          SWAP_PATH=/mnt/swapfile
+          sudo swapoff "${SWAP_PATH}" 2>/dev/null || true
+          sudo fallocate -l "${SWAP_SIZE_GB}G" "${SWAP_PATH}"
+          sudo chmod 600 "${SWAP_PATH}"
+          sudo mkswap "${SWAP_PATH}"
+          sudo swapon "${SWAP_PATH}"
+          free -h
 
       - name: "Setup Build Environment"  # restore-only: clang, arsenal, ccache, lto
         id: setup-build-env
