@@ -79,7 +79,7 @@ else
     log "Building kernel..."
     START_TIME=$(date +%s)
 
-    make "${MAKE_ARGS[@]}" CC="$CC_ARG" || error "Build failed!"
+    make "${MAKE_ARGS[@]}" CC="$CC_ARG" -k || error "Build failed!"
 
     BUILD_SECONDS=$(( $(date +%s) - START_TIME ))
     log "Build completed in ${BUILD_SECONDS}s ✅"
