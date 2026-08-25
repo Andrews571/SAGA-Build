@@ -31,6 +31,7 @@ on:
           - "live"
           - "live-staging"
           - "mirror"
+          - "ramabondanp"
       ksunext:
         description: "KernelSU-Next"
         type: boolean
