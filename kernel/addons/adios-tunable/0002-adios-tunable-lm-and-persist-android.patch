@@ -1,45 +1,59 @@
 From: ADIOS scheduler analysis
-Subject: [PATCH] adios: use trylock instead of blocking lock in the
- interactive-boost hot path (#5)
+Subject: [PATCH] adios: v3.3.2-SAGA -- implements 3 of the 4 previously
+ deferred ChatGPT-review items
 
-Applies ON TOP of adios-android14-6.1-v3.2.0.patch. Same base as the
-previous revision (v3.3.0-SAGA, parts 1-6 + all prior fixes -- see
-commit history). Single, targeted efficiency change found by
-re-reviewing the hottest code paths specifically (every sync read
-insert), not by adding new mechanism.
+Applies ON TOP of adios-android14-6.1-v3.2.0.patch. Same base as
+v3.3.1-SAGA. Previous revision deferred 4 valid-but-lower-priority
+items from the ChatGPT code review; this implements 3 of them (the
+4th, struct reorganization, remains deferred -- pure maintainability,
+zero behavioral effect, still not worth the diff size right now).
 
-CHANGE: task_was_idle_and_gets_boost() (used from add_to_dl_tree() for
-every synchronous READ insert -- the single most frequent call in the
-whole scheduler on a read-heavy workload) now uses
-spin_trylock_irqsave() instead of a blocking spin_lock_irqsave() to
-access the small interactive-boost recency table.
+1. force_shrink_model() moved off the completion hot path. Was called
+   directly from adios_completed_request() (allocates via kmemdup
+   under a spinlock, GFP_ATOMIC) after detecting sustained
+   misprediction -- real work on the exact path this series has been
+   trying to keep fast, at exactly the moment the device may already
+   be under pressure. Now: completion just sets a per-model
+   shrink_pending flag; the existing update_timer (already guaranteed
+   to fire within 100ms of any completion via the pre-existing
+   timer_reduce() call) drains the flag and does the actual shrink in
+   its own context.
 
-WHY: #5 is explicitly documented as a best-effort HINT already --
-missing a boost is never a correctness problem, only a missed
-optimization (see the function's own comments). A blocking lock on
-this exact path means one thread's read insert can stall waiting for
-another CPU's read insert to finish touching the same small table --
-pure added latency for zero benefit, on precisely the path this whole
-patch series has been trying to speed up. None of this session's
-benchmarks (miniio, CPDT) are multi-threaded, so this contention was
-never exercised or visible in any measured number so far -- but real
-Android usage has many concurrent app threads reading at once, where
-this would matter. Uncontended case (the common one, including
-everything measured this session) is completely unchanged: trylock
-succeeds immediately, identical behavior to the blocking version.
-Contended case now returns "no boost" immediately instead of waiting.
+2. READ_ONCE/WRITE_ONCE added for sysfs-tunable fields read on hot
+   paths (lm_confidence_samples, lm_adapt_good_ratio_pct/
+   lm_adapt_bad_ratio_pct, lm_interactive_idle_ms,
+   lm_interactive_boost_ns, read_priority/dl_prio). Applied at the
+   macro level (SYSFS_ULL_DECL, SYSFS_INT_DECL,
+   SYSFS_INT_DECL_PAIRED) so it covers every tunable using those
+   generators, not just the 5 identified as hot-path -- harmless
+   where it's not strictly needed, correct where it is. Aligned u32/
+   u64 don't tear on ARM64 in practice, so this doesn't fix an
+   observed bug, but it's the technically correct way to publish
+   sysfs-configurable state to a concurrent reader and would silence
+   KCSAN if ever run under it.
 
-spin_trylock_irqsave is already used elsewhere in this exact file
-(the pre-existing bq_lock trylock), so this isn't introducing a new
-API pattern to the codebase.
+3. Interactive-boost table doubled 16 -> 32 slots. Real Android easily
+   exceeds 16 concurrently-relevant TGIDs (zygote, system_server,
+   surfaceflinger, launcher, foreground app, GMS, media, vendor
+   services...); at 16 slots, eviction is frequent enough that an
+   evicted task's next read looks like "first sight" and gets
+   re-boosted, undermining the "genuine idle-then-active" signal the
+   mechanism is meant to capture. Still a fixed-size linear scan under
+   a trylock (task_was_idle_and_gets_boost is unchanged otherwise) --
+   a hash+probing redesign would scale further but remains deferred as
+   more invasive than this fix is urgent.
+
+STILL DEFERRED: struct reorganization (nesting the adaptive-controller/
+interactive-boost fields into their own sub-structs instead of flat in
+adios_data) -- zero behavioral effect, pure maintainability, skipped.
 
 NOT submitted upstream. NOT compiled/tested against a real
 android14-6.1 tree yet -- verified only for brace/paren balance and
-that spin_unlock_irqrestore (unchanged) is valid regardless of how
-the lock was acquired, which it is.
+that sizeof(iactv_table) auto-adjusts to the new slot count (it does,
+no hardcoded 16 remained anywhere).
 ---
 --- a/block/adios.c	2026-08-11 01:54:07.045164366 +0000
-+++ b/block/adios.c	2026-08-19 22:53:09.333057503 +0000
++++ b/block/adios.c	2026-08-24 10:13:13.555590436 +0000
 @@ -20,13 +20,14 @@
  #include <linux/string.h>
  #include <linux/list_sort.h>
@@ -52,11 +66,11 @@ the lock was acquired, which it is.
  #include "blk-mq-sched.h"
  
 -#define ADIOS_VERSION "3.2.0"
-+#define ADIOS_VERSION "3.3.0-SAGA"
++#define ADIOS_VERSION "3.3.2-SAGA"
  
  /* Request Types:
   *
-@@ -81,14 +82,79 @@
+@@ -81,14 +82,85 @@
   */
  
  // Global variable to control the latency
@@ -113,7 +127,13 @@ the lock was acquired, which it is.
 +static u32 default_lm_adapt_bad_ratio_pct = 130;   // >130% of prediction = bad
 +static u32 default_lm_adapt_bad_threshold_pct = 20;
 +static u32 default_lm_adapt_good_threshold_pct = 65;
-+static u32 default_lm_adapt_step_permille = 100;
++static u32 default_lm_adapt_step_permille = 50;
++// CHATGPT-REVIEW: asymmetric step (was symmetric +-100 permille, i.e.
++// +-10%). Now defaults to +5%/-10% -- expand cautiously, contract fast.
++// Standard control-theory technique to avoid overshoot; also directly
++// motivated by the empirical volatility measured this session.
++static u32 default_lm_adapt_step_down_permille = 100;
++static u32 default_lm_adapt_cooldown_ms = 1000;
 +static u32 default_lm_adapt_min_permille = 250;
 +static u32 default_lm_adapt_max_permille = 2000;
  // Batch ordering strategy
@@ -138,7 +158,7 @@ the lock was acquired, which it is.
  
  /* Compliance Flags:
   * 0x1: Async requests will not be reordered based on the predicted latency
-@@ -98,6 +164,19 @@
+@@ -98,6 +170,19 @@
  };
  
  // Flags to control compliance with block layer constraints
@@ -158,7 +178,7 @@ the lock was acquired, which it is.
  static u64 default_compliance_flags = 0x0;
  
  // Dynamic thresholds for shrinkage
-@@ -122,10 +201,22 @@
+@@ -122,10 +207,22 @@
  };
  
  // Maximum batch size limits for each operation type
@@ -184,7 +204,7 @@ the lock was acquired, which it is.
  	[ADIOS_OTHER]   =  1,
  };
  
-@@ -135,15 +226,24 @@
+@@ -135,15 +232,35 @@
  };
  
  // Thresholds for latency model control
@@ -209,11 +229,36 @@ the lock was acquired, which it is.
 +// accounting structure. Collisions just mean two recently-active tasks
 +// share a slot and both look "not idle" to each other; worst case is a
 +// missed boost, never incorrect ordering or a correctness issue.
-+#define ADIOS_IACTV_SLOTS 16
++// CHATGPT-REVIEW: bumped 16 -> 32. Real Android easily has more than
++// 16 concurrently-relevant TGIDs (zygote, system_server,
++// surfaceflinger, launcher, foreground app, GMS, media, vendor
++// services...), so 16 slots evict often on a real device -- an evicted
++// task's next read looks like "first sight" and gets boosted again,
++// even though the mechanism is meant to reward genuine idle-then-active
++// transitions. Doubling the table halves collision frequency for a
++// small, fixed cost (still O(32) linear scan, still under a trylock --
++// see task_was_idle_and_gets_boost). A full hash+probing redesign
++// would scale better but is more invasive than this fix is urgent;
++// left for a future revision.
++#define ADIOS_IACTV_SLOTS 32
  
  static u32 default_dl_prio[ADIOS_DL_TYPES] = {8, 0};
  
-@@ -212,6 +312,18 @@
+@@ -195,6 +312,13 @@
+ 	u64 small_count;
+ 	u64 large_sum_delay;
+ 	u64 large_sum_bsize;
++	// CHATGPT-REVIEW FIX #2: was missing -- model_is_confident() had
++	// no way to gate confidence for the LARGE bucket (only small_count
++	// existed), so any workload dominated by large I/O (file copies,
++	// APK installs, sequential restores) never built confidence and
++	// predictive reordering stayed off for it indefinitely, even after
++	// thousands of large-request completions. See model_is_confident().
++	u64 large_count;
+ 	u64 last_update_jiffies;
+ 	struct rcu_head rcu;
+ };
+@@ -212,6 +336,28 @@
  	u32 lm_shrink_at_kreqs;
  	u32 lm_shrink_at_gbytes;
  	u8  lm_shrink_resist;
@@ -223,6 +268,16 @@ the lock was acquired, which it is.
 +	// completions whose actual latency overran the model's own
 +	// prediction by more than lm_overrun_ratio_pct.
 +	atomic_t consec_overruns;
++	// CHATGPT-REVIEW DEFERRED FIX, now applied: force_shrink_model()
++	// allocates (kmemdup, GFP_ATOMIC) and does an RCU swap -- real work,
++	// previously done directly inline from adios_completed_request()
++	// under a spinlock, on the exact I/O completion path this whole
++	// patch series is trying to keep fast. Deferred to the existing
++	// update_timer (already fires within 100ms of any completion via
++	// timer_reduce below) instead: completion just sets this flag,
++	// the timer callback does the actual work in a context that isn't
++	// the hot path.
++	atomic_t shrink_pending;
 +
 +	// Formerly hardcoded #defines, now tunable at runtime (see sysfs below)
 +	u32 lm_block_size_threshold;   // bytes; small vs large bucket boundary
@@ -232,7 +287,7 @@ the lock was acquired, which it is.
  };
  
  struct adios_pcpu_completion {
-@@ -251,6 +363,57 @@
+@@ -251,6 +397,75 @@
  	u32 batch_actual_max_total;
  	u32 async_depth;
  	u32 lat_model_latency_limit;
@@ -273,6 +328,22 @@ the lock was acquired, which it is.
 +	atomic_t window_bad[ADIOS_OPTYPES];
 +	atomic_t window_total[ADIOS_OPTYPES];
 +	atomic_t depth_multiplier_permille[ADIOS_OPTYPES]; // 1000 == 1.0x
++	// CHATGPT-REVIEW FIX #1 (race condition): guards adapt_depth_controller's
++	// evaluation block so only one CPU evaluates/resets a given optype's
++	// window at a time. Without this, two CPUs completing I/O near-
++	// simultaneously could both pass the "total >= window_samples" check
++	// and both evaluate+reset -- not a memory-safety bug (the atomic_t
++	// counters stay individually consistent) but a logical one: the same
++	// batch of samples could get double-applied to the multiplier. This
++	// plausibly explains part of the real volatility measured empirically
++	// this session (randwrite swinging 9-59 MB/s between rounds).
++	atomic_t window_evaluating[ADIOS_OPTYPES];
++	// CHATGPT-REVIEW FIX (cooldown + asymmetric step): prevents the
++	// multiplier from re-adjusting more than once per cooldown period,
++	// and steps up more slowly than it steps down -- standard control-
++	// theory technique to avoid overshoot/oscillation. Also directly
++	// motivated by the same empirical volatility above.
++	unsigned long last_adjust_jiffies[ADIOS_OPTYPES];
 +	u32 lm_adapt_window_samples;   // completions per evaluation window
 +	u32 lm_adapt_bad_threshold_pct;  // >= this %% bad -> throttle down
 +	// SAGA: decoupled from #3's lm_overrun_ratio_pct on purpose -- #3
@@ -283,14 +354,16 @@ the lock was acquired, which it is.
 +	u32 lm_adapt_good_ratio_pct;   // latency <= pred_lat * this/100 -> good
 +	u32 lm_adapt_bad_ratio_pct;    // latency >  pred_lat * this/100 -> bad
 +	u32 lm_adapt_good_threshold_pct; // >= this %% good -> open up
-+	u32 lm_adapt_step_permille;    // adjustment step per evaluation
++	u32 lm_adapt_step_permille;    // adjustment step per evaluation (up)
++	u32 lm_adapt_step_down_permille; // adjustment step when throttling down
++	u32 lm_adapt_cooldown_ms;      // min time between adjustments, per optype
 +	u32 lm_adapt_min_permille;     // floor for the multiplier
 +	u32 lm_adapt_max_permille;     // ceiling for the multiplier
 +
  	u8  bq_refill_below_ratio;
  	u8  is_rotational;
  	u8  batch_order;
-@@ -333,7 +496,7 @@
+@@ -333,7 +548,7 @@
  	u64 sum_weight = 0;
  	u64 cumulative_weight = 0, threshold_weight = 0;
  	u8  outlier_threshold_bucket = 0;
@@ -299,7 +372,7 @@ the lock was acquired, which it is.
  	u8  reduction;
  
  	if (count_all)
-@@ -406,7 +569,7 @@
+@@ -406,7 +621,7 @@
  	u64 cumulative_weight = 0, threshold_weight = 0;
  	u64 sum_weight = 0;
  	u8  outlier_threshold_bucket = 0;
@@ -308,7 +381,23 @@ the lock was acquired, which it is.
  	u8  reduction;
  
  	if (count_all)
-@@ -549,18 +712,18 @@
+@@ -454,6 +669,7 @@
+ 		if (params->large_sum_bsize >> reduction) {
+ 			params->large_sum_delay -= params->large_sum_delay >> reduction;
+ 			params->large_sum_bsize -= params->large_sum_bsize >> reduction;
++			params->large_count     -= params->large_count     >> reduction;
+ 		}
+ 	}
+ 
+@@ -464,6 +680,7 @@
+ 
+ 	params->large_sum_delay += sum_latency;
+ 	params->large_sum_bsize += sum_block_size;
++	params->large_count     += sum_weight;
+ 
+ 	return true;
+ }
+@@ -549,18 +766,18 @@
  	now = jiffies;
  	time_elapsed = unlikely(!new_params->base) ||
  		new_params->last_update_jiffies +
@@ -330,7 +419,7 @@ the lock was acquired, which it is.
  		large_processed = lm_update_large_buckets(model, new_params,
  			aggr->large_bucket, large_weight, !new_params->slope);
  		memset(&aggr->large_bucket[0], 0, sizeof(aggr->large_bucket));
-@@ -621,7 +784,7 @@
+@@ -621,7 +838,7 @@
  	current_base = params->base;
  	rcu_read_unlock();
  
@@ -339,7 +428,7 @@ the lock was acquired, which it is.
  		// Handle small requests
  		bucket_index = lm_input_bucket_index(latency, current_base ?: 1);
  
-@@ -663,9 +826,9 @@
+@@ -663,9 +880,9 @@
  	params = rcu_dereference(model->params);
  
  	result = params->base;
@@ -351,7 +440,7 @@ the lock was acquired, which it is.
  
  	rcu_read_unlock();
  
-@@ -712,6 +875,213 @@
+@@ -712,6 +929,268 @@
  static inline u32 eval_adios_state(struct adios_data *ad, u32 shift)
  { return eval_this_adios_state(get_adios_state(ad), shift); }
  
@@ -364,17 +453,28 @@ the lock was acquired, which it is.
 +// compliance_flags/FIXORDER switch: instead of the operator guessing
 +// when the model is "warm enough", each optype gates itself based on
 +// what it has actually learned so far.
-+static inline bool model_is_confident(struct adios_data *ad, u8 optype) {
++// CHATGPT-REVIEW FIX #2: was small_count-only, meaning any workload
++// dominated by large I/O (file copies, APK installs, sequential
++// restores -- exactly the case a review of this patch flagged) could
++// pass thousands of large-bucket completions through the model and
++// STILL never be "confident", because small_count (an unrelated
++// bucket) stayed near zero. Now checks the SAME bucket the request's
++// own block_size will actually use for prediction (see
++// latency_model_predict's identical size check), using the newly
++// added large_count field.
++static inline bool model_is_confident(struct adios_data *ad, u8 optype,
++		u64 block_size) {
 +	struct latency_model *model = &ad->latency_model[optype];
 +	struct latency_model_params *params;
-+	u64 small_count;
++	u64 count;
 +
 +	rcu_read_lock();
 +	params = rcu_dereference(model->params);
-+	small_count = params->small_count;
++	count = (block_size <= model->lm_block_size_threshold) ?
++		params->small_count : params->large_count;
 +	rcu_read_unlock();
 +
-+	return small_count >= ad->lm_confidence_samples;
++	return count >= READ_ONCE(ad->lm_confidence_samples);
 +}
 +
 +// SAGA #6: effective admission limit for this optype right now --
@@ -386,10 +486,15 @@ the lock was acquired, which it is.
 +static inline u32 effective_batch_limit(struct adios_data *ad, u8 optype) {
 +	u32 base = ad->batch_limit[optype];
 +	s32 mult = atomic_read(&ad->depth_multiplier_permille[optype]);
++	u64 effective; // CHATGPT-REVIEW: u32*u32 could theoretically overflow
++	               // if batch_limit were set to an extreme value via
++	               // sysfs combined with a high multiplier -- unlikely
++	               // in practice but free to do correctly.
 +
 +	if (optype != ADIOS_READ && optype != ADIOS_WRITE)
 +		return base; // controller only manages read/write, see struct comment
-+	return max_t(u32, 1, (base * (u32)mult) / 1000);
++	effective = ((u64)base * (u32)mult) / 1000;
++	return (u32)max_t(u64, 1, effective);
 +}
 +
 +// SAGA #6: windowed good/bad classification + hysteresis adjustment,
@@ -429,8 +534,8 @@ the lock was acquired, which it is.
 +
 +	// SAGA: own classification bar, decoupled from #3 (see struct
 +	// comment on lm_adapt_good_ratio_pct/lm_adapt_bad_ratio_pct).
-+	good_bound = (pred_lat * ad->lm_adapt_good_ratio_pct) / 100;
-+	bad_bound  = (pred_lat * ad->lm_adapt_bad_ratio_pct) / 100;
++	good_bound = (pred_lat * READ_ONCE(ad->lm_adapt_good_ratio_pct)) / 100;
++	bad_bound  = (pred_lat * READ_ONCE(ad->lm_adapt_bad_ratio_pct)) / 100;
 +
 +	if (latency > bad_bound)
 +		atomic_inc(&ad->window_bad[optype]);
@@ -442,30 +547,54 @@ the lock was acquired, which it is.
 +	if (total < ad->lm_adapt_window_samples)
 +		return;
 +
++	// CHATGPT-REVIEW FIX #1: exclusive ownership of the evaluate+reset
++	// step via cmpxchg. If another CPU is already evaluating this
++	// optype's window (flag already 1), this CPU just bails -- its
++	// extra increment either got folded into the window that's about
++	// to be evaluated, or will start counting the next one. Either way
++	// is fine for a heuristic controller; what's NOT fine is two CPUs
++	// both evaluating+resetting concurrently, which is the actual bug.
++	if (atomic_cmpxchg(&ad->window_evaluating[optype], 0, 1) != 0)
++		return;
++
 +	{
 +		u32 good = atomic_xchg(&ad->window_good[optype], 0);
 +		u32 bad  = atomic_xchg(&ad->window_bad[optype], 0);
 +		atomic_set(&ad->window_total[optype], 0);
++		unsigned long now_j = jiffies;
++		unsigned long cooldown_j =
++			msecs_to_jiffies(ad->lm_adapt_cooldown_ms);
++		bool in_cooldown = time_before(now_j,
++			ad->last_adjust_jiffies[optype] + cooldown_j);
 +
 +		good_ratio = (good * 100) / total;
 +		bad_ratio  = (bad  * 100) / total;
 +
-+		if (bad_ratio >= ad->lm_adapt_bad_threshold_pct) {
-+			s32 cur = atomic_read(&ad->depth_multiplier_permille[optype]);
-+			s32 next = cur - (s32)ad->lm_adapt_step_permille;
-+			if (next < (s32)ad->lm_adapt_min_permille)
-+				next = ad->lm_adapt_min_permille;
-+			atomic_set(&ad->depth_multiplier_permille[optype], next);
-+		} else if (good_ratio >= ad->lm_adapt_good_threshold_pct) {
-+			s32 cur = atomic_read(&ad->depth_multiplier_permille[optype]);
-+			s32 next = cur + (s32)ad->lm_adapt_step_permille;
-+			if (next > (s32)ad->lm_adapt_max_permille)
-+				next = ad->lm_adapt_max_permille;
-+			atomic_set(&ad->depth_multiplier_permille[optype], next);
++		// CHATGPT-REVIEW FIX (cooldown): skip the actual adjustment if
++		// we changed the multiplier too recently, even though the
++		// window itself still resets on schedule (keeps sample
++		// classification timely; only the ACTION is rate-limited).
++		if (!in_cooldown) {
++			if (bad_ratio >= ad->lm_adapt_bad_threshold_pct) {
++				s32 cur = atomic_read(&ad->depth_multiplier_permille[optype]);
++				s32 next = cur - (s32)ad->lm_adapt_step_down_permille;
++				if (next < (s32)ad->lm_adapt_min_permille)
++					next = ad->lm_adapt_min_permille;
++				atomic_set(&ad->depth_multiplier_permille[optype], next);
++				ad->last_adjust_jiffies[optype] = now_j;
++			} else if (good_ratio >= ad->lm_adapt_good_threshold_pct) {
++				s32 cur = atomic_read(&ad->depth_multiplier_permille[optype]);
++				s32 next = cur + (s32)ad->lm_adapt_step_permille;
++				if (next > (s32)ad->lm_adapt_max_permille)
++					next = ad->lm_adapt_max_permille;
++				atomic_set(&ad->depth_multiplier_permille[optype], next);
++				ad->last_adjust_jiffies[optype] = now_j;
++			}
++			// else: dead zone, multiplier unchanged -- this is the
++			// hysteresis that keeps the controller from oscillating on
++			// every window when the ratio sits between the two thresholds.
 +		}
-+		// else: dead zone, multiplier unchanged -- this is the
-+		// hysteresis that keeps the controller from oscillating on
-+		// every window when the ratio sits between the two thresholds.
++		atomic_set(&ad->window_evaluating[optype], 0);
 +	}
 +}
 +
@@ -495,6 +624,7 @@ the lock was acquired, which it is.
 +	if (new_params->large_sum_bsize >> reduction) {
 +		new_params->large_sum_delay -= new_params->large_sum_delay >> reduction;
 +		new_params->large_sum_bsize -= new_params->large_sum_bsize >> reduction;
++		new_params->large_count    -= new_params->large_count     >> reduction;
 +	}
 +	rcu_assign_pointer(model->params, new_params);
 +	spin_unlock_irqrestore(&model->update_lock, flags);
@@ -512,13 +642,27 @@ the lock was acquired, which it is.
 +// boosting them would fight the write-deprioritization the rest of
 +// ADIOS already does on purpose.
 +static bool task_was_idle_and_gets_boost(struct adios_data *ad) {
-+	pid_t tgid = task_tgid_nr(current);
-+	u64 now = ktime_get_ns();
-+	u64 idle_threshold_ns = (u64)ad->lm_interactive_idle_ms * NSEC_PER_MSEC;
++	pid_t tgid;
++	u64 now;
++	u64 idle_threshold_ns;
 +	unsigned long flags;
 +	int i, oldest_idx = 0;
 +	u64 oldest_seen = U64_MAX;
 +	bool boost = false;
++
++	// CHATGPT-REVIEW FIX: exclude kernel threads. A kworker doing I/O
++	// on behalf of some subsystem is not "user interaction" no matter
++	// how long it's been since its last read -- boosting it fights the
++	// whole point of this heuristic (prioritizing genuine foreground
++	// activity). Real find from the review: without this, background
++	// kernel work could occasionally look "interactive" and jump the
++	// queue ahead of an actual foreground read.
++	if (current->flags & PF_KTHREAD)
++		return false;
++
++	tgid = task_tgid_nr(current);
++	now = ktime_get_ns();
++	idle_threshold_ns = (u64)READ_ONCE(ad->lm_interactive_idle_ms) * NSEC_PER_MSEC;
 +
 +	// SAGA: trylock instead of a blocking lock. This runs on EVERY sync
 +	// read insert -- the hottest path in the scheduler for a read-heavy
@@ -565,7 +709,7 @@ the lock was acquired, which it is.
  // Add a request to the deadline-sorted red-black tree
  static void add_to_dl_tree(
  		struct adios_data *ad, bool dl_idx, struct request *rq) {
-@@ -729,11 +1099,38 @@
+@@ -729,11 +1208,39 @@
  	 * - basically needs to be processed in early time */
  	rd->deadline = rq->start_time_ns;
  
@@ -579,8 +723,9 @@ the lock was acquired, which it is.
 +	// a task that's been steadily reading all along.
 +	if ((rq->cmd_flags & REQ_SYNC) && adios_optype(rq) == ADIOS_READ &&
 +			task_was_idle_and_gets_boost(ad)) {
-+		if (rd->deadline > ad->lm_interactive_boost_ns)
-+			rd->deadline -= ad->lm_interactive_boost_ns;
++		u64 boost_ns = READ_ONCE(ad->lm_interactive_boost_ns);
++		if (rd->deadline > boost_ns)
++			rd->deadline -= boost_ns;
 +		else
 +			rd->deadline = 0;
 +	}
@@ -601,11 +746,11 @@ the lock was acquired, which it is.
 +		// predictions -- it behaves like FIXORDER until it has earned
 +		// the right not to, per optype, independently.
 +		if (!compliant(ad, ADIOS_CF_FIXORDER) &&
-+				model_is_confident(ad, adios_optype(rq)))
++				model_is_confident(ad, adios_optype(rq), blk_rq_bytes(rq)))
  			rd->deadline += rd->pred_lat;
  	}
  
-@@ -1134,7 +1531,7 @@
+@@ -1134,7 +1641,7 @@
  
  		// Check batch size and total predicted latency
  		if (count && (!has_base ||
@@ -614,7 +759,56 @@ the lock was acquired, which it is.
  				(tpl + added_lat + rd->pred_lat) > ad->global_latency_window)) {
  			stop = true;
  			break;
-@@ -1462,6 +1859,32 @@
+@@ -1397,8 +1904,21 @@
+ static void update_timer_callback(struct timer_list *t) {
+ 	struct adios_data *ad = from_timer(ad, t, update_timer);
+ 
+-	for (u8 optype = 0; optype < ADIOS_OPTYPES; optype++)
+-		latency_model_update(ad, &ad->latency_model[optype]);
++	for (u8 optype = 0; optype < ADIOS_OPTYPES; optype++) {
++		struct latency_model *lm = &ad->latency_model[optype];
++
++		latency_model_update(ad, lm);
++
++		// CHATGPT-REVIEW: drains the deferred shrink flag set from the
++		// completion path above. Runs in this timer's own context
++		// (softirq/process, not the I/O completion hot path), so the
++		// GFP_ATOMIC allocation inside force_shrink_model() no longer
++		// competes with real I/O completion for CPU time exactly when
++		// the device may already be under pressure (the situation that
++		// triggers a shrink in the first place).
++		if (atomic_xchg(&lm->shrink_pending, 0))
++			force_shrink_model(lm);
++	}
+ }
+ 
+ // Handle the completion of a request
+@@ -1446,6 +1966,24 @@
+ 
+ 	u64 latency = now - lct;
+ 
++	// CHATGPT-REVIEW FIX #3 (real finding, upstream's own metric, not
++	// something I introduced): `latency` above is the gap since the
++	// last completion ON THIS SAME CPU (or this request's own start
++	// time as a fallback) -- under continuous back-to-back load, that's
++	// closer to "inter-completion gap in a saturated pipeline" than
++	// true per-request service time. That's plausibly intentional for
++	// ADIOS's OWN regression model (a queue-pressure-aware quantity is
++	// arguably what you want for admission budgeting), so `latency`
++	// itself and its use in latency_model_input() below are left
++	// completely untouched. But #3/#6 (added in this patch series)
++	// interpret deviation from prediction as "did service get worse",
++	// which is a different question -- and under this metric, a change
++	// in CONCURRENCY (fewer in-flight requests, not slower hardware)
++	// can look identical to real degradation. Gets its own, unambiguous
++	// per-request true latency instead, computed once here since
++	// rq->io_start_time_ns is already confirmed non-zero above.
++	u64 true_latency = now - rq->io_start_time_ns;
++
+ 	u32 weight = 1;
+ 	if (ad->is_rotational) {
+ 		sector_t current_pos = blk_rq_pos(rq);
+@@ -1462,6 +2000,39 @@
  
  	local_irq_restore(flags);
  
@@ -626,28 +820,35 @@ the lock was acquired, which it is.
 +	// accuracy, and outliers are exactly the signal we want here.
 +	// Also feeds the #6 depth controller below with the SAME overrun
 +	// classification, so both mechanisms agree on what "bad" means.
++	// CHATGPT-REVIEW FIX #3: uses true_latency (this specific request's
++	// own elapsed time), not the shared inter-completion-gap `latency`
++	// -- see true_latency's own comment above for why.
 +	if (rd->pred_lat > 0) {
 +		struct latency_model *lm = &ad->latency_model[optype];
 +		u64 threshold = (rd->pred_lat * ad->lm_overrun_ratio_pct) / 100;
-+		bool is_overrun = latency > threshold;
++		bool is_overrun = true_latency > threshold;
 +
 +		if (is_overrun) {
 +			if (atomic_inc_return(&lm->consec_overruns) >=
 +					ad->lm_overrun_trigger_count) {
 +				atomic_set(&lm->consec_overruns, 0);
-+				force_shrink_model(lm);
++				// CHATGPT-REVIEW: defer the actual shrink (allocation +
++				// RCU swap) to the timer instead of doing it here, on
++				// the completion hot path. timer_reduce below already
++				// guarantees the timer fires within 100ms regardless.
++				atomic_set(&lm->shrink_pending, 1);
 +			}
 +		} else {
 +			atomic_set(&lm->consec_overruns, 0);
 +		}
 +
-+		adapt_depth_controller(ad, optype, latency, rd->pred_lat);
++		adapt_depth_controller(ad, optype, true_latency, rd->pred_lat);
 +	}
 +
  	if (latency > ad->lat_model_latency_limit)
  		return;
  
-@@ -1594,11 +2017,58 @@
+@@ -1594,11 +2165,64 @@
  		model->lm_shrink_at_kreqs  = default_lm_shrink_at_kreqs;
  		model->lm_shrink_at_gbytes = default_lm_shrink_at_gbytes;
  		model->lm_shrink_resist    = default_lm_shrink_resist;
@@ -661,6 +862,7 @@ the lock was acquired, which it is.
 +		model->lm_interval_threshold_ms = LM_INTERVAL_THRESHOLD_DEFAULT;
 +		model->lm_samples_threshold     = LM_SAMPLES_THRESHOLD_DEFAULT;
 +		atomic_set(&model->consec_overruns, 0);
++		atomic_set(&model->shrink_pending, 0);
 +	}
 +
 +	// SAGA: auto-scale batch_limit defaults by the device's actual
@@ -676,7 +878,12 @@ the lock was acquired, which it is.
 +	// path again (manual sysfs override still can, deliberately).
 +	{
 +		const u32 baseline_qd = 32;
-+		u32 scale_permille = (q->nr_requests * 1000) / baseline_qd;
++		// CHATGPT-REVIEW: cast to u64 before multiplying -- q->nr_requests
++		// is realistically in the tens-to-low-thousands range on any
++		// real device, so this never actually overflows in practice, but
++		// costs nothing to do correctly.
++		u32 scale_permille =
++			(u32)(((u64)q->nr_requests * 1000) / baseline_qd);
 +
 +		if (scale_permille < 500)  scale_permille = 500;   // floor 0.5x
 +		if (scale_permille > 4000) scale_permille = 4000;  // ceil 4x
@@ -710,7 +917,7 @@ the lock was acquired, which it is.
  	}
  
  	eq->elevator_data = ad;
-@@ -1607,9 +2077,54 @@
+@@ -1607,9 +2231,58 @@
  	ad->global_latency_window = (ad->is_rotational)?
  		default_global_latency_window_rotational:
  		default_global_latency_window;
@@ -752,6 +959,8 @@ the lock was acquired, which it is.
 +	ad->lm_adapt_bad_ratio_pct = default_lm_adapt_bad_ratio_pct;
 +	ad->lm_adapt_good_threshold_pct = default_lm_adapt_good_threshold_pct;
 +	ad->lm_adapt_step_permille = default_lm_adapt_step_permille;
++	ad->lm_adapt_step_down_permille = default_lm_adapt_step_down_permille;
++	ad->lm_adapt_cooldown_ms = default_lm_adapt_cooldown_ms;
 +	ad->lm_adapt_min_permille = default_lm_adapt_min_permille;
 +	ad->lm_adapt_max_permille = default_lm_adapt_max_permille;
 +	for (optype = 0; optype < ADIOS_OPTYPES; optype++) {
@@ -759,13 +968,23 @@ the lock was acquired, which it is.
 +		atomic_set(&ad->window_bad[optype], 0);
 +		atomic_set(&ad->window_total[optype], 0);
 +		atomic_set(&ad->depth_multiplier_permille[optype], 1000);
++		atomic_set(&ad->window_evaluating[optype], 0);
++		ad->last_adjust_jiffies[optype] = jiffies;
 +	}
  	ad->batch_order = default_batch_order;
 +	ad->dl_prio[0] = default_read_priority;
  	ad->compliance_flags = default_compliance_flags;
  
  	ad->models_stable = false;
-@@ -1813,6 +2328,25 @@
+@@ -1719,6 +2392,7 @@
+ 	new_params->slope = slope;
+ 	new_params->large_sum_delay = slope;
+ 	new_params->large_sum_bsize = 1024; /* Corresponds to 1 KiB */
++	new_params->large_count = 1;
+ 
+ 	lm_reset_pcpu_buckets(model);
+ 
+@@ -1813,6 +2487,25 @@
  		total_count, discard_count, read_count, write_count);
  }
  
@@ -791,7 +1010,24 @@ the lock was acquired, which it is.
  #define SYSFS_ULL_DECL(field, min_val, max_val) \
  static ssize_t adios_##field##_show( \
  		struct elevator_queue *e, char *page) { \
-@@ -1855,6 +2389,19 @@
+@@ -1827,7 +2520,7 @@
+ 	ret = kstrtoul(page, 10, &val); \
+ 	if (ret || val < (min_val) || val > (max_val)) \
+ 		return -EINVAL; \
+-	ad->field = val; \
++	WRITE_ONCE(ad->field, val); \
+ 	return count; \
+ }
+ 
+@@ -1848,13 +2541,59 @@
+ 	ret = kstrtoint(page, 10, &val); \
+ 	if (ret || val < (min_val) || val > (max_val)) \
+ 		return -EINVAL; \
+-	ad->field = val; \
++	WRITE_ONCE(ad->field, val); \
+ 	return count; \
+ }
+ 
  SYSFS_INT_DECL(bq_refill_below_ratio, 0, 100)
  SYSFS_INT_DECL(lat_model_latency_limit, 0, 2*NSEC_PER_SEC)
  SYSFS_INT_DECL(batch_order, ADIOS_BO_OPTYPE, !!ad->is_rotational)
@@ -802,16 +1038,58 @@ the lock was acquired, which it is.
 +SYSFS_INT_DECL(lm_interactive_boost_ns, 0, 2*NSEC_PER_SEC)
 +SYSFS_INT_DECL(lm_adapt_window_samples, 4, 100000)
 +SYSFS_INT_DECL(lm_adapt_bad_threshold_pct, 1, 100)
-+SYSFS_INT_DECL(lm_adapt_good_ratio_pct, 100, 500)
-+SYSFS_INT_DECL(lm_adapt_bad_ratio_pct, 100, 500)
++// CHATGPT-REVIEW FIX: good_ratio_pct/bad_ratio_pct and min/max_permille
++// were independently bounded but not cross-validated -- sysfs allowed
++// e.g. good=150/bad=110 (overlapping, order-dependent classification)
++// or min=2000/max=1000 (inverted clamp range, silently broken
++// controller). These 4 custom setters replace the generic
++// SYSFS_INT_DECL for just these fields, adding the cross-check.
++#define SYSFS_INT_DECL_PAIRED(field, min_val, max_val, other_field, is_lower) \
++static ssize_t adios_##field##_show( \
++		struct elevator_queue *e, char *page) { \
++	struct adios_data *ad = e->elevator_data; \
++	return sprintf(page, "%d\n", ad->field); \
++} \
++static ssize_t adios_##field##_store( \
++		struct elevator_queue *e, const char *page, size_t count) { \
++	struct adios_data *ad = e->elevator_data; \
++	int val; \
++	int ret; \
++	ret = kstrtoint(page, 10, &val); \
++	if (ret || val < (min_val) || val > (max_val)) \
++		return -EINVAL; \
++	if (is_lower) { \
++		if (val >= (int)ad->other_field) \
++			return -EINVAL; \
++	} else { \
++		if (val <= (int)ad->other_field) \
++			return -EINVAL; \
++	} \
++	WRITE_ONCE(ad->field, val); \
++	return count; \
++}
++
++SYSFS_INT_DECL_PAIRED(lm_adapt_good_ratio_pct, 100, 500, lm_adapt_bad_ratio_pct, 1)
++SYSFS_INT_DECL_PAIRED(lm_adapt_bad_ratio_pct, 100, 500, lm_adapt_good_ratio_pct, 0)
 +SYSFS_INT_DECL(lm_adapt_good_threshold_pct, 1, 100)
 +SYSFS_INT_DECL(lm_adapt_step_permille, 10, 1000)
-+SYSFS_INT_DECL(lm_adapt_min_permille, 50, 1000)
-+SYSFS_INT_DECL(lm_adapt_max_permille, 1000, 10000)
++SYSFS_INT_DECL(lm_adapt_step_down_permille, 10, 1000)
++SYSFS_INT_DECL(lm_adapt_cooldown_ms, 0, 60000)
++SYSFS_INT_DECL_PAIRED(lm_adapt_min_permille, 50, 1000, lm_adapt_max_permille, 1)
++SYSFS_INT_DECL_PAIRED(lm_adapt_max_permille, 1000, 10000, lm_adapt_min_permille, 0)
  
  // Show the read priority
  static ssize_t adios_read_priority_show(
-@@ -1987,6 +2534,49 @@
+@@ -1875,7 +2614,7 @@
+ 		return -EINVAL;
+ 
+ 	guard(spinlock_irqsave)(&ad->lock);
+-	ad->dl_prio[0] = prio;
++	WRITE_ONCE(ad->dl_prio[0], prio);
+ 	ad->dl_bias = 0;
+ 
+ 	return count;
+@@ -1987,6 +2726,49 @@
  SHRINK_THRESHOLD_ATTR_RW(at_gbytes, lm_shrink_at_gbytes, 1,   1000)
  SHRINK_THRESHOLD_ATTR_RW(resist,    lm_shrink_resist,    1,      3)
  
@@ -861,7 +1139,7 @@ the lock was acquired, which it is.
  // Define sysfs attributes
  #define AD_ATTR(name, show_func, store_func) \
  	__ATTR(name, 0644, show_func, store_func)
-@@ -2003,6 +2593,21 @@
+@@ -2003,6 +2785,23 @@
  	AD_ATTR_RW(bq_refill_below_ratio),
  	AD_ATTR_RW(global_latency_window),
  	AD_ATTR_RW(lat_model_latency_limit),
@@ -877,13 +1155,15 @@ the lock was acquired, which it is.
 +	AD_ATTR_RW(lm_adapt_bad_ratio_pct),
 +	AD_ATTR_RW(lm_adapt_good_threshold_pct),
 +	AD_ATTR_RW(lm_adapt_step_permille),
++	AD_ATTR_RW(lm_adapt_step_down_permille),
++	AD_ATTR_RW(lm_adapt_cooldown_ms),
 +	AD_ATTR_RW(lm_adapt_min_permille),
 +	AD_ATTR_RW(lm_adapt_max_permille),
 +	AD_ATTR_RO(depth_controller),
  	AD_ATTR_RW(batch_order),
  	AD_ATTR_RW(compliance_flags),
  
-@@ -2022,6 +2627,11 @@
+@@ -2022,6 +2821,11 @@
  	AD_ATTR_RW(shrink_at_gbytes),
  	AD_ATTR_RW(shrink_resist),
  
