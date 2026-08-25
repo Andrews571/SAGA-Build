@@ -1,5 +1,5 @@
 name: "🌱 Kernel Source"
-run-name: "${{ inputs.force_adopt && format('🌊 Adopt fresh ACK | {0}-{1}-lts', inputs.android_version, inputs.kernel_version) || (inputs.target_stable_tag != '' && format('⚡ Catch-up | {0} | {1}-{2}-lts', inputs.target_stable_tag, inputs.android_version, inputs.kernel_version) || format('🌀 Sync live ACK | {0}-{1}-lts', inputs.android_version, inputs.kernel_version)) }}"
+run-name: "${{ inputs.promote_staging && format('⬆️ Promote staging → live | {0}-{1}', inputs.android_version, inputs.kernel_version) || (inputs.force_adopt && format('🌊 Adopt fresh ACK | {0}-{1}-lts', inputs.android_version, inputs.kernel_version) || (inputs.target_stable_tag != '' && format('⚡ Catch-up | {0} | {1}-{2}-lts', inputs.target_stable_tag, inputs.android_version, inputs.kernel_version) || format('🌀 Sync live ACK | {0}-{1}-lts', inputs.android_version, inputs.kernel_version))) }}"
 
 # The target repo (SAGA-Kernel-{version}, or SAGA-Kernel-{version}-mirror
 # for target=mirror) keeps real git history, so it can be merged against
@@ -56,6 +56,10 @@ on:
         default: ""
       force_adopt:
         description: "Adopt live ACK as a fresh base via a clean clone + force-push (normally only needed once, on the first run, or if history has diverged)"
+        type: boolean
+        default: false
+      promote_staging:
+        description: "Fast-forward live-staging onto live (no ACK/stable merge — just promotes what's already tested on staging). Can't be combined with force_adopt or target_stable_tag; target must be live."
         type: boolean
         default: false
 
@@ -116,6 +120,23 @@ jobs:
           else
             echo "PUSH_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-live" >> $GITHUB_ENV
           fi
+
+          # promote_staging is a standalone action (fast-forward
+          # live-staging onto live) — it doesn't sync, doesn't merge
+          # anything, and has no business running alongside an adopt or a
+          # catch-up in the same dispatch, so those combos are a hard error
+          # rather than silently picking one behavior over the other.
+          if [ "${{ inputs.promote_staging }}" = "true" ]; then
+            if [ "${{ inputs.target }}" = "mirror" ]; then
+              echo "::error::promote_staging only applies to target=live — the mirror repo has no staging branch."
+              exit 1
+            fi
+            if [ "${{ inputs.force_adopt }}" = "true" ] || [ -n "${{ inputs.target_stable_tag }}" ]; then
+              echo "::error::promote_staging can't be combined with force_adopt or target_stable_tag. Run it on its own: target=live, promote_staging=true, everything else default."
+              exit 1
+            fi
+          fi
+          echo "STAGING_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-live-staging" >> $GITHUB_ENV
 
       # force_adopt path: full (non-shallow) clone from live ACK, pushed as
       # many small sequential checkpoints instead of one giant push.
@@ -276,7 +297,7 @@ jobs:
       # Everything below only runs when NOT adopting — normal incremental
       # sync against a target repo that already has real ACK history.
       - name: "Clone target repo (SAGA-Kernel)"
-        if: ${{ inputs.force_adopt == false }}
+        if: ${{ inputs.force_adopt == false && inputs.promote_staging == false }}
         run: |
           REPO_URL="https://Andrews571:${{ secrets.KERNEL_SYNC_TOKEN }}@github.com/Andrews571/${TARGET_REPO}.git"
           # Full (non-shallow) clone — not depth-limited anymore. Two hard
@@ -324,7 +345,7 @@ jobs:
           git config user.email "Andrews571@users.noreply.github.com"
 
       - name: "Fetch + merge live ACK (${{ inputs.android_version }}-${{ inputs.kernel_version }} + ${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts)"
-        if: ${{ inputs.force_adopt == false }}
+        if: ${{ inputs.force_adopt == false && inputs.promote_staging == false }}
         run: |
           cd kernel-work
           git remote add ack-live "https://android.googlesource.com/kernel/common"
@@ -440,7 +461,7 @@ jobs:
           echo "Caught up to ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} (target: ${{ inputs.target_stable_tag }})"
 
       - name: "Push"
-        if: ${{ inputs.force_adopt == false }}
+        if: ${{ inputs.force_adopt == false && inputs.promote_staging == false }}
         run: |
           cd kernel-work
           # Explicit refspec, not just `git push origin ${PUSH_BRANCH}` —
@@ -449,3 +470,38 @@ jobs:
           # clone, but the push destination is always PUSH_BRANCH.
           git push origin "HEAD:refs/heads/${PUSH_BRANCH}"
           echo "Pushed ${TARGET_REPO}@${PUSH_BRANCH}"
+
+      - name: "Promote live-staging → live (fast-forward)"
+        if: ${{ inputs.promote_staging == true }}
+        run: |
+          REPO_URL="https://Andrews571:${{ secrets.KERNEL_SYNC_TOKEN }}@github.com/Andrews571/${TARGET_REPO}.git"
+
+          git clone --branch "${STAGING_BRANCH}" --progress "${REPO_URL}" kernel-work || {
+            echo "::error::Couldn't clone ${STAGING_BRANCH} — does it exist on ${TARGET_REPO}?"
+            exit 1
+          }
+          cd kernel-work
+          git config user.name "Andrews571"
+          git config user.email "Andrews571@users.noreply.github.com"
+
+          # live-staging only ever gets created by cloning live and merging
+          # ACK/stable on top of it (see the Clone step above) — so
+          # promoting it back onto live is always meant to be a pure
+          # fast-forward, never a rewrite, never a force. If it ISN'T a
+          # fast-forward, live has moved on its own since this staging
+          # branch was created (e.g. a separate plain sync landed directly
+          # on live in between) — promoting blindly would silently drop
+          # that. Fail loudly instead; needs a human look, same philosophy
+          # as every other conflict path in this workflow.
+          git fetch origin "${TARGET_BRANCH}" --progress
+          if ! git merge-base --is-ancestor "origin/${TARGET_BRANCH}" HEAD; then
+            echo "::error::${STAGING_BRANCH} is not a fast-forward descendant of ${TARGET_BRANCH} — they've diverged. Diff the two branches and reconcile manually before promoting."
+            exit 1
+          fi
+
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+
+          VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
+          PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
+          SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
+          echo "Promoted ${TARGET_REPO}@${STAGING_BRANCH} onto @${TARGET_BRANCH} (now at ${VERSION}.${PATCHLEVEL}.${SUBLEVEL})"
