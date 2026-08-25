@@ -116,6 +116,16 @@ resolve_android_version() {
 #                this and "live" (see the cache key comment in
 #                setup-arsenal/action.yml).
 #                Repo: SAGA-Kernel-<ver>-mirror Branch: <android>-<ver>-live
+#
+#   ramabondanp  Snapshot of ramabondanp/android_kernel_common-6.1, adopted
+#                wholesale via mirror-reference.yml (history-wiped, single
+#                commit — NOT the real Linux/ACK history, so it can never
+#                take a target_stable_tag catch-up; re-run
+#                mirror-reference.yml against this branch to refresh it
+#                instead). Lives in the same repo as "live", on its own
+#                branch, kept separate from "live-staging" so it never
+#                collides with a real kernel-source.yml catch-up.
+#                Repo: SAGA-Kernel-<ver>        Branch: <android>-<ver>-ramabondanp
 resolve_kernel_source() {
     case "${KERNEL_SOURCE:-live}" in
         live)
@@ -130,8 +140,12 @@ resolve_kernel_source() {
             KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}-mirror"
             KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live"
             ;;
+        ramabondanp)
+            KERNEL_REPO_URL="https://github.com/Andrews571/SAGA-Kernel-${KERNEL_VERSION}"
+            KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-ramabondanp"
+            ;;
         *)
-            error "Unknown KERNEL_SOURCE: '${KERNEL_SOURCE}' — expected 'live', 'live-staging', or 'mirror'. Refusing to silently fall back (this is exactly how the mirror bug happened)."
+            error "Unknown KERNEL_SOURCE: '${KERNEL_SOURCE}' — expected 'live', 'live-staging', 'mirror', or 'ramabondanp'. Refusing to silently fall back (this is exactly how the mirror bug happened)."
             ;;
     esac
 }
