@@ -99,7 +99,7 @@ on:
       le9uo:
         description: "le9uo EXPERIMENTAL(Prevent system freezes)"
         type: boolean
-        default: false  
+        default: true  
       kcompressd:
         description: "kcompressd - optimize zram algorithms"
         type: boolean
@@ -107,11 +107,11 @@ on:
       schedutil:
         description: "Schedutil (force default governor, defends against vendor override)"
         type: boolean
-        default: false
+        default: true
       zram_ir:
         description: "Zram_ir - add multi_comp"
         type: boolean
-        default: true    
+        default: false    
       lto_mode:
         description: "LTO"
         type: choice
