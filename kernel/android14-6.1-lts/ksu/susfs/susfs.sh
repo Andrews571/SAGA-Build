@@ -157,8 +157,17 @@ CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
 CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
 CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 CONFIG_KSU_SUSFS_SUS_MAP=y
-CONFIG_KSU_SUSFS_SUS_SU=y
 CONFIGS
+    # SUS_SU (fake_state/fake_status/ksu_selinux_hide_enabled) isn't
+    # implemented in pershoot/KernelSU-Next's dev-susfs fork's own
+    # selinux.c/selinuxfs.c — only referenced there, with no definitions,
+    # causing undefined-symbol link errors for KSUNEXT+SUSFS specifically
+    # (confirmed via real build, run 28793310460). SukiSU/ReSukiSU use
+    # simonpunk/susfs4ksu, which does implement sus_su.c fully, so they're
+    # unaffected. Leave disabled for KSUNEXT until pershoot's fork ships it.
+    if [ "$KERNEL_VARIANT" != "KSUNEXT" ]; then
+        echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
+    fi
 fi
 log "SuSFS configs enabled ✅"
 
