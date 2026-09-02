@@ -1,0 +1,61 @@
+diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
+index c93954613..c54c9a699 100644
+--- a/drivers/cpufreq/Kconfig
++++ b/drivers/cpufreq/Kconfig
+@@ -115,6 +115,23 @@ config CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+ 
+ endchoice
+ 
++config SAGA_FORCE_SCHEDUTIL
++	bool "SAGA: force default governor on every online/hotplug/resume"
++	depends on CPU_FREQ_GOV_SCHEDUTIL
++	default n
++	help
++	  Re-applies the compile-time default CPUFreq governor every time a
++	  policy comes online (boot, CPU hotplug, suspend/resume), instead
++	  of restoring the governor that was active before the CPU went
++	  offline.
++
++	  This only covers the online/hotplug/resume path. A vendor module
++	  that explicitly switches governor later (confirmed on some
++	  MediaTek SoCs, via a "sugov_ext" governor) is NOT covered here --
++	  see kernel/addons/schedutil/ in the SAGA-Build repo for a
++	  userspace late-boot script that handles that case instead. If
++	  unsure, say N.
++
+ config CPU_FREQ_GOV_PERFORMANCE
+ 	tristate "'performance' governor"
+ 	help
+diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+index bcb81cb56..c0212a02b 100644
+--- a/drivers/cpufreq/cpufreq.c
++++ b/drivers/cpufreq/cpufreq.c
+@@ -1076,6 +1076,20 @@ static int cpufreq_init_policy(struct cpufreq_policy *policy)
+ 	int ret;
+ 
+ 	if (has_target()) {
++#ifdef CONFIG_SAGA_FORCE_SCHEDUTIL
++		/*
++		 * Always re-apply the compile-time default governor instead
++		 * of restoring policy->last_governor -- see the Kconfig help
++		 * text for SAGA_FORCE_SCHEDUTIL for why (defends against a
++		 * vendor init.rc/HAL override surviving as the new
++		 * "last governor" across a hotplug/resume cycle). Does NOT
++		 * cover a vendor module explicitly switching governor after
++		 * this point runs -- see kernel/addons/schedutil/ for the
++		 * userspace-side fix for that case.
++		 */
++		gov = cpufreq_default_governor();
++		__module_get(gov->owner);
++#else
+ 		/* Update policy governor to the one used before hotplug. */
+ 		gov = get_governor(policy->last_governor);
+ 		if (gov) {
+@@ -1089,6 +1103,7 @@ static int cpufreq_init_policy(struct cpufreq_policy *policy)
+ 			gov = cpufreq_default_governor();
+ 			__module_get(gov->owner);
+ 		}
++#endif
+ 
+ 	} else {
+ 
