@@ -63,6 +63,22 @@ if [ -f "$ZRAM_KO" ]; then
     log "LZ4KD: zram.ko included in zip under modules/ (manual insmod required, see release notes) ✅"
 fi
 
+# SCHEDUTIL: bundle the late-boot governor-enforcement script so AK3's
+# own anykernel.sh installs it to /data/adb/service.d/ during flash —
+# see kernel/addons/schedutil/schedutil.sh for why this exists (a
+# vendor HAL on some MediaTek SoCs overrides the governor once, early
+# in boot, after the kernel's own default already took effect).
+if [ "${SCHEDUTIL_ENABLED:-false}" = "true" ]; then
+    SCHEDUTIL_SCRIPT="${SAGA_PATCH_DIR}/kernel/addons/schedutil/99schedutil.sh"
+    if [ -f "$SCHEDUTIL_SCRIPT" ]; then
+        mkdir -p "${TOOL_AK3_DIR}/service.d"
+        cp "$SCHEDUTIL_SCRIPT" "${TOOL_AK3_DIR}/service.d/99schedutil.sh"
+        log "SCHEDUTIL: 99schedutil.sh bundled for AK3 to install on flash ✅"
+    else
+        warn "SCHEDUTIL_ENABLED=true but 99schedutil.sh not found at ${SCHEDUTIL_SCRIPT} — zip will not include it"
+    fi
+fi
+
 ZIP_PATH="/tmp/${ZIP_NAME}"
 export ZIP_PATH ZIP_NAME
 cd "$TOOL_AK3_DIR"
