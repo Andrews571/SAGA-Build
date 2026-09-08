@@ -1,0 +1,109 @@
+From: SAGA <saga@users.noreply.github.com>
+Date: Tue, 8 Sep 2026 00:00:00 +0000
+Subject: [PATCH] sched/fair: gentler burst-penalty growth for top-app tasks (BORE)
+
+Incremental on top of "bore" + "bore-topapp" (0001-bore-topapp-latency-
+sensitive-discount.patch) in that order. Context is the post-bore-topapp
+state of kernel/sched/fair.c and kernel/sysctl.c.
+
+binary_smooth() already treats burst-penalty *decreases* as instant (a
+task that behaves well drops its penalty immediately) but *increases*
+are deliberately smoothed across sleep/wake cycles via
+sched_burst_smoothness, so one long burst doesn't tank a task's
+priority in one shot. That smoothing window is currently the same for
+every task.
+
+This patch adds a second, additive shift (sched_bore_topapp_smooth_boost,
+default 2, range 0-8) applied only when the task belongs to the
+top-app cgroup (task_group(p)->latency_sensitive, same signal used by
+bore-topapp). A larger shift means the *increase* ramps up more slowly
+-- so a foreground app that starts hammering the CPU (e.g. loading a
+level, decoding a big image) takes longer to accumulate the burst
+penalty that would otherwise start deprioritizing it, without ever
+touching how fast a well-behaved app recovers (that path is already
+instant and untouched).
+
+Default of 2 roughly quarters the growth rate on top of whatever
+sched_burst_smoothness already is (each +1 to the shift halves the
+per-cycle increment). Tune via
+/proc/sys/kernel/sched_bore_topapp_smooth_boost at runtime.
+
+Verified: applied cleanly (zero rejects, zero fuzz) on top of a real
+android14-6.1-lts + bore + bore-topapp tree.
+
+Signed-off-by: SAGA <saga@users.noreply.github.com>
+---
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -166,6 +166,7 @@
+ u8   __read_mostly sched_burst_smoothness      = 1;
+ u8   __read_mostly sched_burst_penalty_offset  = 24;
+ u8   __read_mostly sched_bore_topapp_discount  = 6;
++u8   __read_mostly sched_bore_topapp_smooth_boost = 2;
+ unsigned int __read_mostly sched_burst_penalty_scale   = 1536;
+ unsigned int __read_mostly sched_burst_cache_lifetime  = 75000000;
+ #endif
+@@ -659,11 +660,11 @@
+ 	return min_t(u8, 39, prio);
+ }
+ 
+-static inline u32 binary_smooth(u32 new, u32 old)
++static inline u32 binary_smooth(u32 new, u32 old, u8 extra_shift)
+ {
+ 	u32 is_growing = (new > old);
+ 	u32 increment = (new - old) * is_growing;
+-	u32 shift = sched_burst_smoothness;
++	u32 shift = sched_burst_smoothness + extra_shift;
+ 	u32 smoothed = old + ((increment + (1U << shift) - 1) >> shift);
+ 
+ 	return (new & ~(-is_growing)) | (smoothed & (-is_growing));
+@@ -701,7 +702,14 @@
+ 
+ static void restart_burst(struct sched_entity *se)
+ {
+-	se->prev_burst_penalty = binary_smooth(se->curr_burst_penalty, se->prev_burst_penalty);
++	u8 extra_shift = 0;
++
++	if (sched_bore_topapp_smooth_boost && entity_is_task(se) &&
++	    bore_topapp_boosted(task_of(se)))
++		extra_shift = sched_bore_topapp_smooth_boost;
++
++	se->prev_burst_penalty = binary_smooth(se->curr_burst_penalty,
++						se->prev_burst_penalty, extra_shift);
+ 	se->curr_burst_penalty = 0;
+ 	se->burst_time = 0;
+ 	update_burst_score(se);
+diff --git a/kernel/sysctl.c b/kernel/sysctl.c
++++ b/kernel/sysctl.c
+@@ -109,6 +109,7 @@
+ extern uint sched_burst_penalty_scale;
+ extern uint sched_burst_cache_lifetime;
+ extern u8 sched_bore_topapp_discount;
++extern u8 sched_bore_topapp_smooth_boost;
+ extern int sched_bore_update_handler(struct ctl_table *table, int write,
+ 	void __user *buffer, size_t *lenp, loff_t *ppos);
+ static int __maybe_unused two = 2;
+@@ -116,6 +117,7 @@
+ static int __maybe_unused sixty_four = 64;
+ static int __maybe_unused maxval_12_bits = 4095;
+ static int __maybe_unused thirty_nine = 39;
++static int __maybe_unused eight = 8;
+ #endif
+ 
+ #ifdef CONFIG_PROC_SYSCTL
+@@ -1745,6 +1747,15 @@
+ 		.extra1		= SYSCTL_ZERO,
+ 		.extra2		= &thirty_nine,
+ 	},
++	{
++		.procname	= "sched_bore_topapp_smooth_boost",
++		.data		= &sched_bore_topapp_smooth_boost,
++		.maxlen		= sizeof(u8),
++		.mode		= 0644,
++		.proc_handler	= proc_dou8vec_minmax,
++		.extra1		= SYSCTL_ZERO,
++		.extra2		= &eight,
++	},
+ #endif
+ 	{
+ 		.procname	= "sysctl_writes_strict",

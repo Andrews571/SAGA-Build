@@ -1,0 +1,78 @@
+From: SAGA <saga@users.noreply.github.com>
+Date: Tue, 8 Sep 2026 00:00:00 +0000
+Subject: [PATCH] sched/core: don't fully inherit group's worst burst penalty for top-app forks (BORE)
+
+Incremental on top of "bore" + "bore-topapp" in that order. Context is
+the post-bore-topapp state of kernel/sched/core.c.
+
+sched_fork_bore() sets a newly forked task's prev_burst_penalty to
+max(own, inherited) -- the WORST burst penalty among its thread group /
+siblings / ancestor hub, depending on sched_burst_inherit_type. This
+exists so a new task in a CPU-heavy process doesn't get treated as
+"fresh" and unfairly win the scheduler for a moment; reasonable
+default.
+
+But it also means: when the foreground app spawns a new thread or
+process (a very common part of app cold-start and app-switch -- new
+render thread, new binder thread, a freshly exec'd process), that new
+task can start out already penalized because *some other* thread in
+its group happened to be busy a moment ago, even if that busy thread
+had nothing to do with what the user is waiting on right now. This is
+exactly the inverse problem of what bore-topapp already fixes for the
+live burst score -- here it's the *starting* score that's wrong.
+
+Fix: after computing `inherited`, if the forking task lands in the
+top-app cgroup, apply the same bounded sched_bore_topapp_discount used
+in effective_prio() (reused, not a new knob) to the inherited value
+before the max_t(). Units match: sched_bore_topapp_discount is in
+prio-index scale (0-39), inherited/prev_burst_penalty is raw burst
+penalty (8 fractional bits), hence the "<< 8" to align them -- same
+convention as the discount's use in bore-topapp's effective_prio()
+patch.
+
+This only ever lowers what the new task inherits; it does not touch
+its own subsequently-measured burst behavior, so it cannot mask actual
+CPU hogging by the new task itself once it starts running.
+
+Verified: applied cleanly (zero rejects, zero fuzz) on top of a real
+android14-6.1-lts + bore + bore-topapp tree.
+
+Signed-off-by: SAGA <saga@users.noreply.github.com>
+---
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -4533,6 +4533,7 @@
+ #ifdef CONFIG_SCHED_BORE
+ extern u8 sched_burst_inherit_type;
+ extern unsigned int sched_burst_cache_lifetime;
++extern u8 sched_bore_topapp_discount;
+ 
+ #define BORE_BC_TS_BITS   48
+ #define BORE_BC_TS_MASK   ((1ULL << BORE_BC_TS_BITS) - 1)
+@@ -4725,6 +4726,26 @@
+ 	}
+ 	read_unlock(&tasklist_lock);
+ 
++#ifdef CONFIG_UCLAMP_TASK_GROUP
++	/*
++	 * A freshly forked task in the top-app cgroup shouldn't start
++	 * behind just because a sibling/ancestor happened to be CPU-heavy
++	 * a moment ago -- that's exactly the cold-start case we want fast.
++	 * Same bounded discount as effective_prio(), just applied to the
++	 * inherited estimate instead of the live one (units: raw burst
++	 * penalty, 8 fractional bits -- see calc_burst_penalty()).
++	 */
++	if (sched_bore_topapp_discount) {
++		struct task_group *tg = task_group(p);
++
++		if (tg && tg->latency_sensitive) {
++			u16 discount = (u16)sched_bore_topapp_discount << 8;
++
++			inherited -= min_t(u16, inherited, discount);
++		}
++	}
++#endif
++
+ 	p->se.prev_burst_penalty = max_t(u16, p->se.prev_burst_penalty, inherited);
+ }
+ #endif /* CONFIG_SCHED_BORE */
