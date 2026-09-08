@@ -1,0 +1,127 @@
+From: SAGA <saga@users.noreply.github.com>
+Date: Mon, 7 Sep 2026 00:00:00 +0000
+Subject: [PATCH] sched/fair: BORE discount for cgroup-marked latency-sensitive tasks (top-app)
+
+Incremental on top of the "bore" addon (bore-android14-6.1-v6.8.0.patch).
+Requires that addon to have already run in the same ADDONS= list -- this
+patch's context is the post-BORE-patch state of kernel/sched/fair.c and
+kernel/sysctl.c, not stock ACK.
+
+Problem: BORE's effective_prio() only looks at behavioral history
+(se->burst_penalty, built from accumulated runtime since last
+sleep/yield). It has no notion of *why* a task matters -- it cannot
+distinguish a freshly-launched foreground app (which hasn't built up
+a "well-behaved" burst history yet) from a background task that
+happens to also sleep/wake a lot. Cold-starts and app-switches are
+exactly the case where this blind spot shows up as jank.
+
+Android already carries the signal BORE is missing: cpu.uclamp.latency_sensitive
+on a task's cgroup (task_group(p)->latency_sensitive, CONFIG_UCLAMP_TASK_GROUP,
+already =y in gki_defconfig -- see kernel/sched/sched.h and the
+uclamp.latency_sensitive cgroup file in kernel/sched/core.c). Userspace
+(ActivityManager / cpuset) already sets this bit to 1 for the top-app
+cgroup. This patch just wires BORE's priority calculation to read it.
+
+Change: effective_prio() now subtracts a bounded, sysctl-tunable
+discount (sched_bore_topapp_discount, default 6, range 0-39, same
+range as the priority delta itself) from the burst-penalty-derived
+priority addition when task_group(p)->latency_sensitive is set. It is
+a strict discount, never a boost past the task's non-BORE baseline
+priority (min_t floor at the existing burst_penalty=0 case), so a
+misconfigured cgroup cannot starve everything else -- it can only make
+BORE cheaper for tasks Android already flagged as foreground-critical.
+
+Default of 6 chosen to be noticeable but modest (max possible
+effective_prio addition is 39); tune via
+/proc/sys/kernel/sched_bore_topapp_discount at runtime, same as the
+existing sched_burst_* knobs, no rebuild needed to A/B it.
+
+Signed-off-by: SAGA <saga@users.noreply.github.com>
+---
+ kernel/sched/fair.c   | 23 ++++++++++++++++++++++-
+ kernel/sysctl.c       | 12 +++++++++++-
+ 2 files changed, 33 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 540f2bdd7..a1b2c3d4e 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -136,6 +136,7 @@ u8   __read_mostly sched_bore                  = 1;
+ u8   __read_mostly sched_burst_inherit_type    = 2;
+ u8   __read_mostly sched_burst_smoothness      = 1;
+ u8   __read_mostly sched_burst_penalty_offset  = 24;
++u8   __read_mostly sched_bore_topapp_discount  = 6;
+ unsigned int __read_mostly sched_burst_penalty_scale   = 1536;
+ unsigned int __read_mostly sched_burst_cache_lifetime  = 75000000;
+ #endif
+@@ -607,13 +608,33 @@ static inline u32 calc_burst_penalty(u64 burst_time)
+ 	return scaled_penalty - (overflow & ~(overflow >> 31));
+ }
+ 
++/*
++ * True when the task's cgroup has been marked latency-sensitive by
++ * userspace (Android sets this for the top-app cgroup via the
++ * cpu.uclamp.latency_sensitive cgroup file). Returns false, not an
++ * error, whenever the field isn't compiled in or the task has no
++ * group -- callers treat "unknown" the same as "not top-app".
++ */
++#ifdef CONFIG_UCLAMP_TASK_GROUP
++static inline bool bore_topapp_boosted(struct task_struct *p)
++{
++	struct task_group *tg = task_group(p);
++
++	return tg && tg->latency_sensitive;
++}
++#else
++static inline bool bore_topapp_boosted(struct task_struct *p)
++{
++	return false;
++}
++#endif
++
+ static inline u8 effective_prio(struct task_struct *p)
+ {
+ 	u8 prio = p->static_prio - MAX_RT_PRIO;
+ 
+-	if (likely(sched_bore))
+-		prio += p->se.burst_penalty >> 8;
++	if (likely(sched_bore)) {
++		u8 penalty = p->se.burst_penalty >> 8;
++
++		if (sched_bore_topapp_discount && bore_topapp_boosted(p))
++			penalty -= min_t(u8, penalty, sched_bore_topapp_discount);
++
++		prio += penalty;
++	}
+ 
+ 	return min_t(u8, 39, prio);
+ }
+diff --git a/kernel/sysctl.c b/kernel/sysctl.c
+index 3d71a97d6..f9e8a7b21 100644
+--- a/kernel/sysctl.c
++++ b/kernel/sysctl.c
+@@ -108,6 +108,7 @@ extern u8 sched_burst_inherit_type;
+ extern u8 sched_burst_smoothness;
+ extern u8 sched_burst_penalty_offset;
+ extern uint sched_burst_penalty_scale;
++extern u8 sched_bore_topapp_discount;
+ extern uint sched_burst_cache_lifetime;
+ extern int sched_bore_update_handler(struct ctl_table *table, int write,
+ 	void __user *buffer, size_t *lenp, loff_t *ppos);
++static int __maybe_unused thirty_nine = 39;
+@@ -1722,6 +1723,15 @@ static struct ctl_table kern_table[] = {
+ 		.mode		= 0644,
+ 		.proc_handler	= proc_douintvec,
+ 	},
++	{
++		.procname	= "sched_bore_topapp_discount",
++		.data		= &sched_bore_topapp_discount,
++		.maxlen		= sizeof(u8),
++		.mode		= 0644,
++		.proc_handler	= proc_dou8vec_minmax,
++		.extra1		= SYSCTL_ZERO,
++		.extra2		= &thirty_nine,
++	},
+ #endif
+ 	{
+ 		.procname	= "sysctl_writes_strict",
