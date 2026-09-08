@@ -39,6 +39,6 @@ apply_one() {
 apply_one "BORE-TOPAPP-SMOOTH" "0001-bore-topapp-smooth-boost.patch" \
     "kernel/sched/fair.c" "sched_bore_topapp_discount"
 apply_one "BORE-TOPAPP-FORK" "0002-bore-topapp-fork-inherit-discount.patch" \
-    "kernel/sched/core.c" "sched_bore_topapp_discount"
+    "kernel/sched/core.c" "sched_burst_inherit_type"
 
 log "BORE top-app ideas integrated ✅ (sched_bore_topapp_smooth_boost default 2, fork-inherit discount reusing sched_bore_topapp_discount)"
