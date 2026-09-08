@@ -5,24 +5,23 @@
 # by Masahito Suzuki (firelzrd)
 # Repo: https://github.com/firelzrd/adios
 # ======================================================
-# Backport to android14-6.1: elevator_get() instead of elevator_find_get()
-# (doesn't exist on 6.1), mq-deadline preserved as fallback default when
-# ADIOS default is not selected (this tree has no SSG scheduler — see the
-# patch header for how that was confirmed), a NULL pointer fix in
-# adios_completed_request() for UFS MCQ (rq->elv.priv[0] can be NULL for
-# requests that never went through elevator insert), adios_init() moved
-# from module_init() to subsys_initcall() so it always registers before
-# the UFS-MTK platform driver (also device_initcall-level) gets a chance
-# to probe, and a boot-time enforcer in block/genhd.c (re-asserts "adios"
-# on every disk queue a few times during early boot, same pattern as
-# BBRv3's tcp_congestion_control enforcer) — confirmed on real hardware
-# that the subsys_initcall fix alone wasn't enough: something in this
-# device's boot (vendor init, not traced further) still overwrites the
-# scheduler back to mq-deadline after the kernel's own choice.
+# v3.3.4-SAGA: base v3.2.0 backport (elevator_get() instead of
+# elevator_find_get() -- doesn't exist on 6.1, mq-deadline preserved as
+# fallback default, NULL pointer fix in adios_completed_request() for
+# UFS MCQ, subsys_initcall() timing fix, boot-time genhd.c enforcer)
+# MERGED with what used to be the separate "adios-tunable" addon's LM/
+# sysfs extension (model confidence gating, auto-scaled batch limits,
+# auto-decay detection, device-class heuristic, interactive-read boost,
+# adaptive depth controller, 15 tunable sysfs knobs) plus fixes from 3
+# independent review rounds. adios-tunable is now a SEPARATE, optional
+# addon again (see kernel/addons/adios-tunable/) -- it only carries the
+# small genhd logging bonus now, nothing this file doesn't already have.
+# Full rationale for every individual fix/feature is in this patch's own
+# header — see kernel/addons/adios/adios-android14-6.1-v3.3.4.patch.
 
-ADIOS_PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios/adios-android14-6.1-v3.2.0.patch"
+ADIOS_PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios/adios-android14-6.1-v3.3.4.patch"
 
-log "📦 Applying ADIOS I/O scheduler patch..."
+log "📦 Applying ADIOS I/O scheduler patch (v3.3.4-SAGA, LM/sysfs tunables merged in)..."
 [ -f "$ADIOS_PATCH" ] || error "ADIOS: patch file not found at ${ADIOS_PATCH}!"
 
 if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$ADIOS_PATCH" > /dev/null 2>&1; then
@@ -37,22 +36,16 @@ fi
 
 DEFCONFIG_FILE="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
 if ! grep -q "^CONFIG_MQ_IOSCHED_ADIOS=y" "$DEFCONFIG_FILE"; then
-    cat >> "$DEFCONFIG_FILE" << 'EOF'
+    cat >> "$DEFCONFIG_FILE" << 'DEFCONFIG_EOF'
 # ADIOS I/O scheduler (SAGA)
 CONFIG_MQ_IOSCHED_ADIOS=y
 CONFIG_MQ_IOSCHED_DEFAULT_ADIOS=y
-EOF
+DEFCONFIG_EOF
     log "ADIOS: CONFIG_MQ_IOSCHED_ADIOS + DEFAULT_ADIOS enabled ✅"
 fi
 
 log "ADIOS I/O scheduler integrated ✅"
 
-# Extracted from the patch filename itself (e.g. "...-v3.2.0.patch" -> "v3.2.0")
-# rather than hardcoded, so it can't silently go stale if the patch is ever
-# bumped to a new ADIOS release — same reasoning as SUSFS_VER's grep in
-# telegram.sh. Only meaningful within this job (GITHUB_ENV), consumed later
-# by telegram.sh for the per-variant JSON artifact that feeds the channel
-# post's Features page.
 ADIOS_VERSION=$(basename "$ADIOS_PATCH" | sed -n 's/.*-\(v[0-9.]*\)\.patch$/\1/p')
 if [ -n "$ADIOS_VERSION" ] && [ -n "${GITHUB_ENV:-}" ]; then
     echo "ADIOS_VERSION=${ADIOS_VERSION}" >> "$GITHUB_ENV"
