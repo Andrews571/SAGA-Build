@@ -1,45 +1,37 @@
 #!/usr/bin/env bash
 
 # ======================================================
-# 📦 ADDON — ADIOS Tunable LM (experimental, pos-adios)
+# 📦 ADDON — ADIOS genhd enforcer logging (optional, pos-adios)
 # Patch de terceiros, nao-upstream, nao testado em build real.
 # Depende do addon "adios" ja ter rodado antes (mesma ordem em ADDONS=).
 # ======================================================
-# 0002: adiciona sysfs novos ao ADIOS ja aplicado (confianca do modelo,
-#   auto-escala de fila, decaimento auto-detectado, heuristica de
-#   classe de dispositivo, boost interativo, controlador de profundidade
-#   adaptativo, constantes do modelo de latencia tunaveis) + correcoes
-#   de default (compliance_flags=0, batch_limit discard/other, etc).
-# 0003: adiciona logging real ao enforcer de scheduler padrao do SAGA
-#   (block/genhd.c) -- era completamente silencioso antes.
-# Ver o cabecalho de cada .patch pra detalhes/ressalvas completas.
+# A partir da v3.3.4-SAGA do addon "adios", TODO o conteudo que antes
+# vivia aqui (sysfs/LM tunables: confianca do modelo, auto-escala de
+# fila, decaimento auto-detectado, heuristica de classe de dispositivo,
+# boost interativo, controlador de profundidade adaptativo) ja esta
+# dentro do patch do addon "adios" -- nao existe mais nada pra "somar"
+# aqui em cima daquilo. Este addon agora e so o bonus de logging do
+# enforcer de scheduler padrao em block/genhd.c (0003), continua
+# genuinamente opcional e sem relacao com o funcionamento do ADIOS em
+# si -- so torna o enforcer visivel no dmesg/logcat.
+#
+# Corrigido nesta revisao: a versao anterior de 0003 tinha uma linha
+# malformada (hunk -/+ grudado sem quebra de linha) que fazia o
+# `patch --dry-run` falhar SEMPRE, silenciosamente engolido pelo
+# fallback "nao-fatal" abaixo -- ou seja, esse logging nunca chegou a
+# ser aplicado de fato em nenhum build ate agora. Ver o cabecalho do
+# proprio 0003-genhd-enforcer-logging.patch pra detalhes.
 
-ADIOS_TUNABLE_PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios-tunable/0002-adios-tunable-lm-and-persist-android.patch"
 GENHD_LOGGING_PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios-tunable/0003-genhd-enforcer-logging.patch"
 
-log "📦 Applying ADIOS tunable-LM patch (experimental)..."
-[ -f "$ADIOS_TUNABLE_PATCH" ] || error "ADIOS-TUNABLE: patch file not found at ${ADIOS_TUNABLE_PATCH}!"
-
-# Exige que o adios.c ja exista e ja tenha sido patcheado pelo addon "adios" -
-# senao o diff nao bate (esse patch eh incremental sobre o resultado dele).
-if ! grep -q "ADIOS_VERSION \"3.2.0\"" "${KERNEL_SRC}/block/adios.c" 2>/dev/null; then
+# Exige que o adios.c ja exista e ja tenha sido patcheado pelo addon
+# "adios" -- o patch de logging e incremental sobre o enforcer que o
+# addon "adios" adiciona a block/genhd.c.
+if ! grep -q "ADIOS_VERSION \"3.3.4-SAGA\"" "${KERNEL_SRC}/block/adios.c" 2>/dev/null; then
     error "ADIOS-TUNABLE: block/adios.c nao esta no estado esperado (rode o addon 'adios' antes deste na lista ADDONS=)"
 fi
 
-if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$ADIOS_TUNABLE_PATCH" > /dev/null 2>&1; then
-    log "ADIOS-TUNABLE: patch already applied, skipping."
-elif patch -p1 --fuzz=3 --dry-run --forward -d "$KERNEL_SRC" < "$ADIOS_TUNABLE_PATCH" > /dev/null 2>&1; then
-    patch -p1 --fuzz=3 --forward -d "$KERNEL_SRC" < "$ADIOS_TUNABLE_PATCH" \
-        || error "ADIOS-TUNABLE: patch apply failed!"
-    log "ADIOS-TUNABLE: patch applied ✅"
-else
-    error "ADIOS-TUNABLE: patch does not apply cleanly — conflict, or 'adios' addon ran with a different base than expected!"
-fi
-
-log "ADIOS tunable-LM sysfs integrated ✅"
-
-# --- genhd.c enforcer logging (nao-fatal se nao bater) ---
-log "📦 Applying genhd enforcer logging patch (experimental)..."
+log "📦 Applying genhd enforcer logging patch (optional)..."
 if [ -f "$GENHD_LOGGING_PATCH" ]; then
     if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$GENHD_LOGGING_PATCH" > /dev/null 2>&1; then
         log "GENHD-LOGGING: patch already applied, skipping."
@@ -54,4 +46,4 @@ else
     log "GENHD-LOGGING: arquivo nao encontrado em ${GENHD_LOGGING_PATCH}, pulando (nao fatal)"
 fi
 
-log "ADIOS tunable + genhd logging integrados ✅"
+log "genhd enforcer logging integrado ✅"

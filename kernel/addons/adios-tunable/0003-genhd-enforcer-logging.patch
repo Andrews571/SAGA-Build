@@ -110,4 +110,5 @@ NOT compiled/tested against a real android14-6.1 tree yet.
  	return 0;
  }
  late_initcall(saga_adios_enforce_init);
--#endif /* CONFIG_MQ_IOSCHED_DEFAULT_ADIOS */+#endif /* CONFIG_MQ_IOSCHED_DEFAULT_ADIOS */
+-#endif /* CONFIG_MQ_IOSCHED_DEFAULT_ADIOS */
++#endif /* CONFIG_MQ_IOSCHED_DEFAULT_ADIOS */
