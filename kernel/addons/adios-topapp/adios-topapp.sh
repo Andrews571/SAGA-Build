@@ -2,35 +2,42 @@
 
 # ======================================================
 # 📦 ADDON — ADIOS Top-App Deadline Bonus (experimental, pos-adios)
-# Patch proprio (SAGA), nao-upstream, nao testado em device real ainda.
+# Patch proprio (SAGA), nao-upstream.
 # Depende do addon "adios" ja ter rodado antes (mesma ordem em ADDONS=).
 # NAO verificado contra "adios-tunable" -- se usar os dois, cheque
 # conflito em add_to_dl_tree()/struct adios_data antes de confiar.
 # ======================================================
-# 0003: da um desconto tunavel (sysfs topapp_deadline_bonus, default
-#   4ms) no deadline de requests com ioprio elevado (RT, ou BE nivel
-#   0-1), fazendo elas saírem mais cedo na arvore rb ordenada por
-#   deadline. So tem efeito real se o seu task_profiles.json ja seta
-#   ioprio pro cgroup top-app -- ver cabecalho do .patch pra como
-#   checar isso no seu device antes de esperar resultado.
+# 0003: da um desconto tunavel (sysfs topapp_deadline_bonus) no deadline
+#   de requests com ioprio elevado (RT, ou BE nivel 0-1), fazendo elas
+#   saírem mais cedo na arvore rb ordenada por deadline.
+# 0004: o bonus nasce em 0 (desligado) e um timer proprio do ADIOS
+#   (mesmo padrao do update_timer que ja existe no arquivo) liga ele
+#   sozinho, dentro do kernel, 90s depois de anexar na queue -- sem
+#   init.rc, sem device tree, sem modulo. Tunavel via sysfs em runtime
+#   (topapp_deadline_bonus_target, topapp_activation_delay_ms).
 
-PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios-topapp/0003-adios-topapp-deadline-bonus.patch"
+apply_one() {
+    local name="$1" patch="${SAGA_PATCH_DIR}/kernel/addons/adios-topapp/$2" grep_needle="$3"
 
-log "📦 Applying ADIOS top-app deadline-bonus patch (experimental)..."
-[ -f "$PATCH" ] || error "ADIOS-TOPAPP: patch file not found at ${PATCH}!"
+    log "📦 Applying ${name} patch..."
+    [ -f "$patch" ] || error "${name}: patch file not found at ${patch}!"
 
-if ! grep -q "struct adios_data" "${KERNEL_SRC}/block/adios.c" 2>/dev/null; then
-    error "ADIOS-TOPAPP: block/adios.c nao esta no estado esperado (rode o addon 'adios' antes deste na lista ADDONS=)"
-fi
+    if ! grep -q "$grep_needle" "${KERNEL_SRC}/block/adios.c" 2>/dev/null; then
+        error "${name}: block/adios.c nao esta no estado esperado (verifique a ordem dos addons anteriores)"
+    fi
 
-if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$PATCH" > /dev/null 2>&1; then
-    log "ADIOS-TOPAPP: patch already applied, skipping."
-elif patch -p1 --fuzz=3 --dry-run --forward -d "$KERNEL_SRC" < "$PATCH" > /dev/null 2>&1; then
-    patch -p1 --fuzz=3 --forward -d "$KERNEL_SRC" < "$PATCH" \
-        || error "ADIOS-TOPAPP: patch apply failed!"
-    log "ADIOS-TOPAPP: patch applied ✅"
-else
-    error "ADIOS-TOPAPP: patch does not apply cleanly — conflict, or 'adios' addon ran with a different base than expected (e.g. adios-tunable also touched this file first)!"
-fi
+    if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$patch" > /dev/null 2>&1; then
+        log "${name}: patch already applied, skipping."
+    elif patch -p1 --fuzz=3 --dry-run --forward -d "$KERNEL_SRC" < "$patch" > /dev/null 2>&1; then
+        patch -p1 --fuzz=3 --forward -d "$KERNEL_SRC" < "$patch" \
+            || error "${name}: patch apply failed!"
+        log "${name}: patch applied ✅"
+    else
+        error "${name}: patch does not apply cleanly!"
+    fi
+}
 
-log "ADIOS top-app deadline bonus integrated ✅ (topapp_deadline_bonus sysfs, default 4ms — check ioprio is actually set for top-app on your device for this to have any effect)"
+apply_one "ADIOS-TOPAPP" "0003-adios-topapp-deadline-bonus.patch" "struct adios_data"
+apply_one "ADIOS-TOPAPP-SELFTIMER" "0004-adios-topapp-self-activation-timer.patch" "topapp_deadline_bonus_target"
+
+log "ADIOS top-app deadline bonus integrated ✅ — starts DISABLED, self-activates via in-kernel timer ~90s after queue attach (kernel.topapp_activation_delay_ms to tune, no userspace/init changes needed)"

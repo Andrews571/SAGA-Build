@@ -1,0 +1,171 @@
+From: SAGA <saga@users.noreply.github.com>
+Date: Wed, 9 Sep 2026 00:00:00 +0000
+Subject: [PATCH] block/adios: self-activate topapp_deadline_bonus via in-kernel timer
+
+Incremental on top of "adios" + "adios-topapp"
+(0003-adios-topapp-deadline-bonus.patch) in that order.
+
+Root cause of the earlier bootloop: the deadline bonus was classifying
+requests by IO priority class (RT / high BE), on the assumption that
+only the top-app cgroup would carry that on this device. That doesn't
+hold during early boot -- some boot-time daemon(s) on the affected
+device/ROM also run with an elevated ioprio for unrelated reasons, and
+with the bonus active from kernel init, they got the same deadline
+discount, which appears to have starved sequential mount/verification
+IO badly enough to trip the boot watchdog. This is a boot-*timing*
+problem, not a misclassification of who's-the-foreground-app -- so the
+fix is to not be active during boot at all, regardless of who would
+trip the classifier.
+
+Two ways to gate that: wait for an Android userspace signal
+(sys.boot_completed via init.rc), or self-time it entirely inside the
+kernel. This patch does the latter, on request: no init.rc trigger, no
+device-tree change, no separate kernel module -- the scheduler arms a
+one-shot timer_list on its own queue attach and flips the bonus on by
+itself topapp_activation_delay_ms later, the same way ADIOS already
+self-manages its existing update_timer for the latency model. Nothing
+outside this kernel patch is required for the feature to end up
+enabled.
+
+Note on the timer's epoch: it's armed inside adios_init_sched(), i.e.
+relative to when ADIOS actually attaches to its queue -- not an
+arbitrary "since kernel start" jiffies snapshot. On builds using
+CONFIG_MQ_IOSCHED_ADIOS_DEFAULT, that attach happens at storage-queue
+probe time, which is itself very early in kernel boot (well before
+Android userspace/init even starts) -- so in practice this lands close
+to "since kernel boot" anyway on such builds. It does NOT track
+Android's sys.boot_completed and isn't meant to; that's the whole
+point of doing this in-kernel.
+
+Change:
+- default_topapp_deadline_bonus now starts at 0 (disabled), same
+  rationale as before, just enforced differently.
+- New default_topapp_deadline_bonus_target (4ms) is the value the
+  timer switches the live bonus to once it fires.
+- New default_topapp_activation_delay_ms (90000, i.e. 90s) is how
+  long after this scheduler attaches to its queue before that switch
+  happens. 90s is a guess at "safely past first boot's mount/fsck/
+  dex2oat window" on GKI-class devices, not a measurement on your
+  specific hardware -- tune via sysfs, no rebuild needed, if boot
+  takes noticeably longer or shorter on your device.
+- topapp_activate_timer mirrors the existing update_timer exactly:
+  timer_setup() at init, one mod_timer() to arm it, del_timer_sync()
+  in adios_exit_sched() so there's no risk of the callback firing
+  against a freed ad if the queue is torn down before the delay
+  elapses.
+- Both new values are exposed read/write via sysfs
+  (topapp_deadline_bonus_target, topapp_activation_delay_ms), same
+  SYSFS_ULL_DECL/AD_ATTR_RW pattern as every other ADIOS tunable, so
+  you can re-tune or even force-activate early
+  (write topapp_deadline_bonus directly, bypasses the timer entirely)
+  without a rebuild.
+
+This supersedes the previous boot-gate approach (userspace sysfs write
+gated on sys.boot_completed via a separate .rc/.sh pair) -- that
+approach is no longer needed and those files should not be used
+alongside this patch.
+
+Verified: applied cleanly (zero rejects, zero fuzz, zero offset) on
+top of a freshly regenerated block/adios.c with 0003 applied first.
+
+Signed-off-by: SAGA <saga@users.noreply.github.com>
+---
+diff --git a/block/adios.c b/block/adios.c
++++ b/block/adios.c
+@@ -115,7 +115,18 @@
+ };
+ 
+ // Latency targets for each operation type
+-static u64 default_topapp_deadline_bonus = 4 * NSEC_PER_MSEC;
++/*
++ * Starts at 0 (disabled). There's no meaningful "top-app" this early,
++ * so activating immediately only ever risks catching boot-time
++ * daemons that happen to share an elevated ioprio (this is exactly
++ * what caused an earlier bootloop). Self-activates via
++ * topapp_activate_timer below, topapp_activation_delay_ms after this
++ * scheduler attaches to its queue -- fully in-kernel, no userspace
++ * signal, no init.rc, no module needed.
++ */
++static u64 default_topapp_deadline_bonus;
++static u64 default_topapp_deadline_bonus_target = 4 * NSEC_PER_MSEC;
++static u64 default_topapp_activation_delay_ms = 90000;
+ static u64 default_latency_target[ADIOS_OPTYPES] = {
+ 	[ADIOS_READ]    =     2ULL * NSEC_PER_MSEC,
+ 	[ADIOS_WRITE]   =  2000ULL * NSEC_PER_MSEC,
+@@ -249,6 +260,9 @@
+ 	u64 compliance_flags;
+ 	u64 latency_target[ADIOS_OPTYPES];
+ 	u64 topapp_deadline_bonus;
++	u64 topapp_deadline_bonus_target;
++	u64 topapp_activation_delay_ms;
++	struct timer_list topapp_activate_timer;
+ 	u32 batch_limit[ADIOS_OPTYPES];
+ 	u32 batch_actual_max_size[ADIOS_OPTYPES];
+ 	u32 batch_actual_max_total;
+@@ -1426,6 +1440,19 @@
+ 		latency_model_update(ad, &ad->latency_model[optype]);
+ }
+ 
++/*
++ * One-shot: fires topapp_activation_delay_ms after this scheduler was
++ * attached to its queue. Just flips the live bonus over to its
++ * target value; does not re-arm.
++ */
++static void topapp_activate_timer_callback(struct timer_list *t) {
++	struct adios_data *ad = from_timer(ad, t, topapp_activate_timer);
++
++	WRITE_ONCE(ad->topapp_deadline_bonus, ad->topapp_deadline_bonus_target);
++	pr_info("adios: topapp_deadline_bonus activated (%llu ns) after %llums\n",
++		ad->topapp_deadline_bonus_target, ad->topapp_activation_delay_ms);
++}
++
+ // Handle the completion of a request
+ static void adios_completed_request(struct request *rq, u64 now) {
+ 	struct adios_data *ad = rq->q->elevator->elevator_data;
+@@ -1626,6 +1653,8 @@
+ 		ad->batch_limit[optype] = default_batch_limit[optype];
+ 	}
+ 	ad->topapp_deadline_bonus = default_topapp_deadline_bonus;
++	ad->topapp_deadline_bonus_target = default_topapp_deadline_bonus_target;
++	ad->topapp_activation_delay_ms = default_topapp_activation_delay_ms;
+ 
+ 	eq->elevator_data = ad;
+ 
+@@ -1650,6 +1679,11 @@
+ 
+ 	timer_setup(&ad->update_timer, update_timer_callback, 0);
+ 
++	timer_setup(&ad->topapp_activate_timer, topapp_activate_timer_callback, 0);
++	if (ad->topapp_activation_delay_ms)
++		mod_timer(&ad->topapp_activate_timer,
++			jiffies + msecs_to_jiffies((unsigned int)ad->topapp_activation_delay_ms));
++
+ 	/* We dispatch from request queue wide instead of hw queue */
+ 	blk_queue_flag_set(QUEUE_FLAG_SQ_SCHED, q);
+ 
+@@ -1688,6 +1722,7 @@
+ 	struct adios_data *ad = e->elevator_data;
+ 
+ 	del_timer_sync(&ad->update_timer);
++	del_timer_sync(&ad->topapp_activate_timer);
+ 
+ 	WARN_ON_ONCE(!list_empty(&ad->barrier_queue));
+ 	for (int i = 0; i < 2; i++)
+@@ -1860,6 +1895,8 @@
+ SYSFS_ULL_DECL(global_latency_window, 0, ULLONG_MAX)
+ SYSFS_ULL_DECL(compliance_flags, 0, ULLONG_MAX)
+ SYSFS_ULL_DECL(topapp_deadline_bonus, 0, NSEC_PER_SEC)
++SYSFS_ULL_DECL(topapp_deadline_bonus_target, 0, NSEC_PER_SEC)
++SYSFS_ULL_DECL(topapp_activation_delay_ms, 0, 600000ULL)
+ 
+ #define SYSFS_INT_DECL(field, min_val, max_val) \
+ static ssize_t adios_##field##_show( \
+@@ -2051,6 +2088,8 @@
+ 
+ 	AD_ATTR_RW(read_priority),
+ 	AD_ATTR_RW(topapp_deadline_bonus),
++	AD_ATTR_RW(topapp_deadline_bonus_target),
++	AD_ATTR_RW(topapp_activation_delay_ms),
+ 
+ 	AD_ATTR_WO(reset_bq_stats),
+ 	AD_ATTR_WO(reset_lat_model),
