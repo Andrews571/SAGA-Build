@@ -1,6 +1,6 @@
 import sys
 
-MARKER = "luminaire: force MGLRU on (core-only test)"
+MARKER = "SAGA: force MGLRU on (core-only test)"
 
 # --- Anchor 1: request only CORE on write --------------------------------
 CAPS_ANCHOR = (
