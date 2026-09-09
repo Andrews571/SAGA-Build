@@ -38,6 +38,6 @@ apply_one() {
 }
 
 apply_one "ADIOS-TOPAPP" "0003-adios-topapp-deadline-bonus.patch" "struct adios_data"
-apply_one "ADIOS-TOPAPP-SELFTIMER" "0004-adios-topapp-self-activation-timer.patch" "topapp_deadline_bonus_target"
+apply_one "ADIOS-TOPAPP-SELFTIMER" "0004-adios-topapp-self-activation-timer.patch" "adios_req_is_topapp"
 
 log "ADIOS top-app deadline bonus integrated ✅ — starts DISABLED, self-activates via in-kernel timer ~90s after queue attach (kernel.topapp_activation_delay_ms to tune, no userspace/init changes needed)"
