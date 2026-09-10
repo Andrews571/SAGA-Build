@@ -62,10 +62,10 @@ index 99bdd96f4..f2c422acc 100644
  #endif
 diff --git a/kernel/sched/cpufreq_reflex.c b/kernel/sched/cpufreq_reflex.c
 new file mode 100644
-index 000000000..65738791e
+index 000000000..5acc355f2
 --- /dev/null
 +++ b/kernel/sched/cpufreq_reflex.c
-@@ -0,0 +1,890 @@
+@@ -0,0 +1,902 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA REFLEX — CPUFreq governor
@@ -564,8 +564,8 @@ index 000000000..65738791e
 +
 +/************************** sysfs interface ************************/
 +
-+static struct rfx_tunables *global_tunables;
-+static DEFINE_MUTEX(global_tunables_lock);
++static struct rfx_tunables *rfx_global_tunables;
++static DEFINE_MUTEX(rfx_global_tunables_lock);
 +
 +static inline struct rfx_tunables *to_rfx_tunables(struct gov_attr_set *attr_set)
 +{
@@ -612,7 +612,7 @@ index 000000000..65738791e
 +#undef rfx_attr_show
 +#undef rfx_attr_store_uint
 +
-+static ssize_t rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
++static ssize_t rfx_rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
 +{
 +	struct rfx_tunables *tunables = to_rfx_tunables(attr_set);
 +
@@ -620,7 +620,7 @@ index 000000000..65738791e
 +}
 +
 +static ssize_t
-+rate_limit_us_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
++rfx_rate_limit_us_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
 +{
 +	struct rfx_tunables *tunables = to_rfx_tunables(attr_set);
 +	struct rfx_policy *rfx_policy;
@@ -637,10 +637,22 @@ index 000000000..65738791e
 +	return count;
 +}
 +
-+static struct governor_attr rate_limit_us = __ATTR_RW(rate_limit_us);
++/* Deliberately NOT using __ATTR_RW(rate_limit_us) here: that macro ties
++ * the sysfs filename to the C function names via token pasting, and
++ * rfx_rate_limit_us_show/_store are already renamed (see above) to avoid
++ * colliding with schedutil's own rate_limit_us_show/_store — both files
++ * live in the same translation unit (build_utility.c #includes both).
++ * Building the struct by hand keeps the sysfs file named "rate_limit_us"
++ * (matching schedutil's tunable, as documented in the addon) while the
++ * backing C symbols stay distinct. */
++static struct governor_attr rfx_rate_limit_us = {
++	.attr	= { .name = "rate_limit_us", .mode = 0644 },
++	.show	= rfx_rate_limit_us_show,
++	.store	= rfx_rate_limit_us_store,
++};
 +
 +static struct attribute *rfx_attrs[] = {
-+	&rate_limit_us.attr,
++	&rfx_rate_limit_us.attr,
 +	&hispeed_window_us_attr.attr,
 +	&hispeed_load_pct_attr.attr,
 +	&hispeed_freq_pct_attr.attr,
@@ -748,7 +760,7 @@ index 000000000..65738791e
 +	if (tunables) {
 +		gov_attr_set_init(&tunables->attr_set, &rfx_policy->tunables_hook);
 +		if (!have_governor_per_policy())
-+			global_tunables = tunables;
++			rfx_global_tunables = tunables;
 +	}
 +	return tunables;
 +}
@@ -756,7 +768,7 @@ index 000000000..65738791e
 +static void rfx_clear_global_tunables(void)
 +{
 +	if (!have_governor_per_policy())
-+		global_tunables = NULL;
++		rfx_global_tunables = NULL;
 +}
 +
 +static int rfx_init(struct cpufreq_policy *policy)
@@ -780,17 +792,17 @@ index 000000000..65738791e
 +	if (ret)
 +		goto free_rfx_policy;
 +
-+	mutex_lock(&global_tunables_lock);
++	mutex_lock(&rfx_global_tunables_lock);
 +
-+	if (global_tunables) {
++	if (rfx_global_tunables) {
 +		if (WARN_ON(have_governor_per_policy())) {
 +			ret = -EINVAL;
 +			goto stop_kthread;
 +		}
 +		policy->governor_data = rfx_policy;
-+		rfx_policy->tunables = global_tunables;
++		rfx_policy->tunables = rfx_global_tunables;
 +
-+		gov_attr_set_get(&global_tunables->attr_set, &rfx_policy->tunables_hook);
++		gov_attr_set_get(&rfx_global_tunables->attr_set, &rfx_policy->tunables_hook);
 +		goto out;
 +	}
 +
@@ -819,7 +831,7 @@ index 000000000..65738791e
 +		goto fail;
 +
 +out:
-+	mutex_unlock(&global_tunables_lock);
++	mutex_unlock(&rfx_global_tunables_lock);
 +	return 0;
 +
 +fail:
@@ -829,7 +841,7 @@ index 000000000..65738791e
 +
 +stop_kthread:
 +	rfx_kthread_stop(rfx_policy);
-+	mutex_unlock(&global_tunables_lock);
++	mutex_unlock(&rfx_global_tunables_lock);
 +
 +free_rfx_policy:
 +	rfx_policy_free(rfx_policy);
@@ -847,14 +859,14 @@ index 000000000..65738791e
 +	struct rfx_tunables *tunables = rfx_policy->tunables;
 +	unsigned int count;
 +
-+	mutex_lock(&global_tunables_lock);
++	mutex_lock(&rfx_global_tunables_lock);
 +
 +	count = gov_attr_set_put(&tunables->attr_set, &rfx_policy->tunables_hook);
 +	policy->governor_data = NULL;
 +	if (!count)
 +		rfx_clear_global_tunables();
 +
-+	mutex_unlock(&global_tunables_lock);
++	mutex_unlock(&rfx_global_tunables_lock);
 +
 +	rfx_kthread_stop(rfx_policy);
 +	rfx_policy_free(rfx_policy);
