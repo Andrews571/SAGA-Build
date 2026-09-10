@@ -1,0 +1,234 @@
+From: SAGA <saga@users.noreply.github.com>
+Date: Wed, 9 Sep 2026 00:00:00 +0000
+Subject: [PATCH] block/adios: top-app IO deadline bonus, self-activated via in-kernel timer
+
+REQUIRES the "adios" addon to already be at v3.3.4-SAGA
+(adios-android14-6.1-v3.3.4.patch, the merged base that folds in the
+former adios-tunable LM/sysfs extension). Context matched byte-for-
+byte against that exact file -- verified with `patch --fuzz=0`, zero
+rejects, zero offset.
+
+THIS PATCH REPLACES the previous two-file version of this feature
+(0003-adios-topapp-deadline-bonus.patch +
+0004-adios-topapp-self-activation-timer.patch). Delete both of those
+if present. Reason for the replacement, and for merging into a single
+file: those two were built and verified against the OLD
+adios-android14-6.1-v3.2.0.patch base. When the "adios" addon's base
+patch was independently upgraded to v3.3.4-SAGA (merging in the former
+adios-tunable extension), block/adios.c grew from ~2100 to ~3100 lines
+and several functions were restructured. `patch --fuzz=3` still
+"succeeded" applying the old files against the new base -- with
+offsets up to 1000 lines -- but landed content in a subtly wrong
+location inside adios_init_sched(), causing an immediate NULL/invalid
+pointer dereference (EL1 translation fault) at device probe on every
+boot (confirmed via pstore console-ramoops: crash at
+adios_init_sched+0x48, called from sd_probe -> device_add_disk ->
+elevator_init_mq -> blk_mq_init_sched, ~5s into boot). Splitting this
+into two separately-versioned files was what let that drift happen
+undetected; one file, explicitly version-pinned to v3.3.4-SAGA, is
+harder to silently apply against the wrong base.
+
+--- What this actually does (unchanged in intent from before) ---
+
+Part A -- classification + deadline discount (add_to_dl_tree):
+adios_req_is_topapp() reads req_get_ioprio(rq) (rq->ioprio, set from
+the submitting bio at allocation time) and classifies a request as
+latency-critical if its class is IOPRIO_CLASS_RT, or IOPRIO_CLASS_BE
+at level 0-1. This is the same signal BFQ/mq-deadline already use for
+this purpose. struct request has no cgroup reference by the time it
+reaches the elevator (blkcg is a separate controller attachment from
+the task's cpu/uclamp cgroup, and the submitting task_struct isn't
+reliably available this late), so this does NOT use
+task_group()->latency_sensitive the way the BORE-side patches do --
+that signal isn't available at this layer.
+Whether this has any effect at all depends on whether your Android
+build actually sets IO priority for the top-app cgroup (some
+task_profiles.json configs do via SetIoPriority/ioprio_set(); many
+don't). If it doesn't, adios_req_is_topapp() never returns true and
+this is a safe no-op.
+add_to_dl_tree() subtracts a bounded, sysfs-tunable nanosecond bonus
+(topapp_deadline_bonus) from the computed deadline right before
+quantization, for both sync and async requests -- moving matching
+requests earlier in the deadline-ordered RB-tree. Bounded by min_t so
+it can never push a deadline negative/wrap.
+
+Part B -- self-activation timer (the actual bootloop fix):
+topapp_deadline_bonus starts at 0 (disabled) -- there's no meaningful
+"top-app" during early boot, so activating immediately only risks
+catching boot-time daemons that happen to share an elevated ioprio for
+unrelated reasons (which is what caused the original bootloop; a
+different, separate crash from the version-mismatch one above -- see
+git history / earlier review rounds on this addon for that one).
+A one-shot timer_list (topapp_activate_timer), armed inside
+adios_init_sched() the same way the existing update_timer already is,
+fires topapp_activation_delay_ms (default 90000, i.e. 90s) after this
+scheduler attaches to its queue and flips topapp_deadline_bonus over
+to topapp_deadline_bonus_target (default 4ms) by itself -- no init.rc,
+no device-tree change, no separate kernel module. del_timer_sync() in
+adios_exit_sched() prevents any use-after-free if the queue is torn
+down before the delay elapses.
+Note on the timer's epoch: on builds using
+CONFIG_MQ_IOSCHED_ADIOS_DEFAULT, adios_init_sched() runs at storage-
+queue probe time -- itself very early in kernel boot, well before
+Android userspace/init starts -- so in practice 90s-from-that-point
+lands close to 90s-from-kernel-boot on such builds. It does not track
+Android's sys.boot_completed and isn't meant to.
+All three new values (topapp_deadline_bonus,
+topapp_deadline_bonus_target, topapp_activation_delay_ms) are exposed
+read/write via sysfs, same SYSFS_ULL_DECL/AD_ATTR_RW pattern as every
+other ADIOS tunable -- re-tunable, or force-activatable early by
+writing topapp_deadline_bonus directly, without a rebuild.
+
+Verified: `patch -p1 --fuzz=0` against a freshly reconstructed
+block/adios.c (adios-android14-6.1-v3.3.4.patch applied first) --
+zero rejects, zero fuzz, zero offset.
+
+Signed-off-by: SAGA <saga@users.noreply.github.com>
+---
+diff --git a/block/adios.c b/block/adios.c
++++ b/block/adios.c
+@@ -20,6 +20,7 @@
+ #include <linux/string.h>
+ #include <linux/list_sort.h>
+ #include <linux/rcupdate.h>
++#include <linux/ioprio.h>
+ #include <linux/sched.h>
+ #include <linux/workqueue.h>
+ 
+@@ -200,6 +201,17 @@
+ };
+ 
+ // Latency targets for each operation type
++/*
++ * Starts at 0 (disabled). There's no meaningful "top-app" this early,
++ * so activating immediately only ever risks catching boot-time
++ * daemons that happen to share an elevated ioprio. Self-activates via
++ * topapp_activate_timer below, topapp_activation_delay_ms after this
++ * scheduler attaches to its queue -- fully in-kernel, no userspace
++ * signal, no init.rc, no module needed.
++ */
++static u64 default_topapp_deadline_bonus;
++static u64 default_topapp_deadline_bonus_target = 4 * NSEC_PER_MSEC;
++static u64 default_topapp_activation_delay_ms = 90000;
+ static u64 default_latency_target[ADIOS_OPTYPES] = {
+ 	[ADIOS_READ]    =     2ULL * NSEC_PER_MSEC,
+ 	[ADIOS_WRITE]   =  2000ULL * NSEC_PER_MSEC,
+@@ -393,6 +405,10 @@
+ 	u64 global_latency_window;
+ 	u64 compliance_flags;
+ 	u64 latency_target[ADIOS_OPTYPES];
++	u64 topapp_deadline_bonus;
++	u64 topapp_deadline_bonus_target;
++	u64 topapp_activation_delay_ms;
++	struct timer_list topapp_activate_timer;
+ 	u32 batch_limit[ADIOS_OPTYPES];
+ 	u32 batch_actual_max_size[ADIOS_OPTYPES];
+ 	u32 batch_actual_max_total;
+@@ -1248,6 +1264,25 @@
+ 	return true;
+ }
+ 
++/*
++ * True when the request's IO priority marks it as belonging to a
++ * latency-critical submitter -- RT class outright, or the top tiers
++ * of the BE class (Android's task_profiles.json commonly assigns one
++ * of these to the top-app cgroup via ioprio_set()/SetIoPriority when
++ * configured to do so; harmless no-op otherwise, since default class
++ * for unconfigured processes is IOPRIO_CLASS_NONE/BE-4).
++ */
++static inline bool adios_req_is_topapp(struct request *rq) {
++	unsigned short ioprio = req_get_ioprio(rq);
++	unsigned short class = IOPRIO_PRIO_CLASS(ioprio);
++
++	if (class == IOPRIO_CLASS_RT)
++		return true;
++	if (class == IOPRIO_CLASS_BE && IOPRIO_PRIO_DATA(ioprio) <= 1)
++		return true;
++	return false;
++}
++
+ // Add a request to the deadline-sorted red-black tree
+ static void add_to_dl_tree(
+ 		struct adios_data *ad, bool dl_idx, struct request *rq) {
+@@ -1301,6 +1336,9 @@
+ 			rd->deadline += rd->pred_lat;
+ 	}
+ 
++	if (ad->topapp_deadline_bonus && adios_req_is_topapp(rq))
++		rd->deadline -= min_t(u64, rd->deadline, ad->topapp_deadline_bonus);
++
+ 	// Now quantize the deadline (-> dlg->deadline == RB-Tree key)
+ 	deadline = rd->deadline & ~((1ULL << ADIOS_QUANTUM_SHIFT) - 1);
+ 
+@@ -2006,6 +2044,19 @@
+ 		schedule_work(&ad->shrink_work);
+ }
+ 
++/*
++ * One-shot: fires topapp_activation_delay_ms after this scheduler was
++ * attached to its queue. Just flips the live bonus over to its
++ * target value; does not re-arm.
++ */
++static void topapp_activate_timer_callback(struct timer_list *t) {
++	struct adios_data *ad = from_timer(ad, t, topapp_activate_timer);
++
++	WRITE_ONCE(ad->topapp_deadline_bonus, ad->topapp_deadline_bonus_target);
++	pr_info("adios: topapp_deadline_bonus activated (%llu ns) after %llums\n",
++		ad->topapp_deadline_bonus_target, ad->topapp_activation_delay_ms);
++}
++
+ // CHATGPT-REVIEW FIX #4: force_shrink_model() moved here from the
+ // timer callback. Runs in a workqueue's own process context, not
+ // softirq and not the I/O completion hot path -- the allocation
+@@ -2336,6 +2387,10 @@
+ 
+ 	eq->elevator_data = ad;
+ 
++	ad->topapp_deadline_bonus = default_topapp_deadline_bonus;
++	ad->topapp_deadline_bonus_target = default_topapp_deadline_bonus_target;
++	ad->topapp_activation_delay_ms = default_topapp_activation_delay_ms;
++
+ 	ad->is_rotational = !blk_queue_nonrot(q);
+ 	ad->global_latency_window = (ad->is_rotational)?
+ 		default_global_latency_window_rotational:
+@@ -2409,6 +2464,12 @@
+ 	INIT_LIST_HEAD(&ad->barrier_queue);
+ 
+ 	timer_setup(&ad->update_timer, update_timer_callback, 0);
++
++	timer_setup(&ad->topapp_activate_timer, topapp_activate_timer_callback, 0);
++	if (ad->topapp_activation_delay_ms)
++		mod_timer(&ad->topapp_activate_timer,
++			jiffies + msecs_to_jiffies((unsigned int)ad->topapp_activation_delay_ms));
++
+ 	INIT_WORK(&ad->shrink_work, shrink_work_fn);
+ 
+ 	/* We dispatch from request queue wide instead of hw queue */
+@@ -2449,6 +2510,7 @@
+ 	struct adios_data *ad = e->elevator_data;
+ 
+ 	del_timer_sync(&ad->update_timer);
++	del_timer_sync(&ad->topapp_activate_timer);
+ 	cancel_work_sync(&ad->shrink_work);
+ 
+ 	WARN_ON_ONCE(!list_empty(&ad->barrier_queue));
+@@ -2641,6 +2703,9 @@
+ 
+ SYSFS_ULL_DECL(global_latency_window, 0, ULLONG_MAX)
+ SYSFS_ULL_DECL(compliance_flags, 0, ULLONG_MAX)
++SYSFS_ULL_DECL(topapp_deadline_bonus, 0, NSEC_PER_SEC)
++SYSFS_ULL_DECL(topapp_deadline_bonus_target, 0, NSEC_PER_SEC)
++SYSFS_ULL_DECL(topapp_activation_delay_ms, 0, 600000ULL)
+ 
+ #define SYSFS_INT_DECL(field, min_val, max_val) \
+ static ssize_t adios_##field##_show( \
+@@ -3023,6 +3088,9 @@
+ 	AD_ATTR_RW(lm_samples_threshold),
+ 
+ 	AD_ATTR_RW(read_priority),
++	AD_ATTR_RW(topapp_deadline_bonus),
++	AD_ATTR_RW(topapp_deadline_bonus_target),
++	AD_ATTR_RW(topapp_activation_delay_ms),
+ 
+ 	AD_ATTR_WO(reset_bq_stats),
+ 	AD_ATTR_WO(reset_lat_model),
