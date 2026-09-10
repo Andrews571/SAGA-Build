@@ -105,3 +105,11 @@ if [ "${SCHEDUTIL_ENABLED:-false}" = "true" ]; then
     SCHEDUTIL_STATE=$(config --state CONFIG_SAGA_FORCE_SCHEDUTIL 2>/dev/null || echo "unknown")
     log "SCHEDUTIL: CONFIG_SAGA_FORCE_SCHEDUTIL state after scripts/config --enable: ${SCHEDUTIL_STATE}"
 fi
+
+# REFLEX: disponibiliza o governor "reflex" como alternativa ao
+# schedutil, sem trocar o default — ver kernel/addons/reflex/reflex.sh.
+if [ "${REFLEX_ENABLED:-false}" = "true" ]; then
+    config --enable CONFIG_CPU_FREQ_GOV_REFLEX
+    REFLEX_STATE=$(config --state CONFIG_CPU_FREQ_GOV_REFLEX 2>/dev/null || echo "unknown")
+    log "REFLEX: CONFIG_CPU_FREQ_GOV_REFLEX state after scripts/config --enable: ${REFLEX_STATE}"
+fi
