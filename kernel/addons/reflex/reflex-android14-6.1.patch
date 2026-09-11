@@ -62,10 +62,10 @@ index 99bdd96f4..f2c422acc 100644
  #endif
 diff --git a/kernel/sched/cpufreq_reflex.c b/kernel/sched/cpufreq_reflex.c
 new file mode 100644
-index 000000000..5acc355f2
+index 000000000..18b622536
 --- /dev/null
 +++ b/kernel/sched/cpufreq_reflex.c
-@@ -0,0 +1,902 @@
+@@ -0,0 +1,1018 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA REFLEX — CPUFreq governor
@@ -134,6 +134,31 @@ index 000000000..5acc355f2
 +	 * (~8 windows to fully decay with defaults); shift=2 decays twice
 +	 * as fast. 0 is rejected (would never decay). */
 +	unsigned int		hispeed_decay_shift;
++
++	/* Hold time (usec) after the floor last triggered before decay is
++	 * allowed to start. Without this, a scroll gesture with brief gaps
++	 * between touch events (each gap outlasting one window) makes the
++	 * floor drop and re-snap repeatedly instead of holding steady for
++	 * the whole gesture. 0 disables the hold (decay starts immediately,
++	 * the original behaviour). */
++	unsigned int		hispeed_hold_us;
++
++#ifdef CONFIG_SCHED_BORE
++	/* Optional early trigger: if the task currently running on a CPU
++	 * has a BORE burst_penalty score (0-39, see kernel/sched/fair.c)
++	 * at or below this value, snap the floor immediately instead of
++	 * waiting up to hispeed_window_us for the idle-time sample to
++	 * confirm real business. A low/zero score means BORE itself just
++	 * classified this task as fresh/interactive (not a CPU hog), which
++	 * is available at the instant it starts running -- strictly earlier
++	 * than idle-time accounting can confirm the same thing. 0 disables
++	 * this path entirely (pure idle-time floor, same as without BORE).
++	 * Kthreads always carry score 0 in BORE, so a low default here
++	 * would also fire on kernel work; kept conservative (2) and off by
++	 * default is not an option since 0 already means "disabled" -- set
++	 * to 0 explicitly if kthread-triggered floor snaps are unwanted. */
++	unsigned int		bore_boost_max_score;
++#endif
 +};
 +
 +struct rfx_policy {
@@ -178,6 +203,7 @@ index 000000000..5acc355f2
 +	u64			hispeed_prev_wall_time;
 +	u64			hispeed_next_sample_time;
 +	unsigned long		hispeed_floor;	/* capacity units, decays */
++	u64			hispeed_hold_until;	/* ns; decay gated until this */
 +
 +	/* The field below is for single-CPU policies only: */
 +#ifdef CONFIG_NO_HZ_COMMON
@@ -263,11 +289,28 @@ index 000000000..5acc355f2
 + * every update_util callback (same call frequency schedutil already runs
 + * at) is fine.
 + */
++static void rfx_hispeed_raise(struct rfx_cpu *rfx_cpu, u64 time_ns,
++			       unsigned long target)
++{
++	struct rfx_tunables *tunables = rfx_cpu->rfx_policy->tunables;
++
++	if (target > rfx_cpu->hispeed_floor)
++		rfx_cpu->hispeed_floor = target;
++
++	/* Push the earliest-allowed-decay point out every time something
++	 * re-triggers the floor, so a steady stream of touch events (with
++	 * gaps longer than one window but shorter than the hold) keeps the
++	 * floor pinned instead of sawtoothing between two OPPs. */
++	rfx_cpu->hispeed_hold_until = time_ns +
++		(u64)tunables->hispeed_hold_us * NSEC_PER_USEC;
++}
++
 +static void rfx_update_hispeed(struct rfx_cpu *rfx_cpu, u64 time_ns)
 +{
 +	struct rfx_tunables *tunables = rfx_cpu->rfx_policy->tunables;
 +	u64 wall_us, idle_us, delta_wall, delta_idle, busy_pct;
 +	unsigned long cap;
++	bool held = time_ns < rfx_cpu->hispeed_hold_until;
 +
 +	if (time_ns < rfx_cpu->hispeed_next_sample_time)
 +		return;
@@ -282,11 +325,18 @@ index 000000000..5acc355f2
 +	rfx_cpu->hispeed_next_sample_time = time_ns +
 +		(u64)tunables->hispeed_window_us * NSEC_PER_USEC;
 +
-+	/* First sample after start/hotplug, or clock went backwards
-+	 * (shouldn't happen, but a driver quirk is cheaper to guard than to
-+	 * debug): skip this window rather than compute garbage. */
-+	if (unlikely(!delta_wall || delta_idle > delta_wall)) {
-+		rfx_cpu->hispeed_floor >>= tunables->hispeed_decay_shift;
++	/* First sample after start/hotplug, clock went backwards, or a
++	 * suspend/resume-sized jump landed between two samples (delta_wall
++	 * wraps huge as an unsigned subtraction if wall_us regressed, which
++	 * a bare "delta_idle > delta_wall" check does not reliably catch
++	 * once both sides have wrapped): skip this window rather than
++	 * compute garbage from it. Bounding delta_wall to a few windows'
++	 * worth is enough slack for normal scheduling jitter while still
++	 * rejecting a wrapped/bogus value. */
++	if (unlikely(!delta_wall || delta_idle > delta_wall ||
++		     delta_wall > (u64)tunables->hispeed_window_us * 4)) {
++		if (!held)
++			rfx_cpu->hispeed_floor >>= tunables->hispeed_decay_shift;
 +		return;
 +	}
 +
@@ -297,14 +347,53 @@ index 000000000..5acc355f2
 +	cap = arch_scale_cpu_capacity(rfx_cpu->cpu);
 +
 +	if (busy_pct >= tunables->hispeed_load_pct) {
-+		unsigned long target = (cap * tunables->hispeed_freq_pct) / 100;
-+
-+		if (target > rfx_cpu->hispeed_floor)
-+			rfx_cpu->hispeed_floor = target;
-+	} else {
++		rfx_hispeed_raise(rfx_cpu, time_ns,
++				  (cap * tunables->hispeed_freq_pct) / 100);
++	} else if (!held) {
 +		rfx_cpu->hispeed_floor >>= tunables->hispeed_decay_shift;
 +	}
 +}
++
++#ifdef CONFIG_SCHED_BORE
++/*
++ * rfx_bore_check() - early hispeed trigger from BORE's own burst
++ * classification, instead of waiting for the idle-time window to confirm
++ * the same thing after the fact.
++ *
++ * BORE tags every sched_entity with a burst_penalty score (0-39, see
++ * kernel/sched/fair.c calc_burst_score()) that goes up the longer a task
++ * has been hogging the CPU since its last sleep, and resets to a low value
++ * on wake. A task currently running with a low score is, by BORE's own
++ * definition, one it just classified as fresh/interactive rather than a
++ * CPU hog -- available the instant that task starts running, strictly
++ * earlier than hispeed_window_us of idle-time can confirm the CPU turned
++ * busy. Runs on every rfx_get_util() call (cheap: one struct field read
++ * under the rq lock update_util callbacks already hold), not gated by the
++ * window, since there is no expensive syscall-like read involved here
++ * unlike get_cpu_idle_time().
++ */
++static void rfx_bore_check(struct rfx_cpu *rfx_cpu, u64 time_ns)
++{
++	struct rfx_tunables *tunables = rfx_cpu->rfx_policy->tunables;
++	struct task_struct *curr;
++	unsigned long cap;
++
++	if (!tunables->bore_boost_max_score)
++		return;
++
++	curr = READ_ONCE(cpu_rq(rfx_cpu->cpu)->curr);
++	if (!curr || is_idle_task(curr) ||
++	    (curr->se.burst_penalty >> 8) > tunables->bore_boost_max_score)
++		return;
++
++	cap = arch_scale_cpu_capacity(rfx_cpu->cpu);
++	rfx_hispeed_raise(rfx_cpu, time_ns, (cap * tunables->hispeed_freq_pct) / 100);
++}
++#else
++static inline void rfx_bore_check(struct rfx_cpu *rfx_cpu, u64 time_ns) {}
++#endif
++
++
 +
 +static void rfx_get_util(struct rfx_cpu *rfx_cpu, u64 time)
 +{
@@ -316,6 +405,7 @@ index 000000000..5acc355f2
 +					   FREQUENCY_UTIL, NULL);
 +
 +	rfx_update_hispeed(rfx_cpu, time);
++	rfx_bore_check(rfx_cpu, time);
 +	if (rfx_cpu->hispeed_floor > rfx_cpu->util)
 +		rfx_cpu->util = rfx_cpu->hispeed_floor;
 +}
@@ -609,6 +699,16 @@ index 000000000..5acc355f2
 +rfx_attr_store_uint(hispeed_decay_shift, 1, 6);
 +static struct governor_attr hispeed_decay_shift_attr = __ATTR_RW(hispeed_decay_shift);
 +
++rfx_attr_show(hispeed_hold_us);
++rfx_attr_store_uint(hispeed_hold_us, 0, 100000);
++static struct governor_attr hispeed_hold_us_attr = __ATTR_RW(hispeed_hold_us);
++
++#ifdef CONFIG_SCHED_BORE
++rfx_attr_show(bore_boost_max_score);
++rfx_attr_store_uint(bore_boost_max_score, 0, 39);
++static struct governor_attr bore_boost_max_score_attr = __ATTR_RW(bore_boost_max_score);
++#endif
++
 +#undef rfx_attr_show
 +#undef rfx_attr_store_uint
 +
@@ -657,6 +757,10 @@ index 000000000..5acc355f2
 +	&hispeed_load_pct_attr.attr,
 +	&hispeed_freq_pct_attr.attr,
 +	&hispeed_decay_shift_attr.attr,
++	&hispeed_hold_us_attr.attr,
++#ifdef CONFIG_SCHED_BORE
++	&bore_boost_max_score_attr.attr,
++#endif
 +	NULL
 +};
 +ATTRIBUTE_GROUPS(rfx);
@@ -820,6 +924,18 @@ index 000000000..5acc355f2
 +	tunables->hispeed_load_pct    = 90;
 +	tunables->hispeed_freq_pct    = 70;
 +	tunables->hispeed_decay_shift = 1;
++	/* 16ms hold: survives a typical gap between scroll-gesture touch
++	 * events without letting the floor free-run forever on a single
++	 * trigger (each fresh trigger still pushes the hold window out,
++	 * see rfx_hispeed_raise()). */
++	tunables->hispeed_hold_us     = 16000;
++#ifdef CONFIG_SCHED_BORE
++	/* Conservative: only scores 0-2 (freshly-woken tasks and kthreads,
++	 * per BORE's own classification) trigger early. 0 disables this
++	 * path outright if kthread-triggered snaps turn out unwanted on a
++	 * given device. */
++	tunables->bore_boost_max_score = 2;
++#endif
 +
 +	policy->governor_data = rfx_policy;
 +	rfx_policy->tunables = tunables;
