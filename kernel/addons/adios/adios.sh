@@ -16,12 +16,25 @@
 # independent review rounds. adios-tunable is now a SEPARATE, optional
 # addon again (see kernel/addons/adios-tunable/) -- it only carries the
 # small genhd logging bonus now, nothing this file doesn't already have.
+#
+# v3.3.5-SAGA: ports the flush/barrier simplification from firelzrd's
+# own upstream v3.2.0 -> v3.3.0 update (github.com/firelzrd/adios).
+# Removes ADIOS's own Tier-1 REQ_OP_FLUSH barrier queue -- the generic
+# block layer's flush state machine (block/blk-flush.c) already
+# handles REQ_PREFLUSH/REQ_FUA ordering correctly (predates 2.6.37),
+# so ADIOS's own barrier_queue/barrier_lock/release_barrier_requests()
+# were redundant complexity. Deliberately does NOT port upstream's
+# other v3.3.0 change (the shallow_depth/to_word_depth fix) -- that
+# fix targets a bug introduced by sbitmap's shallow_depth unit
+# convention change in Linux 6.12, which this android14-6.1 tree
+# predates; porting it here would introduce a unit mismatch, not fix
+# one. Full rationale in this patch's own header.
 # Full rationale for every individual fix/feature is in this patch's own
-# header — see kernel/addons/adios/adios-android14-6.1-v3.3.4.patch.
+# header — see kernel/addons/adios/adios-android14-6.1-v3.3.5.patch.
 
-ADIOS_PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios/adios-android14-6.1-v3.3.4.patch"
+ADIOS_PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios/adios-android14-6.1-v3.3.5.patch"
 
-log "📦 Applying ADIOS I/O scheduler patch (v3.3.4-SAGA, LM/sysfs tunables merged in)..."
+log "📦 Applying ADIOS I/O scheduler patch (v3.3.5-SAGA, upstream flush-barrier simplification merged in)..."
 [ -f "$ADIOS_PATCH" ] || error "ADIOS: patch file not found at ${ADIOS_PATCH}!"
 
 if patch -p1 --fuzz=3 --dry-run --reverse -d "$KERNEL_SRC" < "$ADIOS_PATCH" > /dev/null 2>&1; then
