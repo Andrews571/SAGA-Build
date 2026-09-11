@@ -1,6 +1,6 @@
 {
   "resukisu": {
-    "good": "23a40c0f1dc047ee73a1dfd70a3f14df70021cac",
+    "good": "0b5efe9e0102c43ca5c41174d500f5a7080cd0c7",
     "bad": [
       "03b60f260cce36f23efbd26c9c334edfdc9ce7eb",
       "0b4f56fd92bcc47a24bd4add8d7125239531c4f5",
@@ -12,7 +12,8 @@
       "a70ed67f260ea28dcf53263222863f23bdb8736a",
       "beaaea0eb895dc41e7b9bf5e3f39e57aa9635bab",
       "f1dd81dc96d7f3f6691e6ac8b50fba9ae8a2f17c",
-      "f56219d2998dc00aa2a80eda8c2280b1455a3519"
+      "f56219d2998dc00aa2a80eda8c2280b1455a3519",
+      "23a40c0f1dc047ee73a1dfd70a3f14df70021cac"
     ]
   },
   "susfs_resukisu": {
