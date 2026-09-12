@@ -1,0 +1,186 @@
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 7e5e6de82..32b2472c7 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -168,6 +168,35 @@ u8   __read_mostly sched_burst_smoothness      = 1;
+ u8   __read_mostly sched_burst_penalty_offset  = 24;
+ unsigned int __read_mostly sched_burst_penalty_scale   = 1536;
+ unsigned int __read_mostly sched_burst_cache_lifetime  = 75000000;
++
++/*
++ * SAGA: bounded, hard preemption budget for freshly-woken/interactive
++ * tasks, layered on top of BORE's own (soft, vruntime-based) wakeup
++ * favouritism. Inspired by -- not ported from, this is a from-scratch
++ * reimplementation against 6.1's real CFS internals -- the "root bucket
++ * warp" idea in Apple XNU's Clutch scheduler
++ * (apple-oss-distributions/xnu, doc/scheduler/sched_clutch_edge.md):
++ * a class that is technically behind in scheduling order still gets a
++ * small, periodically-refreshing budget during which it can preempt
++ * outright, bounding worst-case wakeup latency without starving
++ * everything else. See bore_warp_preempt() below for the mechanism.
++ *
++ * Off by default (0) -- deliberately not enabled out of the box. This
++ * touches the single hottest path in the scheduler (every wakeup
++ * preemption decision); it should be turned on and evaluated on its own,
++ * after the rest of the burst-penalty tuning is already trusted, not
++ * silently inherited by every device that enables CONFIG_SCHED_BORE.
++ */
++u8   __read_mostly sched_bore_warp_enabled     = 0;
++/* Max BORE score (0-39) the newly woken task may have to qualify as
++ * "fresh" -- same conservative default as Reflex's bore_boost_max_score,
++ * kept independently tunable since the two mechanisms sit in different
++ * subsystems and may want different sensitivity in practice. */
++u8   __read_mostly sched_bore_warp_max_score   = 2;
++/* Cooldown between warp grants on the same cfs_rq, in microseconds.
++ * Small on purpose: this is a last-resort hard override for when the
++ * soft vruntime-based check isn't enough, not the primary mechanism. */
++unsigned int __read_mostly sched_bore_warp_us  = 2000;
+ #endif
+ 
+ int sched_thermal_decay_shift;
+@@ -7927,6 +7956,55 @@ static void set_skip_buddy(struct sched_entity *se)
+ 		cfs_rq_of(se)->skip = se;
+ }
+ 
++#ifdef CONFIG_SCHED_BORE
++/*
++ * bore_warp_preempt() - bounded, hard preemption grant for a freshly-woken
++ * task, independent of (and checked before) the normal soft
++ * wakeup_preempt_entity() vruntime/gran comparison.
++ *
++ * wakeup_preempt_entity() already lets BORE-favoured tasks (lower
++ * effective vruntime from a low burst_penalty) preempt sooner than
++ * vanilla CFS would -- but it is still a *soft* comparison: if 'curr'
++ * also happens to have a low vruntime right now (e.g. it was recently
++ * favoured itself), a genuinely fresh 'pse' can still lose and wait up to
++ * wakeup_gran() or the next tick. This adds a second, independent, hard
++ * guarantee on top: when 'curr' is a relative CPU hog (meaningfully
++ * higher BORE score than 'pse') and 'pse' is fresh, and this cfs_rq
++ * hasn't granted a warp preemption recently, preempt unconditionally.
++ *
++ * The "recently" part is the safety bound: one grant per
++ * sched_bore_warp_us per cfs_rq, not a per-task allowance. Without a
++ * cooldown, a burst of fresh-looking wakeups (e.g. a binder thread pool
++ * waking up together) could each individually qualify and chain
++ * preemptions back-to-back, thrashing the CPU instead of helping it.
++ * With the cooldown, at most one "free" preemption escapes per window --
++ * the same bound shape as the per-bucket warp budget refresh in Apple
++ * XNU's Clutch scheduler this is conceptually modelled on (see the
++ * comment on sched_bore_warp_enabled above for the reference).
++ */
++static bool bore_warp_preempt(struct cfs_rq *cfs_rq, struct sched_entity *se,
++			       struct sched_entity *pse, u64 now)
++{
++	if (!sched_bore_warp_enabled)
++		return false;
++
++	if (now < cfs_rq->bore_warp_deadline)
++		return false;
++
++	if ((pse->burst_penalty >> 8) > sched_bore_warp_max_score)
++		return false;
++
++	/* Require curr to be meaningfully worse, not just "not as fresh":
++	 * two similarly-fresh tasks don't need a forced switch, the normal
++	 * soft check already handles that case fine on its own. */
++	if (se->burst_penalty <= pse->burst_penalty)
++		return false;
++
++	cfs_rq->bore_warp_deadline = now + (u64)sched_bore_warp_us * NSEC_PER_USEC;
++	return true;
++}
++#endif
++
+ /*
+  * Preempt the current task with a newly woken task if needed:
+  */
+@@ -8009,6 +8087,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+ 	if (ignore)
+ 		return;
+ 
++#ifdef CONFIG_SCHED_BORE
++	if (bore_warp_preempt(cfs_rq_of(se), se, pse, rq_clock_task(rq))) {
++		if (!next_buddy_marked)
++			set_next_buddy(pse);
++		goto preempt;
++	}
++#endif
++
+ 	if (wakeup_preempt_entity(se, pse) == 1) {
+ 		/*
+ 		 * Bias pick_next to pick the sched entity that is
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 848680566..8efe16e9e 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -577,6 +577,15 @@ struct cfs_rq {
+ 
+ 	struct rb_root_cached	tasks_timeline;
+ 
++#ifdef CONFIG_SCHED_BORE
++	/* Cooldown for bore_warp_preempt() in fair.c: at most one hard
++	 * "warp" preemption grant per sched_bore_warp_us on this cfs_rq,
++	 * regardless of how many fresh-looking tasks wake up in that
++	 * window. See the comment on bore_warp_preempt() for why this is a
++	 * cooldown and not a per-task allowance. */
++	u64			bore_warp_deadline;
++#endif
++
+ 	/*
+ 	 * 'curr' points to currently running entity on this cfs_rq.
+ 	 * It is set to NULL otherwise (i.e when none are currently running).
+diff --git a/kernel/sysctl.c b/kernel/sysctl.c
+index dc6d0f5da..940a641fb 100644
+--- a/kernel/sysctl.c
++++ b/kernel/sysctl.c
+@@ -114,6 +114,16 @@ static int __maybe_unused two = 2;
+ static int __maybe_unused three = 3;
+ static int __maybe_unused sixty_four = 64;
+ static int __maybe_unused maxval_12_bits = 4095;
++/* SAGA warp knobs -- see the comment on sched_bore_warp_enabled in
++ * kernel/sched/fair.c for what these do. sched_bore_warp_max_score
++ * reuses the same 0-39 BORE score range as the other burst_* knobs
++ * above, so it shares their "three"-ish upper bound style; warp_us gets
++ * its own bound since it's a microsecond duration, not a score. */
++extern u8 sched_bore_warp_enabled;
++extern u8 sched_bore_warp_max_score;
++extern uint sched_bore_warp_us;
++static int __maybe_unused thirty_nine = 39;
++static int __maybe_unused warp_us_max = 50000;
+ #endif
+ 
+ #ifdef CONFIG_PROC_SYSCTL
+@@ -1734,6 +1744,33 @@ static struct ctl_table kern_table[] = {
+ 		.mode		= 0644,
+ 		.proc_handler	= proc_douintvec,
+ 	},
++	{
++		.procname	= "sched_bore_warp_enabled",
++		.data		= &sched_bore_warp_enabled,
++		.maxlen		= sizeof(u8),
++		.mode		= 0644,
++		.proc_handler	= proc_dou8vec_minmax,
++		.extra1		= SYSCTL_ZERO,
++		.extra2		= SYSCTL_ONE,
++	},
++	{
++		.procname	= "sched_bore_warp_max_score",
++		.data		= &sched_bore_warp_max_score,
++		.maxlen		= sizeof(u8),
++		.mode		= 0644,
++		.proc_handler	= proc_dou8vec_minmax,
++		.extra1		= SYSCTL_ZERO,
++		.extra2		= &thirty_nine,
++	},
++	{
++		.procname	= "sched_bore_warp_us",
++		.data		= &sched_bore_warp_us,
++		.maxlen		= sizeof(unsigned int),
++		.mode		= 0644,
++		.proc_handler	= proc_douintvec_minmax,
++		.extra1		= SYSCTL_ZERO,
++		.extra2		= &warp_us_max,
++	},
+ #endif
+ 	{
+ 		.procname	= "sysctl_writes_strict",
