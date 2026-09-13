@@ -59,6 +59,18 @@ fi
 
 cd "${ROOT_DIR}"
 
-export REFLEX_ENABLED=true
+# Liga o Kconfig direto no defconfig, mesmo mecanismo confiável do
+# bore.sh/pccg.sh -- não depende de nenhum bloco em defconfig.sh que
+# alguém precise lembrar de colar (esse era o bug: REFLEX_ENABLED=true
+# não tinha ninguém consumindo, então o governor nunca era ligado de
+# verdade, só aplicado no source).
+DEFCONFIG_FILE="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
+if ! grep -q "^CONFIG_CPU_FREQ_GOV_REFLEX=y" "$DEFCONFIG_FILE"; then
+    cat >> "$DEFCONFIG_FILE" << 'EOF'
+# REFLEX cpufreq governor (SAGA)
+CONFIG_CPU_FREQ_GOV_REFLEX=y
+EOF
+    log "REFLEX: CONFIG_CPU_FREQ_GOV_REFLEX enabled ✅"
+fi
 
-log "REFLEX integrated ✅ (CONFIG_CPU_FREQ_GOV_REFLEX will be enabled after defconfig; untested on real hardware — bench before shipping as default)"
+log "REFLEX integrated ✅ (untested on real hardware; bench before shipping as default)"
