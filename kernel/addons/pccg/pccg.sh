@@ -59,11 +59,23 @@ elif patch -p1 --fuzz=3 --dry-run --forward < "$PATCH_FILE" > /dev/null 2>&1; th
     patch -p1 --fuzz=3 --forward < "$PATCH_FILE" || error "PCCG: apply failed!"
     log "PCCG: applied ✅"
 else
-    error "PCCG: does not apply cleanly on top of REFLEX — verified clean against android14-6.1-live + reflex-android14-6.1.patch on $(date +%Y-%m-%d), needs re-verification!"
+    error "PCCG: does not apply cleanly — verified clean against android14-6.1-live (order-independent re: reflex/bore) on $(date +%Y-%m-%d), needs re-verification!"
 fi
 
 cd "${ROOT_DIR}"
 
-export PCCG_ENABLED=true
+# Liga o Kconfig direto no defconfig, mesmo mecanismo confiável do
+# bore.sh -- não depende de nenhum bloco em defconfig.sh que alguém
+# precise lembrar de colar. select CPU_FREQ_GOV_ATTR_SET e select
+# IRQ_WORK já ficam resolvidos automaticamente pelo Kconfig (a entry
+# CPU_FREQ_GOV_PCCG já faz esse select sozinha).
+DEFCONFIG_FILE="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
+if ! grep -q "^CONFIG_CPU_FREQ_GOV_PCCG=y" "$DEFCONFIG_FILE"; then
+    cat >> "$DEFCONFIG_FILE" << 'EOF'
+# PCCG cpufreq governor (SAGA)
+CONFIG_CPU_FREQ_GOV_PCCG=y
+EOF
+    log "PCCG: CONFIG_CPU_FREQ_GOV_PCCG enabled ✅"
+fi
 
 log "PCCG integrated ✅ (self-sufficient, BORE-enhanced when present; untested on real hardware)"

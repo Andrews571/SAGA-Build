@@ -1,8 +1,8 @@
 diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
-index d12a926e4..bf32740c8 100644
+index c93954613..20f5c32e7 100644
 --- a/drivers/cpufreq/Kconfig
 +++ b/drivers/cpufreq/Kconfig
-@@ -123,6 +123,16 @@ config CPU_FREQ_DEFAULT_GOV_REFLEX
+@@ -113,6 +113,16 @@ config CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
  	  have a look at the help section of that governor. The fallback
  	  governor will be 'performance'.
  
@@ -19,7 +19,7 @@ index d12a926e4..bf32740c8 100644
  endchoice
  
  config CPU_FREQ_GOV_PERFORMANCE
-@@ -240,6 +250,24 @@ config CPU_FREQ_GOV_REFLEX
+@@ -211,6 +221,23 @@ config CPU_FREQ_GOV_SCHEDUTIL
  
  	  If in doubt, say N.
  
@@ -29,15 +29,14 @@ index d12a926e4..bf32740c8 100644
 +	select CPU_FREQ_GOV_ATTR_SET
 +	select IRQ_WORK
 +	help
-+	  "Pre CPU Clutch Governor" -- REFLEX's more aggressive, fully
-+	  self-sufficient sibling, inspired by Apple's Clutch/Edge scheduler
-+	  concepts (iOS 27). Detects a CPU going from idle to busy on its
-+	  own (a plain rq->nr_running edge, no other subsystem required),
-+	  jumps to a capacity-scaled floor immediately, and takes BORE's
-+	  burst_penalty as a second opinion when CONFIG_SCHED_BORE is also
-+	  enabled. Tunable per policy via sysfs (same knobs as reflex, plus
-+	  wake_edge_boost and auto_capacity_scale) — safe to enable
-+	  alongside schedutil and reflex, does not replace either.
++	  "Pre CPU Clutch Governor" -- a fully self-sufficient hispeed-floor
++	  governor inspired by Apple's Clutch/Edge scheduler concepts (iOS
++	  27). Detects a CPU going from idle to busy on its own (a plain
++	  rq->nr_running edge, no other subsystem required), jumps to a
++	  capacity-scaled floor immediately, and takes BORE's burst_penalty
++	  as a second opinion when CONFIG_SCHED_BORE is also enabled.
++	  Tunable per policy via sysfs — safe to enable alongside schedutil
++	  and reflex, does not replace either.
 +
 +	  If in doubt, say N.
 +
@@ -45,11 +44,11 @@ index d12a926e4..bf32740c8 100644
  
  config CPUFREQ_DT
 diff --git a/kernel/sched/build_utility.c b/kernel/sched/build_utility.c
-index f2c422acc..1221df62b 100644
+index 99bdd96f4..c35ebc6bc 100644
 --- a/kernel/sched/build_utility.c
 +++ b/kernel/sched/build_utility.c
-@@ -73,6 +73,10 @@
- # include "cpufreq_reflex.c"
+@@ -69,6 +69,10 @@
+ # include "cpufreq_schedutil.c"
  #endif
  
 +#ifdef CONFIG_CPU_FREQ_GOV_PCCG
