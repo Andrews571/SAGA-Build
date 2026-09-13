@@ -1,9 +1,9 @@
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 7e5e6de82..32b2472c7 100644
+index 1830a2e46..972643b87 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -168,6 +168,35 @@ u8   __read_mostly sched_burst_smoothness      = 1;
- u8   __read_mostly sched_burst_penalty_offset  = 24;
+@@ -170,6 +170,36 @@ u8   __read_mostly sched_bore_topapp_discount  = 6;
+ u8   __read_mostly sched_bore_topapp_smooth_boost = 2;
  unsigned int __read_mostly sched_burst_penalty_scale   = 1536;
  unsigned int __read_mostly sched_burst_cache_lifetime  = 75000000;
 +
@@ -27,9 +27,10 @@ index 7e5e6de82..32b2472c7 100644
 + */
 +u8   __read_mostly sched_bore_warp_enabled     = 0;
 +/* Max BORE score (0-39) the newly woken task may have to qualify as
-+ * "fresh" -- same conservative default as Reflex's bore_boost_max_score,
-+ * kept independently tunable since the two mechanisms sit in different
-+ * subsystems and may want different sensitivity in practice. */
++ * "fresh" -- same conservative default as Reflex/PCCG's
++ * bore_boost_max_score, kept independently tunable since the two
++ * mechanisms sit in different subsystems and may want different
++ * sensitivity in practice. */
 +u8   __read_mostly sched_bore_warp_max_score   = 2;
 +/* Cooldown between warp grants on the same cfs_rq, in microseconds.
 + * Small on purpose: this is a last-resort hard override for when the
@@ -38,7 +39,7 @@ index 7e5e6de82..32b2472c7 100644
  #endif
  
  int sched_thermal_decay_shift;
-@@ -7927,6 +7956,55 @@ static void set_skip_buddy(struct sched_entity *se)
+@@ -7963,6 +7993,55 @@ static void set_skip_buddy(struct sched_entity *se)
  		cfs_rq_of(se)->skip = se;
  }
  
@@ -94,7 +95,7 @@ index 7e5e6de82..32b2472c7 100644
  /*
   * Preempt the current task with a newly woken task if needed:
   */
-@@ -8009,6 +8087,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+@@ -8045,6 +8124,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
  	if (ignore)
  		return;
  
@@ -130,29 +131,28 @@ index 848680566..8efe16e9e 100644
  	 * 'curr' points to currently running entity on this cfs_rq.
  	 * It is set to NULL otherwise (i.e when none are currently running).
 diff --git a/kernel/sysctl.c b/kernel/sysctl.c
-index dc6d0f5da..940a641fb 100644
+index f6b4d124a..67a5534e4 100644
 --- a/kernel/sysctl.c
 +++ b/kernel/sysctl.c
-@@ -114,6 +114,16 @@ static int __maybe_unused two = 2;
- static int __maybe_unused three = 3;
- static int __maybe_unused sixty_four = 64;
+@@ -118,6 +118,15 @@ static int __maybe_unused sixty_four = 64;
  static int __maybe_unused maxval_12_bits = 4095;
+ static int __maybe_unused thirty_nine = 39;
+ static int __maybe_unused eight = 8;
 +/* SAGA warp knobs -- see the comment on sched_bore_warp_enabled in
-+ * kernel/sched/fair.c for what these do. sched_bore_warp_max_score
-+ * reuses the same 0-39 BORE score range as the other burst_* knobs
-+ * above, so it shares their "three"-ish upper bound style; warp_us gets
-+ * its own bound since it's a microsecond duration, not a score. */
++ * kernel/sched/fair.c for what these do. Reuses the existing
++ * 'thirty_nine' bound above (added by BORE-TOPAPP) for
++ * sched_bore_warp_max_score, since it's the same 0-39 BORE score range
++ * -- no need for a second identical constant. */
 +extern u8 sched_bore_warp_enabled;
 +extern u8 sched_bore_warp_max_score;
 +extern uint sched_bore_warp_us;
-+static int __maybe_unused thirty_nine = 39;
 +static int __maybe_unused warp_us_max = 50000;
  #endif
  
  #ifdef CONFIG_PROC_SYSCTL
-@@ -1734,6 +1744,33 @@ static struct ctl_table kern_table[] = {
- 		.mode		= 0644,
- 		.proc_handler	= proc_douintvec,
+@@ -1756,6 +1765,33 @@ static struct ctl_table kern_table[] = {
+ 		.extra1		= SYSCTL_ZERO,
+ 		.extra2		= &eight,
  	},
 +	{
 +		.procname	= "sched_bore_warp_enabled",
