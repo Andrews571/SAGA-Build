@@ -274,11 +274,289 @@ STILL NOT submitted upstream. STILL NOT compiled against a real
 android14-6.1 GKI tree or booted on hardware -- that remains the
 single biggest open risk for this whole addon, same as before.
 ---
+From: ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.5-SAGA -- 3 fixes from a third external
+ technical review, each independently verified against the real 6.1
+ tree before applying (not applied on trust)
+
+This review (a standalone document, not a chat-interactive round like
+the previous two) raised 24 points. Only the 3 below were verified
+real and applied here. The rest were either read and judged to be
+design opinions/lower-severity suggestions not independently verified
+against source before this patch, one was verified and found to
+already be handled (see below), and one was verified and found to be
+a false alarm (also below) -- neither of those two needed a code
+change.
+
+1. REAL, most serious: cross-CPU race in the latency model's per-CPU
+   bucket reset. latency_model_input() (hot-path writer, called on
+   every IO completion) only ever protects its own bucket with
+   local_irq_save() on the CPU it's executing on -- that provides zero
+   exclusion against a *different* CPU touching the same memory.
+   lm_reset_pcpu_buckets() -- called from sideload_latency_model(), the
+   rare sysfs-triggered reset path -- iterated every possible CPU with
+   a raw memset(), while holding only model->update_lock, which the
+   writer never takes. A completion on CPU X racing a reset from CPU Y
+   could corrupt sum_of_weights/weighted_sum_latency mid read-modify-
+   write, and on the next delta-vs-snapshot computation a zeroed
+   "current" against a stale nonzero "snapshot" can underflow a u64 by
+   a large margin, feeding garbage into the regression, confidence
+   gate, and shrink logic.
+   Fix: lm_reset_pcpu_buckets() now uses on_each_cpu() to run the reset
+   on each ONLINE cpu with that cpu's own irqs disabled (standard SMP
+   call-function context) -- the same discipline the writer already
+   uses on itself, so the two can never interleave on the same CPU.
+   Offline CPUs can't be running the writer either, so they don't need
+   an IPI. Only touches the rare explicit-reset path; the hot path
+   (latency_model_input itself) is completely unchanged, so this adds
+   zero per-completion cost.
+
+2. REAL, minor: u64->u32 sysfs truncation. batch_limit[]'s store
+   function parsed input with kstrtoul() into an `unsigned long`
+   (64-bit on arm64) with only a "!= 0" check -- no upper bound --
+   then assigned it into batch_limit[], which is u32. A value like
+   4294967296 parses fine and silently becomes 0 on assignment.
+   Checked every other kstrtoul() call site in this file first: all of
+   them either target a genuinely u64 field (matches unsigned long
+   exactly, no truncation possible), are used only as a boolean
+   trigger (never stored), or already have an explicit min/max range
+   check that keeps the value within the target field's width
+   regardless of kstrtoul's 64 bits -- batch_limit's store was the only
+   one with neither a matching width nor a bound. Fixed by switching
+   just that one to kstrtou32(), which rejects out-of-range input
+   outright (-ERANGE) instead of relying on an unwritten range check.
+
+3. REAL, scope issue: the boot-time "adios" enforcer (genhd.c,
+   saga_adios_enforce_fn(), late_initcall, added to win a race against
+   vendor init possibly setting a different scheduler after boot) was
+   calling elv_iosched_store(q, "adios", 5) on every disk in the
+   system (block_class / disk_type, no filter beyond nonzero capacity)
+   -- 5 times, 20s apart, so anywhere from ~20s to ~100s into boot.
+   That's broader than the problem it's solving: it can briefly
+   perturb queues that have nothing to do with the device actually
+   being tuned (boot/vendor/cache/other LUs) during the most
+   IO-sensitive part of boot. The reviewer's blanket "remove the whole
+   mechanism" suggestion isn't quite right either -- it exists for a
+   real, previously-observed reason (vendor init overriding the
+   scheduler post-boot) and removing it reopens that. Went with the
+   reviewer's own second suggestion instead: new Kconfig string
+   MQ_IOSCHED_ADIOS_ENFORCE_DISK lets the builder restrict enforcement
+   to one disk_name (e.g. "sdc" -- note this can differ from what
+   you'd guess, and even between devices/firmware on the same phone
+   model). Empty string, the default, preserves the exact original
+   unrestricted behavior -- so this is opt-in, not a behavior change
+   for anyone who doesn't set it.
+
+Verified but NOT applied (checked against real source, found to be a
+non-issue):
+
+- The review's top "P0" item claimed guard()/scoped_guard() (used
+  throughout this file, e.g. scoped_guard(spinlock_irqsave, ...))
+  might not be available on a vanilla Linux 6.1 tree and should be
+  removed/replaced. Checked the actual android14-6.1-lts source
+  directly: include/linux/cleanup.h has the full guard()/scoped_guard()
+  macro infrastructure, and include/linux/spinlock.h has
+  DEFINE_LOCK_GUARD_1(spinlock_irqsave, ...) specifically -- the exact
+  variant this file uses. Present natively, nothing to change.
+
+- The review's Section 1 ("critical problem") claimed the depth
+  controller compares true per-request latency against a prediction
+  trained on a different metric (inter-completion gap), and recommends
+  splitting them into two separate models. Checked the code: they're
+  already split, from an earlier review round -- see the
+  "CHATGPT-REVIEW FIX #3" comment already present above true_latency's
+  definition, which explains explicitly why the inter-completion
+  metric (`latency`) stays feeding the model's own regression while
+  the depth controller and overrun detection use only true_latency
+  (now - rq->io_start_time_ns). Nothing to change; the review appears
+  to be describing a state the code was already moved past.
+
+Not independently verified against source in this round (read and
+judged plausible-to-debatable, not confirmed real or ruled out by
+inspection): double-buffer residual window in the adaptive depth
+controller, confidence-gate blind spot to workload-shape changes,
+first-seen-TGID interactive boost heuristic, batch_actual_max_* stats
+synchronization, force_shrink_model's rcu_head-copy style,
+exit_sched() invariant coverage, and the --fuzz=3 default in
+adios.sh's own apply step (this last one is real and known -- see
+adios-topapp's own script, which already uses --fuzz=0 as a guard for
+exactly this reason -- but changing adios.sh's tolerance is a build-
+process decision, not a code fix, and wasn't part of what was asked
+for in this pass).
+
+Verified: `patch -p1 --fuzz=0` against a freshly reconstructed
+block/adios.c (prior v3.3.5 state applied first) -- zero rejects,
+zero fuzz, zero offset on Kconfig.iosched, adios.c, and genhd.c (the
+three files this patch actually touches).
+---
+From: ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.5-SAGA -- 2 more fixes from the same
+ external review, after checking every remaining unverified item
+ against source
+
+Continued auditing the same review document's remaining 21 points
+against the real file. Result: several were already fixed in earlier
+review rounds (documented below), one is a genuine but low-severity
+gap now fixed, one design critique is valid but deliberately left for
+future work, and the rest are style/organizational opinions with no
+code change warranted.
+
+4. REAL, low severity: batch_actual_max_size[]/batch_actual_max_total
+   (pure observability counters -- "biggest batch ever dispatched",
+   never read back into any scheduling decision) are updated in
+   fill_batch_queues(), called only from dispatch_from_bq() under
+   ad->bq_lock -- so the hot-path write side is already correctly
+   locked. But adios_batch_actual_max_show() (sysfs read) and
+   adios_reset_bq_stats_store() (sysfs reset) accessed the same fields
+   with no lock at all. Fixed by wrapping both in
+   scoped_guard(spinlock_irqsave, &ad->bq_lock) -- rare, non-hot-path
+   sysfs calls, so the extra lock/unlock is free in practice. Worst
+   case before this fix was a torn read of a debug counter or a reset
+   racing a concurrent max-update and losing one sample -- cosmetic,
+   never fed back into scheduling, but the fix was nearly free so
+   applied anyway.
+
+14. REAL, cheap hardening: exit_sched() only WARN_ON_ONCE'd that
+   prio_queue[0/1] were empty at teardown -- nothing checked dl_tree[]
+   (the deadline-sorted RB-trees) or batch_queue[][] (the batch-queue
+   lists). Scheduler switching (none <-> adios <-> mq-deadline, which
+   this same file's own genhd.c enforcer can trigger) is exactly where
+   a request left behind in a structure teardown doesn't inspect would
+   surface as a silent leak instead of a loud, diagnosable warning.
+   Added the same WARN_ON_ONCE pattern for both: RB_EMPTY_ROOT() on
+   both dl_tree[] roots, and list_empty() across every
+   batch_queue[page][optype] combination. Diagnostic only -- doesn't
+   change behavior when everything actually is empty (the expected
+   case), just gives a specific WARN_ON_ONCE hit instead of silence if
+   a future change leaks a request into either structure.
+
+Already fixed in earlier review rounds (re-verified against current
+source, no new change needed):
+
+- Item 3 / P1.2 (double-buffer residual race in the adaptive depth
+  controller): the struct's own comment, marked "CHATGPT-REVIEW FIX #1
+  v2", already documents this exact scenario -- a writer that read the
+  old buffer index microseconds before an evaluator's cmpxchg-swap can
+  still land one sample in the buffer being evaluated. It's bounded
+  and explicitly accepted: "a single-sample-per-window skew at most,
+  standard tradeoff for lock-free double-buffered kernel stats vs. a
+  full seqlock" -- not an overlooked bug, a reasoned tradeoff already
+  documented where it lives.
+- Item 12 (confidence gate blind to workload-shape change): partially
+  already addressed by "CHATGPT-REVIEW FIX #2" -- model_is_confident()
+  checks the SAME bucket (small vs large) the current request will
+  actually use, not an unrelated one. The review's deeper point (raw
+  sample count within the right bucket still doesn't capture *recent*
+  prediction error/variance/model staleness) is valid and NOT
+  addressed -- left as a real, standalone future enhancement (would
+  need a recent-error-window mechanism, not a quick fix), not folded
+  into this patch.
+
+Read, judged to be valid design opinions or lower-priority
+observations, no code change made:
+
+- Item 9 (READ_ONCE()/WRITE_ONCE() audit): checked the specific fields
+  the review names -- batch_limit[], latency_target[],
+  global_latency_window, lm_block_size_threshold. Confirmed real: none
+  of them use READ_ONCE/WRITE_ONCE on either the sysfs-store or hot-
+  path-read side (unlike global_latency_window/compliance_flags'
+  SYSFS_ULL_DECL macro, which does). This is a legitimate gap, but a
+  systematic fix means auditing every tunable's every read site
+  individually, and the reviewer's own closing note says READ_ONCE
+  alone doesn't even solve cases needing multi-field consistency
+  (those need a lock/seqcount instead) -- sprinkling it on a handful of
+  named fields without that full audit risks false confidence more
+  than it helps. Treating as separate future work, not bolted onto
+  this patch.
+- Item 11 (first-seen-TGID interactive boost is too eager): a genuine
+  design suggestion (require "recently idle/foreground", not just
+  "first IO from this TGID"), not a bug -- no crash or corruption
+  results from the current heuristic, just a possibly-too-generous
+  boost. Left for a future, separate change.
+- Item 13 (force_shrink_model's rcu_head-copy style): the review
+  itself doesn't call this a serious bug ("Não considero esse ponto um
+  bug grave"), just a readability preference for explicit field-by-
+  field copying over copying the whole struct including its rcu_head.
+  No functional issue -- skipped.
+- Item 15 (patch is too large as a single unit / should be split into
+  conceptual layers): a build-process/maintainability opinion about
+  how this addon is organized, not a defect in what it does. Noted,
+  not acted on here.
+- The --fuzz=3 default in adios.sh's own apply step: real and already
+  known (adios-topapp's own former script used --fuzz=0 specifically
+  to guard against this same class of silent-corruption risk after an
+  earlier incident in this project). Changing adios.sh's tolerance is
+  a build-process decision, not a code fix, and wasn't asked for in
+  this pass.
+
+Verified: `patch -p1 --fuzz=0` against a freshly reconstructed
+block/adios.c (prior v3.3.5 state applied first) -- zero rejects,
+zero fuzz, zero offset on Kconfig.iosched, adios.c, and genhd.c.
+---
+From: ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.5-SAGA -- close item 9 (READ_ONCE/
+ WRITE_ONCE consistency) for the specific fields it named
+
+Previously deferred as "real but needs a full audit, not a spot fix."
+Did that audit: grep'd every plain (non-ONCE) field access, cross-
+referenced against every READ_ONCE(ad->.../model->...) already in the
+file to find the existing pattern, then applied it to exactly the
+fields the review named plus one the audit caught that the review
+didn't:
+
+- topapp_deadline_bonus: found this was MY OWN inconsistency from the
+  earlier bore/adios-topapp work -- the self-activation timer already
+  wrote it with WRITE_ONCE, but the hot-path read in add_to_dl_tree()
+  was plain. Fixed the read side to match what the write side already
+  did.
+- latency_target[]: hot-path read (add_to_dl_tree) now READ_ONCE, the
+  sysfs store now WRITE_ONCE.
+- global_latency_window: the two hot-path reads (fill_batch_queues,
+  dispatch_from_bq) now READ_ONCE. Its sysfs write already used
+  WRITE_ONCE (SYSFS_ULL_DECL macro). Its *other* write site --
+  adios_init_sched()'s one-time rotational/queue-depth heuristic --
+  was deliberately left alone: it runs once, single-threaded, before
+  the struct is published to any other CPU, so there's no concurrent
+  reader to race with at that point; adding ONCE there would be
+  cosmetic, not a fix for anything.
+- lm_block_size_threshold: the sysfs store already took
+  model->update_lock, but that only protects against a second
+  concurrent *writer* -- the 3 hot-path readers (latency_model_input,
+  predict latency, and the small/large count lookup) are
+  *deliberately* lock-free by design (that's the whole point of the
+  per-CPU bucket architecture), so the writer's lock gives a lock-free
+  reader zero benefit on its own. Added WRITE_ONCE on the (still
+  locked, for the other reason) write, and READ_ONCE on all 3 reads,
+  so writer and lock-free readers are at least each individually
+  well-defined instead of the compiler being free to assume no one
+  else is looking.
+
+Scope check: confirmed via grep that the depth-controller's own family
+of tunables (lm_adapt_*, already 13 READ_ONCE + a few WRITE_ONCE call
+sites) already followed this discipline consistently -- this patch
+brings the remaining flagged fields in line with that existing
+pattern, rather than inventing a new one.
+
+Not touched, and shouldn't be: fields that are only ever read/written
+under a lock both sides (e.g. the depth-controller's window state,
+already protected end-to-end) don't need READ_ONCE/WRITE_ONCE on top
+of the lock -- adding it there would be noise, not a fix. Multi-field
+invariants (the review's own closing caveat) still aren't addressed by
+any of this -- READ_ONCE/WRITE_ONCE only ever makes a single access
+well-defined, never a relationship between two fields; none of the
+fields touched here have that kind of cross-field dependency, so
+plain per-field ONCE annotation was the right-sized fix in every case
+here.
+
+Verified: `patch -p1 --fuzz=0` against a freshly reconstructed
+block/adios.c (prior v3.3.5 state applied first) -- zero rejects,
+zero fuzz, zero offset.
+---
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
 index 08b8af92f..ee5d322a0 100644
 --- a/block/Kconfig.iosched
 +++ b/block/Kconfig.iosched
-@@ -16,6 +16,21 @@ config MQ_IOSCHED_KYBER
+@@ -16,6 +16,41 @@ config MQ_IOSCHED_KYBER
  	  synchronous writes, it will self-tune queue depths to achieve that
  	  goal.
  
@@ -296,6 +574,26 @@ index 08b8af92f..ee5d322a0 100644
 +	default n
 +	help
 +	  Enable the ADIOS I/O scheduler as the default scheduler for MQ I/O.
++
++config MQ_IOSCHED_ADIOS_ENFORCE_DISK
++	string "Disk name the boot-time ADIOS enforcer is restricted to (empty = all disks)"
++	depends on MQ_IOSCHED_DEFAULT_ADIOS
++	default ""
++	help
++	  REVIEW FIX: the boot-time enforcer (genhd.c, saga_adios_enforce_fn)
++	  used to call elv_iosched_store(q, "adios", 5) on every disk in the
++	  system (block_class, no filter beyond nonzero capacity) to win a
++	  race against vendor init possibly setting a different scheduler
++	  after boot. That's broader than it needs to be -- it can briefly
++	  perturb unrelated queues (boot/vendor/cache/other LUs) during the
++	  most I/O-sensitive part of boot, repeated 5 times over ~100s.
++	
++	  Set this to the exact disk_name (as shown in /sys/block/<name>,
++	  e.g. "sda" or "sdc" -- this can differ from what you'd guess, and
++	  can differ between devices/firmware even on the same phone model)
++	  of the disk you actually care about (typically the one backing
++	  /data) to restrict enforcement to just that device. Leave empty to
++	  keep the old, unrestricted behavior.
 +
  config IOSCHED_BFQ
  	tristate "BFQ I/O scheduler"
@@ -316,7 +614,7 @@ new file mode 100644
 index 000000000..7a1c4d5e2
 --- /dev/null
 +++ b/block/adios.c
-@@ -0,0 +1,3072 @@
+@@ -0,0 +1,3129 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Adaptive Deadline I/O Scheduler (ADIOS)
@@ -340,6 +638,7 @@ index 000000000..7a1c4d5e2
 +#include <linux/list_sort.h>
 +#include <linux/rcupdate.h>
 +#include <linux/ioprio.h>
++#include <linux/smp.h>
 +#include <linux/sched.h>
 +#include <linux/workqueue.h>
 +
@@ -348,7 +647,7 @@ index 000000000..7a1c4d5e2
 +#include "blk-mq.h"
 +#include "blk-mq-sched.h"
 +
-+#define ADIOS_VERSION "3.3.4-SAGA"
++#define ADIOS_VERSION "3.3.5-SAGA"
 +
 +/* Request Types:
 + *
@@ -1052,12 +1351,35 @@ index 000000000..7a1c4d5e2
 +static void reset_buckets(struct lm_buckets *buckets)
 +{ memset(buckets, 0, sizeof(*buckets)); }
 +
++/*
++ * REVIEW FIX (per-CPU reset race): latency_model_input() -- the hot-path
++ * writer -- only ever protects its own per-CPU bucket with
++ * local_irq_save() on the CPU it's running on; it never takes
++ * model->update_lock. A raw for_each_possible_cpu() + memset() here (as
++ * before) can therefore race a live writer on another CPU while that
++ * CPU is mid read-modify-write into the exact same bucket, corrupting
++ * sum_of_weights/weighted_sum_latency (and, on the next delta-vs-
++ * snapshot computation, potentially underflowing a u64 by a large
++ * margin). Only ever called from the rare, explicit reset path
++ * (sideload_latency_model(), sysfs-triggered) -- never per completion
++ * -- so it can afford real cross-CPU exclusion without touching the
++ * hot path's cost at all. on_each_cpu() runs the reset on each ONLINE
++ * cpu with that cpu's local irqs disabled (SMP call-function context),
++ * the same discipline the writer already uses on itself, so the two
++ * can never interleave on the same CPU. CPUs that are offline can't be
++ * running the writer either, so resetting their (still-allocated)
++ * percpu storage without IPI'ing them is safe by construction.
++ */
++static void lm_reset_one_cpu_buckets(void *info)
++{
++	struct latency_model *model = info;
++
++	reset_buckets(this_cpu_ptr(model->pcpu_buckets));
++	reset_buckets(this_cpu_ptr(model->pcpu_snapshot));
++}
++
 +static void lm_reset_pcpu_buckets(struct latency_model *model) {
-+	int cpu;
-+	for_each_possible_cpu(cpu) {
-+		reset_buckets(per_cpu_ptr(model->pcpu_buckets, cpu));
-+		reset_buckets(per_cpu_ptr(model->pcpu_snapshot, cpu));
-+	}
++	on_each_cpu(lm_reset_one_cpu_buckets, model, 1);
 +}
 +
 +// Update the latency model parameters and statistics
@@ -1202,7 +1524,7 @@ index 000000000..7a1c4d5e2
 +	current_base = params->base;
 +	rcu_read_unlock();
 +
-+	if (block_size <= model->lm_block_size_threshold) {
++	if (block_size <= READ_ONCE(model->lm_block_size_threshold)) {
 +		// Handle small requests
 +		bucket_index = lm_input_bucket_index(latency, current_base ?: 1);
 +
@@ -1244,9 +1566,10 @@ index 000000000..7a1c4d5e2
 +	params = rcu_dereference(model->params);
 +
 +	result = params->base;
-+	if (block_size > model->lm_block_size_threshold)
++	u32 bs_threshold = READ_ONCE(model->lm_block_size_threshold);
++	if (block_size > bs_threshold)
 +		result += params->slope *
-+			DIV_ROUND_UP_ULL(block_size - model->lm_block_size_threshold, 1024);
++			DIV_ROUND_UP_ULL(block_size - bs_threshold, 1024);
 +
 +	rcu_read_unlock();
 +
@@ -1319,7 +1642,7 @@ index 000000000..7a1c4d5e2
 +
 +	rcu_read_lock();
 +	params = rcu_dereference(model->params);
-+	count = (block_size <= model->lm_block_size_threshold) ?
++	count = (block_size <= READ_ONCE(model->lm_block_size_threshold)) ?
 +		params->small_count : params->large_count;
 +	rcu_read_unlock();
 +
@@ -1640,7 +1963,7 @@ index 000000000..7a1c4d5e2
 +	/* Tier-3: Aynchronous Requests
 +	 * - Can be reordered and delayed freely */
 +	if (!(rq->cmd_flags & REQ_SYNC)) {
-+		rd->deadline += ad->latency_target[adios_optype(rq)];
++		rd->deadline += READ_ONCE(ad->latency_target[adios_optype(rq)]);
 +		// SAGA: gate predictive reordering on both the manual switch
 +		// (compliance_flags/FIXORDER, operator-controlled) AND the
 +		// automatic per-optype confidence check (model_is_confident).
@@ -1656,8 +1979,10 @@ index 000000000..7a1c4d5e2
 +			rd->deadline += rd->pred_lat;
 +	}
 +
-+	if (ad->topapp_deadline_bonus && adios_req_is_topapp(rq))
-+		rd->deadline -= min_t(u64, rd->deadline, ad->topapp_deadline_bonus);
++	u64 topapp_bonus = READ_ONCE(ad->topapp_deadline_bonus);
++
++	if (topapp_bonus && adios_req_is_topapp(rq))
++		rd->deadline -= min_t(u64, rd->deadline, topapp_bonus);
 +
 +	// Now quantize the deadline (-> dlg->deadline == RB-Tree key)
 +	deadline = rd->deadline & ~((1ULL << ADIOS_QUANTUM_SHIFT) - 1);
@@ -2048,7 +2373,7 @@ index 000000000..7a1c4d5e2
 +		// -- left as-is on purpose.
 +		if (count && (!has_base ||
 +				ad->batch_count[page][optype] >= effective_batch_limit(ad, optype) ||
-+				(tpl + added_lat + rd->pred_lat) > ad->global_latency_window)) {
++				(tpl + added_lat + rd->pred_lat) > READ_ONCE(ad->global_latency_window))) {
 +			stop = true;
 +			break;
 +		}
@@ -2189,7 +2514,7 @@ index 000000000..7a1c4d5e2
 +	// current page is empty or the total ongoing latency is below the threshold
 +	if (!bq_page_has_rq(bq_state, !ad->bq_page) &&
 +			(!bq_curr_page_has_rq || (!tpl || tpl < div_u64(
-+			ad->global_latency_window * ad->bq_refill_below_ratio, 100))) &&
++			READ_ONCE(ad->global_latency_window) * ad->bq_refill_below_ratio, 100))) &&
 +			eval_this_adios_state(state, ADIOS_STATE_DL))
 +		fill_batch_queues(ad, tpl);
 +
@@ -2743,6 +3068,20 @@ index 000000000..7a1c4d5e2
 +	for (int i = 0; i < 2; i++)
 +		WARN_ON_ONCE(!list_empty(&ad->prio_queue[i]));
 +
++	/* REVIEW SUGGESTION: exit_sched previously only checked prio_queue.
++	 * Scheduler switching (none <-> adios <-> mq-deadline, or the
++	 * genhd.c boot enforcer forcing a switch) is exactly where lifetime
++	 * bugs -- a request left behind in a structure this teardown
++	 * doesn't look at -- would surface. These are diagnostic only
++	 * (WARN_ON_ONCE, not a functional fix on their own); the belief is
++	 * everything should already be empty by this point, so firing here
++	 * means an insert/dispatch path is leaking a request somewhere. */
++	for (int i = 0; i < 2; i++)
++		WARN_ON_ONCE(!RB_EMPTY_ROOT(&ad->dl_tree[i].rb_root));
++	for (int page = 0; page < ADIOS_BQ_PAGES; page++)
++		for (u8 optype = 0; optype < ADIOS_OPTYPES; optype++)
++			WARN_ON_ONCE(!list_empty(&ad->batch_queue[page][optype]));
++
 +	for (u8 i = 0; i < ADIOS_OPTYPES; i++) {
 +		struct latency_model *model = &ad->latency_model[i];
 +		struct latency_model_params *params = rcu_access_pointer(model->params);
@@ -2850,7 +3189,7 @@ index 000000000..7a1c4d5e2
 +	if (ret) \
 +		return ret; \
 +	sideload_latency_model(&ad->latency_model[optype], 0, 0); \
-+	ad->latency_target[optype] = nsec; \
++	WRITE_ONCE(ad->latency_target[optype], nsec); \
 +	return count; \
 +} \
 +static ssize_t adios_batch_limit_##name##_show( \
@@ -2860,9 +3199,15 @@ index 000000000..7a1c4d5e2
 +} \
 +static ssize_t adios_batch_limit_##name##_store( \
 +		struct elevator_queue *e, const char *page, size_t count) { \
-+	unsigned long max_batch; \
++	/* REVIEW FIX: was kstrtoul() into an unsigned long (64-bit on \
++	 * arm64) with no upper-bound check, then assigned into batch_limit[]\
++	 * (u32) -- a value like 4294967296 parsed fine and silently \
++	 * truncated to 0 on assignment. kstrtou32() rejects anything that \
++	 * doesn't fit in u32 outright (-ERANGE), matching the field's own \
++	 * width instead of relying on an unwritten range check. */ \
++	u32 max_batch; \
 +	int ret; \
-+	ret = kstrtoul(page, 10, &max_batch); \
++	ret = kstrtou32(page, 10, &max_batch); \
 +	if (ret || max_batch == 0) \
 +		return -EINVAL; \
 +	struct adios_data *ad = e->elevator_data; \
@@ -2880,10 +3225,18 @@ index 000000000..7a1c4d5e2
 +	struct adios_data *ad = e->elevator_data;
 +	u32 total_count, read_count, write_count, discard_count;
 +
-+	total_count = ad->batch_actual_max_total;
-+	read_count = ad->batch_actual_max_size[ADIOS_READ];
-+	write_count = ad->batch_actual_max_size[ADIOS_WRITE];
-+	discard_count = ad->batch_actual_max_size[ADIOS_DISCARD];
++	/* REVIEW FIX: the hot-path writer (fill_batch_queues(), called only
++	 * from dispatch_from_bq() under bq_lock) updates these under that
++	 * lock; this show and the reset store below didn't take it, so a
++	 * concurrent read/reset could observe a torn update. Low real-world
++	 * severity (pure observability counters, never fed back into a
++	 * scheduling decision), but the fix is free. */
++	scoped_guard(spinlock_irqsave, &ad->bq_lock) {
++		total_count = ad->batch_actual_max_total;
++		read_count = ad->batch_actual_max_size[ADIOS_READ];
++		write_count = ad->batch_actual_max_size[ADIOS_WRITE];
++		discard_count = ad->batch_actual_max_size[ADIOS_DISCARD];
++	}
 +
 +	return sprintf(page,
 +		"Total  : %u\nDiscard: %u\nRead   : %u\nWrite  : %u\n",
@@ -3070,10 +3423,12 @@ index 000000000..7a1c4d5e2
 +	if (ret || val != 1)
 +		return -EINVAL;
 +
-+	for (u8 i = 0; i < ADIOS_OPTYPES; i++)
-+		ad->batch_actual_max_size[i] = 0;
++	scoped_guard(spinlock_irqsave, &ad->bq_lock) {
++		for (u8 i = 0; i < ADIOS_OPTYPES; i++)
++			ad->batch_actual_max_size[i] = 0;
 +
-+	ad->batch_actual_max_total = 0;
++		ad->batch_actual_max_total = 0;
++	}
 +
 +	return count;
 +}
@@ -3227,7 +3582,7 @@ index 000000000..7a1c4d5e2
 +
 +		spin_lock_irqsave(&model->update_lock, flags);
 +		changed = (model->lm_block_size_threshold != val);
-+		model->lm_block_size_threshold = val;
++		WRITE_ONCE(model->lm_block_size_threshold, val);
 +		spin_unlock_irqrestore(&model->update_lock, flags);
 +
 +		if (changed)
@@ -3413,7 +3768,7 @@ diff --git a/block/genhd.c b/block/genhd.c
 index c9dc2f2c..a17b7705 100644
 --- a/block/genhd.c
 +++ b/block/genhd.c
-@@ -1525,3 +1525,67 @@ void inc_diskseq(struct gendisk *disk)
+@@ -1525,3 +1525,77 @@ void inc_diskseq(struct gendisk *disk)
  {
  	disk->diskseq = atomic64_inc_return(&diskseq);
  }
@@ -3445,6 +3800,13 @@ index c9dc2f2c..a17b7705 100644
 +{
 +	struct class_dev_iter iter;
 +	struct device *dev;
++	/* REVIEW FIX: restrict enforcement to a specific disk, if the
++	 * builder configured one, instead of every disk in the system --
++	 * see CONFIG_MQ_IOSCHED_ADIOS_ENFORCE_DISK's help text for why.
++	 * Empty string (the default) preserves the original, unrestricted
++	 * behavior exactly.
++	 */
++	static const char target[] = CONFIG_MQ_IOSCHED_ADIOS_ENFORCE_DISK;
 +
 +	class_dev_iter_init(&iter, &block_class, NULL, &disk_type);
 +	while ((dev = class_dev_iter_next(&iter))) {
@@ -3456,6 +3818,9 @@ index c9dc2f2c..a17b7705 100644
 +		 * check inside it) — only need to skip not-yet-populated
 +		 * disks here. */
 +		if (!q || get_capacity(disk) == 0)
++			continue;
++
++		if (target[0] && strcmp(disk->disk_name, target) != 0)
 +			continue;
 +
 +		mutex_lock(&q->sysfs_lock);
