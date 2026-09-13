@@ -1,5 +1,5 @@
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 1830a2e46..972643b87 100644
+index 1830a2e46..a953b3a34 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -170,6 +170,36 @@ u8   __read_mostly sched_bore_topapp_discount  = 6;
@@ -39,7 +39,7 @@ index 1830a2e46..972643b87 100644
  #endif
  
  int sched_thermal_decay_shift;
-@@ -7963,6 +7993,55 @@ static void set_skip_buddy(struct sched_entity *se)
+@@ -7963,6 +7993,62 @@ static void set_skip_buddy(struct sched_entity *se)
  		cfs_rq_of(se)->skip = se;
  }
  
@@ -88,6 +88,13 @@ index 1830a2e46..972643b87 100644
 +		return false;
 +
 +	cfs_rq->bore_warp_deadline = now + (u64)sched_bore_warp_us * NSEC_PER_USEC;
++	/* Cross-subsystem hint for PCCG (cpufreq_pccg.c) -- read-and-cleared
++	 * there, not gated by anything else here: if warp is disabled
++	 * (sched_bore_warp_enabled=0) this function returns false above
++	 * before ever reaching this line, so the flag simply never gets
++	 * set and PCCG's consumer is a permanent no-op, with zero extra
++	 * checks needed on the cpufreq side. */
++	cfs_rq->bore_warp_fired = true;
 +	return true;
 +}
 +#endif
@@ -95,7 +102,7 @@ index 1830a2e46..972643b87 100644
  /*
   * Preempt the current task with a newly woken task if needed:
   */
-@@ -8045,6 +8124,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+@@ -8045,6 +8131,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
  	if (ignore)
  		return;
  
@@ -111,10 +118,10 @@ index 1830a2e46..972643b87 100644
  		/*
  		 * Bias pick_next to pick the sched entity that is
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 848680566..8efe16e9e 100644
+index 848680566..0bb9fa0e0 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -577,6 +577,15 @@ struct cfs_rq {
+@@ -577,6 +577,21 @@ struct cfs_rq {
  
  	struct rb_root_cached	tasks_timeline;
  
@@ -125,6 +132,12 @@ index 848680566..8efe16e9e 100644
 +	 * window. See the comment on bore_warp_preempt() for why this is a
 +	 * cooldown and not a per-task allowance. */
 +	u64			bore_warp_deadline;
++	/* Set by bore_warp_preempt() the instant it grants a warp; consumed
++	 * (read-and-cleared) by PCCG's pccg_bore_warp_check() in
++	 * cpufreq_pccg.c as a cross-subsystem signal -- see the comment
++	 * there for why a warp grant gets treated differently from PCCG's
++	 * own, weaker burst_penalty-only check. */
++	bool			bore_warp_fired;
 +#endif
 +
  	/*
