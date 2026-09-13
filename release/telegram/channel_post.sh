@@ -79,6 +79,9 @@ linux_ver = ''
 kernel_version = ''
 bore_version = ''
 adios_version = ''
+build_system = ''
+compiler = ''
+lto = ''
 for f in sorted(glob.glob(links_dir + '/*.json')):
     try:
         data = json.load(open(f))
@@ -90,14 +93,18 @@ for f in sorted(glob.glob(links_dir + '/*.json')):
             versions[v] = kv
         if not linux_ver: linux_ver = data.get('linux_ver','')
         if not kernel_version: kernel_version = data.get('kernel_version','')
-        # bore/adios are the same addon regardless of which KSU variant
-        # built it, so any one variant's resolved version is as good as
-        # any other's — first non-empty wins, same as linux_ver above.
+        # bore/adios/build_system/compiler/lto are the same regardless of
+        # which KSU variant built it, so any one variant's resolved value
+        # is as good as any other's — first non-empty wins, same as
+        # linux_ver above.
         if not bore_version: bore_version = data.get('bore_version','')
         if not adios_version: adios_version = data.get('adios_version','')
+        if not build_system: build_system = data.get('build_system','')
+        if not compiler: compiler = data.get('compiler','')
+        if not lto: lto = data.get('lto','')
     except Exception as e:
         print('[warn] ' + str(e), file=sys.stderr)
-print(json.dumps({'links':result,'versions':versions,'linux_ver':linux_ver,'kernel_version':kernel_version,'bore_version':bore_version,'adios_version':adios_version}))
+print(json.dumps({'links':result,'versions':versions,'linux_ver':linux_ver,'kernel_version':kernel_version,'bore_version':bore_version,'adios_version':adios_version,'build_system':build_system,'compiler':compiler,'lto':lto}))
 ")
 
 VARIANT_LINKS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['links']))")
@@ -106,7 +113,10 @@ LINUX_VER=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(
 KERNEL_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['kernel_version'])")
 BORE_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['bore_version'])")
 ADIOS_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['adios_version'])")
-export LINUX_VER KERNEL_VERSION BORE_VERSION ADIOS_VERSION
+BUILD_SYSTEM_DISPLAY=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['build_system'])")
+COMPILER_STRING=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['compiler'])")
+LTO_MODE=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['lto'])")
+export LINUX_VER KERNEL_VERSION BORE_VERSION ADIOS_VERSION BUILD_SYSTEM_DISPLAY COMPILER_STRING LTO_MODE
 
 if [ "$VARIANT_LINKS_JSON" = "{}" ] || [ -z "$VARIANT_LINKS_JSON" ]; then
     warn "Skipping channel post: no valid variant links found"
@@ -197,6 +207,32 @@ CAPTION_CHANNEL="$(cat "$CAPTION_CHANNEL_FILE")"
 rm -f "$CAPTION_CHANNEL_FILE" "$CAPTION_GROUP_DUMMY"
 
 # ------------------------------------------------------
+# Build rich message (tabelas + seção recolhível, estilo chainonyourdoor)
+# Mesmas env vars do caption builder acima — reaproveita ADDONS/versões/
+# variant links já resolvidos, não recalcula nada.
+# ------------------------------------------------------
+RICH_MESSAGE_FILE="/tmp/channel_post_rich.json"
+
+LINUX_VER="${LINUX_VER:-N/A}" \
+KERNEL_VERSION="${KERNEL_VERSION:-}" \
+ADDONS="${ADDONS:-}" \
+BORE_VERSION="${BORE_VERSION:-}" \
+ADIOS_VERSION="${ADIOS_VERSION:-}" \
+BUILD_SYSTEM_DISPLAY="${BUILD_SYSTEM_DISPLAY:-}" \
+COMPILER_STRING="${COMPILER_STRING:-}" \
+LTO_MODE="${LTO_MODE:-}" \
+TICK_RATE="${TICK_RATE:-}" \
+CHANGELOG="${CHANGELOG:-}" \
+GITHUB_SHA="${GITHUB_SHA:-}" \
+GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
+GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
+GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
+VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
+VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
+python3 "${SAGA_PATCH_DIR}/release/telegram/rich_caption.py" "$RICH_MESSAGE_FILE" \
+    || error "Rich message builder failed"
+
+# ------------------------------------------------------
 # Send photo to channel
 # ------------------------------------------------------
 log "📸 Sending channel post..."
@@ -217,4 +253,28 @@ if telegram_api_call "sendPhoto" "/tmp/tg_channel_response.json" "Channel send" 
 
 fi
 
-rm -f /tmp/tg_channel_response.json /tmp/tg_discussion_response.json
+# ------------------------------------------------------
+# Send rich message to channel (formato tabelas/seções recolhíveis).
+# Best-effort e NÃO bloqueia o job: se sendRichMessage falhar (ex: bot
+# ainda sem Premium vinculado, cliente do usuário desatualizado, etc.),
+# o post MarkdownV2 acima já foi entregue de qualquer forma. Uma vez que
+# isso for confirmado funcionando em produção, dá pra remover os dois
+# blocos sendPhoto+caption acima e deixar só o rich message.
+# ------------------------------------------------------
+RICH_PAYLOAD_CHANNEL="/tmp/channel_post_rich_payload_channel.json"
+python3 -c "
+import json
+rich = json.load(open('${RICH_MESSAGE_FILE}'))
+json.dump({'chat_id': '${TELEGRAM_CHANNEL_ID}', 'rich_message': rich}, open('${RICH_PAYLOAD_CHANNEL}', 'w'))
+"
+
+if telegram_api_call "sendRichMessage" "/tmp/tg_channel_rich_response.json" "Channel rich message" \
+    -H "Content-Type: application/json" \
+    --data-binary "@${RICH_PAYLOAD_CHANNEL}"; then
+    log "✅ Channel rich message sent"
+else
+    warn "Rich message send failed — MarkdownV2 post above still stands"
+fi
+
+rm -f /tmp/tg_channel_response.json /tmp/tg_discussion_response.json \
+      "$RICH_MESSAGE_FILE" "$RICH_PAYLOAD_CHANNEL" /tmp/tg_channel_rich_response.json

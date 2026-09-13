@@ -169,8 +169,12 @@ if [ "$RUN_MODE_UPPER" = "RELEASE" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then
         LINK_FILE="${LINKS_DIR}/${VARIANT_KEY}.json"
         # bore_version/adios_version: exported to $GITHUB_ENV by bore.sh/
         # adios.sh in run_addons() earlier in this same job, only present
-        # when that addon was actually applied this build.
-        echo "{\"variant\":\"${VARIANT_KEY}\",\"link\":\"${GROUP_MSG_LINK}\",\"linux_ver\":\"${LINUX_VER}\",\"kernel_version\":\"${KERNEL_VERSION}\",\"ksu_version\":\"${KERNEL_VARIANT_VERSION}\",\"bore_version\":\"${BORE_VERSION:-}\",\"adios_version\":\"${ADIOS_VERSION:-}\"}" > "${LINK_FILE}"
+        # when that addon was actually applied this build. build_system/
+        # compiler/lto: same idea as linux_ver/kernel_version below — every
+        # build has one, needed by the channel's rich message (see
+        # rich_caption.py) since that job only sees these per-variant JSONs,
+        # never the per-job env directly.
+        echo "{\"variant\":\"${VARIANT_KEY}\",\"link\":\"${GROUP_MSG_LINK}\",\"linux_ver\":\"${LINUX_VER}\",\"kernel_version\":\"${KERNEL_VERSION}\",\"ksu_version\":\"${KERNEL_VARIANT_VERSION}\",\"bore_version\":\"${BORE_VERSION:-}\",\"adios_version\":\"${ADIOS_VERSION:-}\",\"build_system\":\"${BUILD_SYSTEM_DISPLAY:-}\",\"compiler\":\"${COMPILER_STRING:-}\",\"lto\":\"${LTO_MODE:-}\"}" > "${LINK_FILE}"
         log "Variant link saved → ${LINK_FILE} ✅"
     fi
 fi
