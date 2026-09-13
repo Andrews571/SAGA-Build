@@ -60,10 +60,10 @@ index 99bdd96f4..c35ebc6bc 100644
  #endif
 diff --git a/kernel/sched/cpufreq_pccg.c b/kernel/sched/cpufreq_pccg.c
 new file mode 100644
-index 000000000..34d75f411
+index 000000000..fefb2dde6
 --- /dev/null
 +++ b/kernel/sched/cpufreq_pccg.c
-@@ -0,0 +1,1181 @@
+@@ -0,0 +1,1218 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA PCCG (Pre CPU Clutch Governor) — CPUFreq governor
@@ -479,8 +479,44 @@ index 000000000..34d75f411
 +	cap = arch_scale_cpu_capacity(pccg_cpu->cpu);
 +	pccg_hispeed_raise(pccg_cpu, time_ns, pccg_target_util_instant(pccg_cpu, cap));
 +}
++
++/*
++ * pccg_bore_warp_check() - the actual bore-warp integration: consumes the
++ * cross-subsystem hint bore_warp_preempt() (kernel/sched/fair.c) sets the
++ * instant it forces a preemption.
++ *
++ * This is a strictly stronger signal than the plain burst_penalty read in
++ * pccg_bore_check() above: that function fires whenever *any* low-score
++ * task happens to be curr, which includes plenty of ordinary cases where
++ * the soft vruntime-based preemption was already going to handle things
++ * fine on its own. A warp grant means BORE's own scheduler-side logic
++ * looked at the situation and judged it bad enough to force a hard
++ * preemption over the normal check -- i.e. it is BORE actively
++ * classifying this moment as more important, not just "a fresh task
++ * happens to be running". That's exactly the distinction
++ * instant_trigger_pct exists to make, so a warp grant is treated as a
++ * CONFIRMED trigger (full target, like the idle-time window), not an
++ * unconfirmed one.
++ *
++ * A no-op with zero overhead beyond one bool read when
++ * sched_bore_warp_enabled=0 -- bore_warp_preempt() never sets the flag in
++ * that case, so there's nothing here to consume.
++ */
++static void pccg_bore_warp_check(struct pccg_cpu *pccg_cpu, u64 time_ns)
++{
++	struct cfs_rq *cfs_rq = &cpu_rq(pccg_cpu->cpu)->cfs;
++	unsigned long cap;
++
++	if (!cfs_rq->bore_warp_fired)
++		return;
++	cfs_rq->bore_warp_fired = false;
++
++	cap = arch_scale_cpu_capacity(pccg_cpu->cpu);
++	pccg_hispeed_raise(pccg_cpu, time_ns, pccg_target_util(pccg_cpu, cap));
++}
 +#else
 +static inline void pccg_bore_check(struct pccg_cpu *pccg_cpu, u64 time_ns) {}
++static inline void pccg_bore_warp_check(struct pccg_cpu *pccg_cpu, u64 time_ns) {}
 +#endif
 +
 +/*
@@ -524,6 +560,7 @@ index 000000000..34d75f411
 +	pccg_update_hispeed(pccg_cpu, time);
 +	pccg_wake_edge_check(pccg_cpu, time);
 +	pccg_bore_check(pccg_cpu, time);
++	pccg_bore_warp_check(pccg_cpu, time);
 +	if (pccg_cpu->hispeed_floor > pccg_cpu->util)
 +		pccg_cpu->util = pccg_cpu->hispeed_floor;
 +}
