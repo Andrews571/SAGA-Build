@@ -6,7 +6,6 @@
 # Aggregates all variant links and sends a single photo post to the channel.
 # Called from the notify-channel job after all builds have finished.
 
-CAPTION_BUILDER="${SAGA_PATCH_DIR}/release/telegram/caption.py"
 BANNER_DIR="${SAGA_PATCH_DIR}/release/telegram"
 
 # Run standalone (bash release/telegram/channel_post.sh) from notify-channel,
@@ -165,51 +164,9 @@ if [ "$MISSING_VARIANTS_JSON" != "[]" ]; then
 fi
 
 # ------------------------------------------------------
-# Features Telegraph page (BORE/ADIOS/BBRv3/BBG) — best-effort, gracefully
-# degrades to no Features link if TELEGRAPH_TOKEN isn't set or the API
-# call fails (see telegraph_page.py). Must run before the caption builder
-# below, since the resulting URL (possibly empty) feeds into it.
-# ------------------------------------------------------
-FEATURES_URL=$(ADDONS="${ADDONS:-}" \
-    LINUX_VER="${LINUX_VER:-N/A}" \
-    BORE_VERSION="${BORE_VERSION:-}" \
-    ADIOS_VERSION="${ADIOS_VERSION:-}" \
-    TICK_RATE="${TICK_RATE:-}" \
-    TELEGRAPH_TOKEN="${TELEGRAPH_TOKEN:-}" \
-    python3 "${SAGA_PATCH_DIR}/release/telegram/telegraph_page.py")
-export FEATURES_URL
-
-# ------------------------------------------------------
-# Build channel caption
-# ------------------------------------------------------
-CAPTION_GROUP_DUMMY="/tmp/channel_post_group_dummy.txt"
-CAPTION_CHANNEL_FILE="/tmp/channel_post_caption.txt"
-
-LINUX_VER="${LINUX_VER:-N/A}" \
-KERNEL_VERSION="${KERNEL_VERSION:-}" \
-ADDONS="${ADDONS:-}" \
-BORE_VERSION="${BORE_VERSION:-}" \
-ADIOS_VERSION="${ADIOS_VERSION:-}" \
-TICK_RATE="${TICK_RATE:-}" \
-FEATURES_URL="${FEATURES_URL:-}" \
-CHANGELOG="${CHANGELOG:-}" \
-TELEGRAM_GROUP="${TELEGRAM_GROUP:-}" \
-GITHUB_SHA="${GITHUB_SHA:-}" \
-GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
-GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
-GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
-VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
-VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
-python3 "$CAPTION_BUILDER" "$CAPTION_GROUP_DUMMY" "$CAPTION_CHANNEL_FILE" \
-    || error "Caption builder failed"
-
-CAPTION_CHANNEL="$(cat "$CAPTION_CHANNEL_FILE")"
-rm -f "$CAPTION_CHANNEL_FILE" "$CAPTION_GROUP_DUMMY"
-
-# ------------------------------------------------------
-# Build rich message (tabelas + seção recolhível, estilo chainonyourdoor)
-# Mesmas env vars do caption builder acima — reaproveita ADDONS/versões/
-# variant links já resolvidos, não recalcula nada.
+# Build rich message (tabelas + duas abas recolhíveis: "What's Inside?" e
+# "Features" — post único, banner embutido). Esse é o ÚNICO formato de post
+# agora; o caption MarkdownV2 + Telegraph antigo foi removido.
 # ------------------------------------------------------
 RICH_MESSAGE_FILE="/tmp/channel_post_rich.json"
 
@@ -229,52 +186,30 @@ GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
 GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
 VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
 VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
+BANNER_ATTACH_NAME="banner" \
+SAGA_ADDONS_DIR="${SAGA_PATCH_DIR}/kernel/addons" \
 python3 "${SAGA_PATCH_DIR}/release/telegram/rich_caption.py" "$RICH_MESSAGE_FILE" \
     || error "Rich message builder failed"
 
 # ------------------------------------------------------
-# Send photo to channel
+# Send rich message (banner + tabelas + abas) — multipart: "rich_message"
+# vai como campo texto (JSON), "banner" como arquivo, referenciado dentro
+# do JSON via "attach://banner" (mesma convenção de sendMediaGroup).
 # ------------------------------------------------------
 log "📸 Sending channel post..."
 
-if telegram_api_call "sendPhoto" "/tmp/tg_channel_response.json" "Channel send" \
-    -F "chat_id=${TELEGRAM_CHANNEL_ID}" \
-    -F "parse_mode=MarkdownV2" \
-    -F "photo=@${BANNER_PATH}" \
-    -F "caption=${CAPTION_CHANNEL}" \
-&&
-   telegram_api_call "sendPhoto" "/tmp/tg_discussion_response.json" "Discussion send" \
-    -F "chat_id=${TELEGRAM_DISCUSSION_ID}" \
-    -F "parse_mode=MarkdownV2" \
-    -F "photo=@${BANNER_PATH}" \
-    -F "caption=${CAPTION_CHANNEL}"; then
-
-    log "✅ Channel and discussion posts sent"
-
-fi
-
-# ------------------------------------------------------
-# Send rich message to channel (formato tabelas/seções recolhíveis).
-# Best-effort e NÃO bloqueia o job: se sendRichMessage falhar (ex: bot
-# ainda sem Premium vinculado, cliente do usuário desatualizado, etc.),
-# o post MarkdownV2 acima já foi entregue de qualquer forma. Uma vez que
-# isso for confirmado funcionando em produção, dá pra remover os dois
-# blocos sendPhoto+caption acima e deixar só o rich message.
-# ------------------------------------------------------
-RICH_PAYLOAD_CHANNEL="/tmp/channel_post_rich_payload_channel.json"
-python3 -c "
-import json
-rich = json.load(open('${RICH_MESSAGE_FILE}'))
-json.dump({'chat_id': '${TELEGRAM_CHANNEL_ID}', 'rich_message': rich}, open('${RICH_PAYLOAD_CHANNEL}', 'w'))
-"
-
 if telegram_api_call "sendRichMessage" "/tmp/tg_channel_rich_response.json" "Channel rich message" \
-    -H "Content-Type: application/json" \
-    --data-binary "@${RICH_PAYLOAD_CHANNEL}"; then
-    log "✅ Channel rich message sent"
-else
-    warn "Rich message send failed — MarkdownV2 post above still stands"
+    -F "chat_id=${TELEGRAM_CHANNEL_ID}" \
+    -F "rich_message=<${RICH_MESSAGE_FILE}" \
+    -F "banner=@${BANNER_PATH}" \
+&&
+   telegram_api_call "sendRichMessage" "/tmp/tg_discussion_rich_response.json" "Discussion rich message" \
+    -F "chat_id=${TELEGRAM_DISCUSSION_ID}" \
+    -F "rich_message=<${RICH_MESSAGE_FILE}" \
+    -F "banner=@${BANNER_PATH}"; then
+
+    log "✅ Channel and discussion rich messages sent"
+
 fi
 
-rm -f /tmp/tg_channel_response.json /tmp/tg_discussion_response.json \
-      "$RICH_MESSAGE_FILE" "$RICH_PAYLOAD_CHANNEL" /tmp/tg_channel_rich_response.json
+rm -f "$RICH_MESSAGE_FILE" /tmp/tg_channel_rich_response.json /tmp/tg_discussion_rich_response.json
