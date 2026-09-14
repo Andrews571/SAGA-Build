@@ -552,6 +552,89 @@ Verified: `patch -p1 --fuzz=0` against a freshly reconstructed
 block/adios.c (prior v3.3.5 state applied first) -- zero rejects,
 zero fuzz, zero offset.
 ---
+From: ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.5-SAGA -- 3 findings from a second,
+ independent external review, one of them a real regression this
+ patch's own earlier fix introduced
+
+This review explicitly scoped itself to items NOT already covered by
+prior rounds documented in this file, and found something none of the
+earlier rounds (including the ones in this same file) caught: the
+per-CPU race fix earlier in this changelog introduced a worse bug than
+the one it fixed. All 3 below verified against real source (this
+tree's kernel/smp.c for #1, this file for #2 and #3) before applying.
+
+1. CRITICAL, own regression: sideload_latency_model() calls
+   spin_lock_irqsave(&model->update_lock, flags) -- disabling this
+   CPU's local IRQs -- and, still inside that section, called
+   lm_reset_pcpu_buckets(), which (per this same v3.3.5's earlier fix)
+   is on_each_cpu(fn, model, 1), i.e. wait=1. Checked this tree's own
+   kernel/smp.c: smp_call_function_many_cond() (which on_each_cpu()
+   uses) asserts lockdep_assert_irqs_enabled() and documents why in
+   its own comment -- "Can deadlock when called with interrupts
+   disabled". This is reachable from userspace (any sysfs write that
+   triggers a sideload -- e.g. lm_block_size_threshold's store, or
+   direct reset), not a theoretical path. Fix: moved the
+   lm_reset_pcpu_buckets(model) call to before spin_lock_irqsave()
+   instead of after it -- ordinary IRQs-enabled task-context footing,
+   same as any other on_each_cpu() caller, same as it should have been
+   the first time. This does introduce a benign ordering skew (a
+   completion racing this exact call could land in a freshly-zeroed
+   bucket against the about-to-be-replaced old params instead of the
+   also-about-to-be-replaced old bucket state) -- explicitly accepted
+   in the new comment at the call site, same class of single-sample
+   skew this file already accepts elsewhere (e.g. the depth
+   controller's double-buffer, documented in its own struct comment).
+   Lesson noted: the fix for the original per-CPU race was verified by
+   confirming it applies and compiles cleanly, but not checked against
+   every calling *context* it would run in -- braces balancing and a
+   clean patch apply don't catch a locking-context violation like this
+   one. Worth being more suspicious of exactly this class of thing
+   going forward.
+
+2. Cosmetic, no functional impact: a comment directly above
+   shrink_work_fn() still described force_shrink_model()'s allocation
+   as "still GFP_ATOMIC ... left as GFP_ATOMIC deliberately" -- stale
+   since an earlier review round ("SAGA FIX 3rd review round",
+   documented right above force_shrink_model() itself) already moved
+   that allocation to GFP_KERNEL, before the lock. The two comments
+   simply never got reconciled when the second one was written. Fixed
+   the stale one to describe the actual current code instead of
+   contradicting it -- orphaned comments like this are exactly what
+   caused this same review to have to go re-verify something already
+   fixed elsewhere in the file.
+
+3. REAL, architectural gap: block/elevator.c's
+   elevator_get_default(), CONFIG_MQ_IOSCHED_DEFAULT_ADIOS branch,
+   returned elevator_get(q, "adios", false) unconditionally --
+   completely skipping the hardware-topology guard
+   (q->nr_hw_queues != 1 && !blk_mq_is_shared_tags(...) -> NULL) that
+   the stock/mq-deadline branch right below it still respects. That
+   guard exists upstream specifically to avoid forcing a software
+   scheduler onto a queue with genuine multiple hardware queues and no
+   shared tags -- real hardware-level parallelism that software
+   reordering doesn't help and can actively hurt. This backport
+   explicitly targets UFS MCQ, which is exactly a multiple-hw-queue
+   configuration, so this gap could force ADIOS onto precisely the
+   kind of queue upstream's own logic says not to. Not mentioned in
+   any prior review round. Fixed by applying the identical guard check
+   in the ADIOS branch before calling elevator_get() -- ADIOS gets no
+   special exemption from a check that exists for a hardware reason,
+   not a scheduler-specific one.
+
+Verified but not independently re-confirmed in this round (this
+review's own "verified correct" list, taken on the reviewer's word
+rather than re-derived from source again here): batch_limit[]'s
+kstrtou32 fix, lm_interactive_boost_ns's SYSFS_ULL_DECL fix, and
+lm_adapt_bounds_lock's 4-attribute TOCTOU serialization -- all three
+were already fixed/verified in earlier rounds in this same file and
+this review found nothing new to add on any of them.
+
+Verified: `patch -p1 --fuzz=0` against a freshly reconstructed
+block/adios.c (prior v3.3.5 state applied first) -- zero rejects,
+zero fuzz, zero offset on Kconfig.iosched, adios.c, elevator.c, and
+genhd.c.
+---
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
 index 08b8af92f..ee5d322a0 100644
 --- a/block/Kconfig.iosched
@@ -614,7 +697,7 @@ new file mode 100644
 index 000000000..7a1c4d5e2
 --- /dev/null
 +++ b/block/adios.c
-@@ -0,0 +1,3129 @@
+@@ -0,0 +1,3154 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Adaptive Deadline I/O Scheduler (ADIOS)
@@ -2613,17 +2696,19 @@ index 000000000..7a1c4d5e2
 +
 +// CHATGPT-REVIEW FIX #4: force_shrink_model() moved here from the
 +// timer callback. Runs in a workqueue's own process context, not
-+// softirq and not the I/O completion hot path -- the allocation
-+// inside force_shrink_model() (still GFP_ATOMIC; switching to
-+// GFP_KERNEL would additionally require restructuring
-+// force_shrink_model to allocate before taking model->update_lock,
-+// since a spinlock can't be held across a sleeping allocation -- left
-+// as GFP_ATOMIC deliberately to avoid that extra locking change for
-+// now, especially since a failed GFP_ATOMIC shrink already degrades
-+// gracefully, just skipping that attempt) no longer competes with
-+// timer/softirq processing for CPU time exactly when the device may
-+// already be under pressure (the situation that triggers a shrink in
-+// the first place).
++// softirq and not the I/O completion hot path.
++// REVIEW FIX (stale comment): this used to say the allocation inside
++// force_shrink_model() was left on GFP_ATOMIC deliberately. That was
++// true when this comment was written, but force_shrink_model() was
++// since restructured (see its own comment, "SAGA FIX 3rd review
++// round") to allocate with GFP_KERNEL *before* taking
++// model->update_lock, precisely so it wouldn't need to stay on
++// GFP_ATOMIC. This comment just never got updated to match -- fixed
++// here instead of left contradicting the actual code. Either way,
++// running in this workqueue instead of a timer callback still matters
++// on its own: it no longer competes with timer/softirq processing for
++// CPU time exactly when the device may already be under pressure (the
++// situation that triggers a shrink in the first place).
 +static void shrink_work_fn(struct work_struct *work) {
 +	struct adios_data *ad = container_of(work, struct adios_data, shrink_work);
 +
@@ -3118,6 +3203,31 @@ index 000000000..7a1c4d5e2
 +	if (!new_params)
 +		return;
 +
++	/*
++	 * REVIEW FIX (found after the v3.3.5 per-CPU race fix -- that fix
++	 * introduced this one): on_each_cpu(..., wait=1) must be called
++	 * with local IRQs enabled -- kernel/smp.c's own
++	 * smp_call_function_many_cond() asserts exactly this
++	 * (lockdep_assert_irqs_enabled()) and documents why in its own
++	 * comment: "Can deadlock when called with interrupts disabled".
++	 * The previous version of this function called
++	 * lm_reset_pcpu_buckets() (which does the on_each_cpu) *after*
++	 * spin_lock_irqsave() below -- i.e. with this CPU's IRQs already
++	 * off. Moved here, before the lock, so the per-CPU reset completes
++	 * on ordinary IRQs-enabled task-context footing, same as any other
++	 * on_each_cpu() caller. This does mean a completion racing this
++	 * exact call could count against the about-to-be-replaced old
++	 * params into a freshly-zeroed bucket instead of the also-about-
++	 * to-be-replaced old bucket state -- a benign, one-sample-class
++	 * ordering skew, not a correctness issue: this whole function only
++	 * ever runs on an explicit, rare, sysfs-triggered reset, and every
++	 * other timing skew in this file's stats paths already accepts the
++	 * same order of imprecision on purpose (see the double-buffer
++	 * depth controller's own comment for a documented example of that
++	 * same tradeoff).
++	 */
++	lm_reset_pcpu_buckets(model);
++
 +	spin_lock_irqsave(&model->update_lock, flags);
 +
 +	old_params = rcu_dereference_protected(model->params,
@@ -3135,8 +3245,6 @@ index 000000000..7a1c4d5e2
 +	new_params->large_sum_delay = slope;
 +	new_params->large_sum_bsize = 1024; /* Corresponds to 1 KiB */
 +	new_params->large_count = 1;
-+
-+	lm_reset_pcpu_buckets(model);
 +
 +	rcu_assign_pointer(model->params, new_params);
 +	spin_unlock_irqrestore(&model->update_lock, flags);
@@ -3748,11 +3856,26 @@ diff --git a/block/elevator.c b/block/elevator.c
 index a7644462d..64211ff49 100644
 --- a/block/elevator.c
 +++ b/block/elevator.c
-@@ -638,11 +638,15 @@ static struct elevator_type *elevator_get_default(struct request_queue *q)
+@@ -638,11 +638,30 @@ static struct elevator_type *elevator_get_default(struct request_queue *q)
  	if (q->tag_set->flags & BLK_MQ_F_NO_SCHED_BY_DEFAULT)
  		return NULL;
  
 +#ifdef CONFIG_MQ_IOSCHED_DEFAULT_ADIOS
++	/*
++	 * REVIEW FIX: this branch used to return elevator_get(q, "adios",
++	 * false) unconditionally, skipping the exact hardware-topology
++	 * guard the stock/mq-deadline branch below still respects. That
++	 * guard exists to avoid forcing a software scheduler onto a queue
++	 * with genuine multiple hardware queues and no shared tags --
++	 * real hardware-level parallelism that reordering in software
++	 * doesn't help and can hurt. This backport explicitly targets UFS
++	 * MCQ, which is exactly a multiple-hw-queue configuration, so
++	 * skipping this guard could force ADIOS onto a queue where
++	 * upstream's own judgment is "don't." Apply the same check ADIOS
++	 * gets no exemption from it.
++	 */
++	if (q->nr_hw_queues != 1 && !blk_mq_is_shared_tags(q->tag_set->flags))
++		return NULL;
 +	return elevator_get(q, "adios", false);
 +#else
  	if (q->nr_hw_queues != 1 &&
