@@ -123,12 +123,16 @@ on:
       run_mode:
         description: "Run Mode"
         type: choice
-        default: "Warm Run"
+        default: "Build"
         options:
           - "Dry Run"
           - "Warm Run"
           - "Build"
           - "Release"
+      test_candidates:
+        description: "⚠️ Test unverified upstream candidates (automation only — leave OFF; Pin Scout sets this)"
+        type: boolean
+        default: false
       changelog:
         description: "Changelog on Post"
         type: string
@@ -305,6 +309,7 @@ jobs:
       KERNEL_VERSION:              ${{ inputs.kernel_version }}
       LTO_MODE:                  ${{ inputs.lto_mode }}
       RUN_MODE:                    ${{ inputs.run_mode }}
+      TEST_CANDIDATES:             ${{ inputs.test_candidates }}
       DRY_RUN:                     ${{ inputs.run_mode == 'Dry Run' }}
       BUILD_SYSTEM:                ${{ inputs.build_system }}
       ADDONS:                      ${{ needs.prepare-matrix.outputs.addons }}
