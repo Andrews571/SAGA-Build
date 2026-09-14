@@ -1,0 +1,62 @@
+name: "🔭 Pin Scout (upstream candidate check)"
+
+# Only job of this workflow: keep manifest.json's "good" pins fresh by
+# testing new upstream commits, on a schedule — completely decoupled
+# from build.yml's manual dispatches. Manual patch-testing runs
+# (governor/mglru/adios-topapp/etc.) never touch an unverified
+# candidate again unless someone explicitly flips test_candidates=true
+# by hand in build.yml's own dispatch form.
+#
+# How it works: this workflow doesn't reimplement scout.sh/engine.sh at
+# all — it just triggers build.yml the same way a human clicking "Run
+# workflow" would, via the REST API, with run_mode="Warm Run" (compile
+# check only, no artifact, no release-channel post) and
+# test_candidates=true. All the actual candidate-resolution/promotion
+# logic stays in scout.sh + engine.sh, single source of truth.
+
+on:
+  schedule:
+    # Every 6 hours. Adjust freely — this only costs runner minutes when
+    # upstream actually has something new to test (scout.sh no-ops back
+    # to the pin otherwise), so tightening this doesn't waste much even
+    # at higher frequency. Cron is always UTC.
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: "Kernel Version to check"
+        type: choice
+        default: "6.1"
+        options:
+          - "5.10"
+          - "5.15"
+          - "6.1"
+          - "6.6"
+          - "6.12"
+
+jobs:
+  dispatch-warm-run:
+    name: "Dispatch candidate check"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Trigger build.yml (Warm Run, test_candidates=true)"
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          KERNEL_VERSION: ${{ inputs.kernel_version || '6.1' }}
+        run: |
+          gh workflow run build.yml \
+            --repo "${{ github.repository }}" \
+            -f build_system="Make - Neutron" \
+            -f kernel_version="${KERNEL_VERSION}" \
+            -f kernel_source="live" \
+            -f ksunext=true \
+            -f resukisu=true \
+            -f sukisu=true \
+            -f vanilla=false \
+            -f susfs="enable" \
+            -f run_mode="Warm Run" \
+            -f test_candidates=true \
+            -f update_arsenal="no"
+
+          echo "✅ Dispatched — check the Actions tab for the triggered run."
+          echo "This job's own job doesn't wait for it: promotion/blacklist happens inside that run's own Checkpoint step, same as any other build.yml run."
