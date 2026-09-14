@@ -60,10 +60,10 @@ index 99bdd96f4..c35ebc6bc 100644
  #endif
 diff --git a/kernel/sched/cpufreq_pccg.c b/kernel/sched/cpufreq_pccg.c
 new file mode 100644
-index 000000000..fefb2dde6
+index 000000000..9da06a48c
 --- /dev/null
 +++ b/kernel/sched/cpufreq_pccg.c
-@@ -0,0 +1,1218 @@
+@@ -0,0 +1,1301 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA PCCG (Pre CPU Clutch Governor) — CPUFreq governor
@@ -115,6 +115,10 @@ index 000000000..fefb2dde6
 + */
 +
 +#define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
++/* Ring buffer size for pccg_streak_confirmed()'s recent-edge tracking --
++ * generous upper bound for streak_min_count (sysfs-capped to this same
++ * value), not a tunable itself. */
++#define PCCG_STREAK_MAX		8
 +
 +/* SCHED_FLAG_SUGOV is private to kernel/sched/sched.h; already visible here
 + * since this file is #included from build_utility.c after sched.h. */
@@ -181,6 +185,28 @@ index 000000000..fefb2dde6
 +	 * actually measured. 100 restores the original all-in behaviour. */
 +	unsigned int		instant_trigger_pct;
 +
++	/* Streak detection: distinguishes "one isolated wakeup" (a binder
++	 * call, background housekeeping -- exactly what instant_trigger_pct
++	 * exists to throttle) from "a rapid train of separate short wakeups"
++	 * (a scroll gesture: each touch is its own brief idle->busy edge,
++	 * spaced further apart than they last, so the idle-time window
++	 * almost never sees enough sustained busy% to CONFIRM it the normal
++	 * way -- simulation against a synthetic scroll trace showed this
++	 * meant scroll responsiveness was being throttled by
++	 * instant_trigger_pct just as much as genuine background noise,
++	 * which was never the intent).
++	 *
++	 * If streak_min_count edges land within streak_window_us of each
++	 * other, the CPU is very likely mid-gesture rather than handling a
++	 * one-off wakeup: subsequent triggers in that streak are treated as
++	 * CONFIRMED (full target) instead of instant (scaled by
++	 * instant_trigger_pct). A single isolated edge never reaches the
++	 * count, so background noise stays throttled exactly as before.
++	 * streak_min_count=0 disables this (every trigger stays instant,
++	 * the original behaviour before this knob existed). */
++	unsigned int		streak_window_us;
++	unsigned int		streak_min_count;
++
 +#ifdef CONFIG_SCHED_BORE
 +	/* Optional second early trigger: see the identical knob in
 +	 * cpufreq_reflex.c for the full rationale. Independent of, and
@@ -242,6 +268,15 @@ index 000000000..fefb2dde6
 +	 * pccg_wake_edge_check()). No CONFIG dependency at all -- plain
 +	 * rq->nr_running is always present. */
 +	unsigned int		prev_nr_running;
++
++	/* Streak-detection ring buffer for pccg_wake_edge_check() -- see
++	 * the streak_window_us/streak_min_count comment in struct
++	 * pccg_tunables. Zero-initialized (by the memset in pccg_start()),
++	 * which is safe: a 0 timestamp is always "ancient" relative to any
++	 * real time_ns, so unused slots never spuriously count as part of
++	 * a recent streak. */
++	u64			streak_times[PCCG_STREAK_MAX];
++	unsigned int		streak_idx;
 +
 +	/* The field below is for single-CPU policies only: */
 +#ifdef CONFIG_NO_HZ_COMMON
@@ -535,6 +570,35 @@ index 000000000..fefb2dde6
 + * SAGA ships -- BORE and the idle-time path only add extra corroboration
 + * on top when they're present.
 + */
++/*
++ * pccg_streak_confirmed() - records this edge's timestamp and reports
++ * whether streak_min_count edges have landed within streak_window_us of
++ * each other, including this one. See the streak_window_us/
++ * streak_min_count comment in struct pccg_tunables for the full
++ * rationale (short version: tells a scroll gesture's train of short
++ * wakeups apart from one isolated background wakeup, using nothing but
++ * the wake-edge timestamps PCCG already generates).
++ */
++static bool pccg_streak_confirmed(struct pccg_cpu *pccg_cpu, u64 time_ns)
++{
++	struct pccg_tunables *tunables = pccg_cpu->pccg_policy->tunables;
++	unsigned int min_count = tunables->streak_min_count;
++	u64 window_ns = (u64)tunables->streak_window_us * NSEC_PER_USEC;
++	unsigned int count = 0, i;
++
++	pccg_cpu->streak_times[pccg_cpu->streak_idx] = time_ns;
++	pccg_cpu->streak_idx = (pccg_cpu->streak_idx + 1) % PCCG_STREAK_MAX;
++
++	if (!min_count)
++		return false;
++
++	for (i = 0; i < PCCG_STREAK_MAX; i++) {
++		if (time_ns - pccg_cpu->streak_times[i] <= window_ns)
++			count++;
++	}
++	return count >= min_count;
++}
++
 +static void pccg_wake_edge_check(struct pccg_cpu *pccg_cpu, u64 time_ns)
 +{
 +	struct pccg_tunables *tunables = pccg_cpu->pccg_policy->tunables;
@@ -542,8 +606,11 @@ index 000000000..fefb2dde6
 +
 +	if (tunables->wake_edge_boost && !pccg_cpu->prev_nr_running && nr_running) {
 +		unsigned long cap = arch_scale_cpu_capacity(pccg_cpu->cpu);
++		bool confirmed = pccg_streak_confirmed(pccg_cpu, time_ns);
 +
-+		pccg_hispeed_raise(pccg_cpu, time_ns, pccg_target_util_instant(pccg_cpu, cap));
++		pccg_hispeed_raise(pccg_cpu, time_ns,
++				    confirmed ? pccg_target_util(pccg_cpu, cap)
++					      : pccg_target_util_instant(pccg_cpu, cap));
 +	}
 +	pccg_cpu->prev_nr_running = nr_running;
 +}
@@ -886,6 +953,14 @@ index 000000000..fefb2dde6
 +pccg_attr_store_uint(instant_trigger_pct, 0, 100);
 +PCCG_ATTR(instant_trigger_pct);
 +
++pccg_attr_show(streak_window_us);
++pccg_attr_store_uint(streak_window_us, 1000, 1000000);
++PCCG_ATTR(streak_window_us);
++
++pccg_attr_show(streak_min_count);
++pccg_attr_store_uint(streak_min_count, 0, PCCG_STREAK_MAX);
++PCCG_ATTR(streak_min_count);
++
 +#ifdef CONFIG_SCHED_BORE
 +pccg_attr_show(bore_boost_max_score);
 +pccg_attr_store_uint(bore_boost_max_score, 0, 39);
@@ -945,6 +1020,8 @@ index 000000000..fefb2dde6
 +	&wake_edge_boost_attr.attr,
 +	&auto_capacity_scale_attr.attr,
 +	&instant_trigger_pct_attr.attr,
++	&streak_window_us_attr.attr,
++	&streak_min_count_attr.attr,
 +#ifdef CONFIG_SCHED_BORE
 +	&bore_boost_max_score_attr.attr,
 +#endif
@@ -1126,6 +1203,12 @@ index 000000000..fefb2dde6
 +	 * confirmed one (idle-time window) does -- see the field comment
 +	 * on instant_trigger_pct for the full reasoning. */
 +	tunables->instant_trigger_pct = 50;
++	/* Simulated against a synthetic scroll-gesture trace: 3 edges
++	 * within 120ms reliably separates "mid-gesture" from "one isolated
++	 * background wakeup" without over-triggering on ordinary light use.
++	 * See the field comment in struct pccg_tunables for the reasoning. */
++	tunables->streak_window_us    = 120000;
++	tunables->streak_min_count    = 3;
 +#ifdef CONFIG_SCHED_BORE
 +	/* Conservative: only scores 0-2 (freshly-woken tasks and kthreads,
 +	 * per BORE's own classification) trigger early. 0 disables this
