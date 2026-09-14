@@ -5,12 +5,20 @@
 # Decides which git ref (commit SHA) each tracked upstream component
 # (ReSukiSU, SukiSU-Ultra, SuSFS) should build against for this run.
 #
-# - RUN_MODE=Release: always use the manifest's known-good pin. Never
-#   queries upstream, never builds an untested candidate.
-# - RUN_MODE=Build/Warm Run: queries upstream's latest commit. If it
-#   differs from the pin and isn't already known-bad, that becomes the
-#   candidate for this run — and checkpoint/engine.sh decides after
-#   the build whether to promote it or blacklist it.
+# - RUN_MODE=Release, OR TEST_CANDIDATES!=true: always use the manifest's
+#   known-good pin. Never queries upstream, never builds an untested
+#   candidate. This is the default for every manual dispatch — Release
+#   is hard-locked to it regardless of TEST_CANDIDATES (a "Release" that
+#   ships an unverified candidate would defeat the whole point).
+# - TEST_CANDIDATES=true (and RUN_MODE!=Release): queries upstream's
+#   latest commit. If it differs from the pin and isn't already known-
+#   bad, that becomes the candidate for this run — and checkpoint/
+#   engine.sh decides after the build whether to promote it or
+#   blacklist it. Only the scheduled Pin Scout workflow sets this —
+#   see .github/workflows/pin-scout.yml. (2026-09: split out after a
+#   ReSukiSU candidate got silently promoted via a routine "Build" run
+#   and only failed at boot, not compile — see manifest.json history
+#   around resukisu 23a40c0f1dc0 for the incident.)
 # - Exception (deadlock-breaking retest): if no good pin exists yet AND
 #   the latest upstream commit is already blacklisted, there is no known-
 #   good ref to fall back to at all. Falling back to an empty ref there
@@ -100,10 +108,10 @@ resolve_component() {
     good=$(jq -r ".${key}.good // \"\"" "$MANIFEST")
     bad_list=$(jq -c ".${key}.bad // []" "$MANIFEST")
 
-    if [ "${RUN_MODE^^}" = "RELEASE" ]; then
-        [ -n "$good" ] || error "scout: RUN_MODE=Release but no known-good ${key} pin exists yet — run a Build first."
+    if [ "${RUN_MODE^^}" = "RELEASE" ] || [ "${TEST_CANDIDATES:-false}" != "true" ]; then
+        [ -n "$good" ] || error "scout: no known-good ${key} pin exists yet, and candidate testing is off for this run — trigger the Pin Scout workflow (.github/workflows/pin-scout.yml) first."
         ref="$good"; candidate="false"
-        log "${prefix}: Release mode — pinned to ${ref:0:12} (no upstream check)"
+        log "${prefix}: pinned to ${ref:0:12} (no upstream check$( [ "${RUN_MODE^^}" = "RELEASE" ] && echo ", Release mode" || echo "" ))"
     elif [ -z "$latest" ]; then
         ref="$good"; candidate="false"
         log "${prefix}: no candidate available — using pinned ${good:0:12}"
