@@ -51,22 +51,8 @@
     "bad": []
   },
   "ksunext_susfs_fork": {
-    "good": "5dfc3359e1cf2f4d953c74205c8d06e6eaadbec0",
-    "bad": [
-      "1200c46668e17a413cb98346744248f73cbe6f33",
-      "1dec76ef97ca046ca617431dbf9d67f0dd57913a",
-      "22c53df37637cab4ae48c65e31d092aefdb3c670",
-      "569bef518a15955851dc2aa7aa9173b91fb493e1",
-      "7d14b013c178d08c518e596638c565a7ed566ee4",
-      "841686e170c1d5711f8dc1f7c050ed8abf816138",
-      "a16c61fb8f886378c762468cb288233b03cb396a",
-      "a85172b3e634a3f067c83841f9ef2867ef8fc87a",
-      "beb69066b8fa644ac4e04d47d730c5bf88ad759c",
-      "daf1347b3ca1b8bd78d37a9024e6e7de6863534c",
-      "e453b138c569504d46aba452880b7caabe866807",
-      "fb7906839b0ea7cadfc571ad31cef34705e36431",
-      "fdbdbcb9b975634d7ac7d90d05665e6756c59399"
-    ]
+    "good": "3b18216f71df189ab3d1b1ce0bdb21be1268e771",
+    "bad": []
   },
   "susfs_ksunext": {
     "good": "9efad534e492e20b049b69be7bcc914283c60b3b",
