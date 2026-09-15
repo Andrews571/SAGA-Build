@@ -62,10 +62,10 @@ index 99bdd96f4..f2c422acc 100644
  #endif
 diff --git a/kernel/sched/cpufreq_reflex.c b/kernel/sched/cpufreq_reflex.c
 new file mode 100644
-index 000000000..18b622536
+index 000000000..bcb70a311
 --- /dev/null
 +++ b/kernel/sched/cpufreq_reflex.c
-@@ -0,0 +1,1018 @@
+@@ -0,0 +1,1081 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA REFLEX — CPUFreq governor
@@ -289,18 +289,52 @@ index 000000000..18b622536
 + * every update_util callback (same call frequency schedutil already runs
 + * at) is fine.
 + */
++/*
++ * rfx_target_util() - where the floor should land, in capacity units,
++ * given hispeed_freq_pct.
++ *
++ * Pre-compensates for the +25% DVFS headroom that map_util_perf() (called
++ * later, once, when translating util to an actual frequency in
++ * rfx_get_next_freq()) always adds on top of whatever util it's given.
++ * Without this, "floor = cap * pct / 100" already reaches 100% of
++ * capacity once pct passes roughly 80, and map_util_perf's *1.25 on top
++ * of that saturates the requested frequency at the policy max well before
++ * pct=100 -- on a Cortex-A55-class LITTLE core specifically, pct=70
++ * already computed out to ~87% of that core's max frequency, not 70% of
++ * it, which is why hispeed_freq_pct had almost no usable range below
++ * ~60-70 and every confirmed trigger landed the CPU at or near its
++ * ceiling regardless of the knob. Dividing by 125 instead of 100 here
++ * cancels that later *1.25 out, so hispeed_freq_pct=N now means
++ * approximately N% of max frequency, linearly, across its whole 1-100
++ * range -- what the knob's name always implied but the math didn't
++ * actually deliver.
++ */
++static unsigned long rfx_target_util(struct rfx_cpu *rfx_cpu, unsigned long cap)
++{
++	struct rfx_tunables *tunables = rfx_cpu->rfx_policy->tunables;
++
++	return (cap * tunables->hispeed_freq_pct) / 125;
++}
++
 +static void rfx_hispeed_raise(struct rfx_cpu *rfx_cpu, u64 time_ns,
 +			       unsigned long target)
 +{
 +	struct rfx_tunables *tunables = rfx_cpu->rfx_policy->tunables;
 +
-+	if (target > rfx_cpu->hispeed_floor)
-+		rfx_cpu->hispeed_floor = target;
++	/* Only a trigger that actually RAISES the floor extends the hold --
++	 * extending it unconditionally meant a trigger landing below the
++	 * current (already-elevated) floor kept pushing the decay point out
++	 * without contributing anything, pinning the floor high longer than
++	 * the work that justified it lasted. */
++	if (target <= rfx_cpu->hispeed_floor)
++		return;
 +
-+	/* Push the earliest-allowed-decay point out every time something
-+	 * re-triggers the floor, so a steady stream of touch events (with
-+	 * gaps longer than one window but shorter than the hold) keeps the
-+	 * floor pinned instead of sawtoothing between two OPPs. */
++	rfx_cpu->hispeed_floor = target;
++
++	/* Push the earliest-allowed-decay point out on a real raise, so a
++	 * steady stream of touch events (with gaps longer than one window
++	 * but shorter than the hold) keeps the floor pinned instead of
++	 * sawtoothing between two OPPs. */
 +	rfx_cpu->hispeed_hold_until = time_ns +
 +		(u64)tunables->hispeed_hold_us * NSEC_PER_USEC;
 +}
@@ -347,8 +381,7 @@ index 000000000..18b622536
 +	cap = arch_scale_cpu_capacity(rfx_cpu->cpu);
 +
 +	if (busy_pct >= tunables->hispeed_load_pct) {
-+		rfx_hispeed_raise(rfx_cpu, time_ns,
-+				  (cap * tunables->hispeed_freq_pct) / 100);
++		rfx_hispeed_raise(rfx_cpu, time_ns, rfx_target_util(rfx_cpu, cap));
 +	} else if (!held) {
 +		rfx_cpu->hispeed_floor >>= tunables->hispeed_decay_shift;
 +	}
@@ -376,18 +409,25 @@ index 000000000..18b622536
 +{
 +	struct rfx_tunables *tunables = rfx_cpu->rfx_policy->tunables;
 +	struct task_struct *curr;
++	unsigned int penalty;
 +	unsigned long cap;
 +
 +	if (!tunables->bore_boost_max_score)
 +		return;
 +
 +	curr = READ_ONCE(cpu_rq(rfx_cpu->cpu)->curr);
-+	if (!curr || is_idle_task(curr) ||
-+	    (curr->se.burst_penalty >> 8) > tunables->bore_boost_max_score)
++	if (!curr || is_idle_task(curr))
++		return;
++
++	/* READ_ONCE: burst_penalty is updated by the scheduler without any
++	 * lock held here, so a plain read leaves the compiler free to
++	 * reload it between the shift and the comparison. */
++	penalty = READ_ONCE(curr->se.burst_penalty) >> 8;
++	if (penalty > tunables->bore_boost_max_score)
 +		return;
 +
 +	cap = arch_scale_cpu_capacity(rfx_cpu->cpu);
-+	rfx_hispeed_raise(rfx_cpu, time_ns, (cap * tunables->hispeed_freq_pct) / 100);
++	rfx_hispeed_raise(rfx_cpu, time_ns, rfx_target_util(rfx_cpu, cap));
 +}
 +#else
 +static inline void rfx_bore_check(struct rfx_cpu *rfx_cpu, u64 time_ns) {}
@@ -395,7 +435,22 @@ index 000000000..18b622536
 +
 +
 +
-+static void rfx_get_util(struct rfx_cpu *rfx_cpu, u64 time)
++/*
++ * rfx_get_util() - refresh this CPU's cached util/max/bw_dl, and (only
++ * when @local) run rfx_bore_check() for it.
++ *
++ * @local distinguishes "this is the CPU whose update_util callback we are
++ * servicing right now" from "this is just another CPU in the same shared
++ * policy being polled for its utilization" -- rfx_next_freq_shared() loops
++ * over every CPU in the policy, most of them remote from whichever one is
++ * actually running that loop. The util reads stay unconditional (that
++ * aggregation is the whole point of the shared path); rfx_bore_check()
++ * does not, since it dereferences that specific CPU's rq->curr -- doing
++ * that for a remote CPU means reading a scheduler snapshot nobody here is
++ * holding still, racing bore_warp_preempt() and the scheduler's own
++ * context-switch path on that CPU with no lock in common.
++ */
++static void rfx_get_util(struct rfx_cpu *rfx_cpu, u64 time, bool local)
 +{
 +	struct rq *rq = cpu_rq(rfx_cpu->cpu);
 +
@@ -405,7 +460,8 @@ index 000000000..18b622536
 +					   FREQUENCY_UTIL, NULL);
 +
 +	rfx_update_hispeed(rfx_cpu, time);
-+	rfx_bore_check(rfx_cpu, time);
++	if (local)
++		rfx_bore_check(rfx_cpu, time);
 +	if (rfx_cpu->hispeed_floor > rfx_cpu->util)
 +		rfx_cpu->util = rfx_cpu->hispeed_floor;
 +}
@@ -507,7 +563,7 @@ index 000000000..18b622536
 +	if (!rfx_should_update_freq(rfx_cpu->rfx_policy, time))
 +		return false;
 +
-+	rfx_get_util(rfx_cpu, time);
++	rfx_get_util(rfx_cpu, time, true);
 +	rfx_iowait_apply(rfx_cpu, time);
 +
 +	return true;
@@ -584,7 +640,7 @@ index 000000000..18b622536
 +		struct rfx_cpu *j_rfx_cpu = &per_cpu(rfx_cpu_data, j);
 +		unsigned long j_util, j_max;
 +
-+		rfx_get_util(j_rfx_cpu, time);
++		rfx_get_util(j_rfx_cpu, time, j == rfx_cpu->cpu);
 +		rfx_iowait_apply(j_rfx_cpu, time);
 +		j_util = j_rfx_cpu->util;
 +		j_max = j_rfx_cpu->max;
@@ -994,7 +1050,14 @@ index 000000000..18b622536
 +	struct rfx_policy *rfx_policy = policy->governor_data;
 +	void (*uu)(struct update_util_data *data, u64 time, unsigned int flags);
 +	unsigned int cpu;
-+	u64 now = ktime_get_ns();
++	/* sched_clock(), not ktime_get_ns(): every other time_ns value in
++	 * this file comes from rq_clock(rq) (see cpufreq_update_util() in
++	 * sched.h), which reads the sched_clock domain. Both are monotonic
++	 * and stay closely tracked post-boot on any sane config, so the
++	 * mismatch was never a real bug -- but seeding from the same clock
++	 * domain everything else here already uses removes any doubt about
++	 * it for free. */
++	u64 now = sched_clock();
 +
 +	rfx_policy->freq_update_delay_ns	= rfx_policy->tunables->rate_limit_us * NSEC_PER_USEC;
 +	rfx_policy->last_freq_update_time	= 0;
