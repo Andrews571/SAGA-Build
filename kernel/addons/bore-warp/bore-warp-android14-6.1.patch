@@ -1,5 +1,5 @@
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 1830a2e46..a953b3a34 100644
+index 1830a2e46..38903993a 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -170,6 +170,36 @@ u8   __read_mostly sched_bore_topapp_discount  = 6;
@@ -39,7 +39,7 @@ index 1830a2e46..a953b3a34 100644
  #endif
  
  int sched_thermal_decay_shift;
-@@ -7963,6 +7993,62 @@ static void set_skip_buddy(struct sched_entity *se)
+@@ -7963,6 +7993,65 @@ static void set_skip_buddy(struct sched_entity *se)
  		cfs_rq_of(se)->skip = se;
  }
  
@@ -93,8 +93,11 @@ index 1830a2e46..a953b3a34 100644
 +	 * (sched_bore_warp_enabled=0) this function returns false above
 +	 * before ever reaching this line, so the flag simply never gets
 +	 * set and PCCG's consumer is a permanent no-op, with zero extra
-+	 * checks needed on the cpufreq side. */
-+	cfs_rq->bore_warp_fired = true;
++	 * checks needed on the cpufreq side. set_bit() (not a plain
++	 * assignment): PCCG may read/clear this for a remote CPU under a
++	 * shared cpufreq policy without holding *this* CPU's rq lock, see
++	 * the field comment on bore_warp_fired in sched.h. */
++	set_bit(0, &cfs_rq->bore_warp_fired);
 +	return true;
 +}
 +#endif
@@ -102,7 +105,7 @@ index 1830a2e46..a953b3a34 100644
  /*
   * Preempt the current task with a newly woken task if needed:
   */
-@@ -8045,6 +8131,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+@@ -8045,6 +8134,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
  	if (ignore)
  		return;
  
@@ -118,10 +121,10 @@ index 1830a2e46..a953b3a34 100644
  		/*
  		 * Bias pick_next to pick the sched entity that is
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 848680566..0bb9fa0e0 100644
+index 848680566..ac8be7213 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -577,6 +577,21 @@ struct cfs_rq {
+@@ -577,6 +577,40 @@ struct cfs_rq {
  
  	struct rb_root_cached	tasks_timeline;
  
@@ -133,11 +136,30 @@ index 848680566..0bb9fa0e0 100644
 +	 * cooldown and not a per-task allowance. */
 +	u64			bore_warp_deadline;
 +	/* Set by bore_warp_preempt() the instant it grants a warp; consumed
-+	 * (read-and-cleared) by PCCG's pccg_bore_warp_check() in
++	 * (test-and-cleared) by PCCG's pccg_bore_warp_check() in
 +	 * cpufreq_pccg.c as a cross-subsystem signal -- see the comment
 +	 * there for why a warp grant gets treated differently from PCCG's
-+	 * own, weaker burst_penalty-only check. */
-+	bool			bore_warp_fired;
++	 * own, weaker burst_penalty-only check.
++	 *
++	 * unsigned long + test_and_clear_bit(), not a plain bool: in a
++	 * shared cpufreq policy (the common case for an Android cluster),
++	 * PCCG reads/clears this for CPUs other than the one currently
++	 * holding this rq's own lock (pccg_next_freq_shared() loops over
++	 * every CPU in the policy, most of them remote from whichever CPU
++	 * is actually running that loop) -- a plain bool read-then-write
++	 * there races against bore_warp_preempt() setting it concurrently
++	 * under the *other* CPU's own rq lock. test_and_clear_bit() makes
++	 * the read-and-clear atomic regardless of which CPU's lock (if
++	 * any) the caller happens to be holding. */
++	unsigned long		bore_warp_fired;
++/* Companion define for cpufreq_pccg.c (or any other consumer) to detect
++ * that this field actually exists, independent of CONFIG_SCHED_BORE
++ * alone: BORE's base patch does not provide bore_warp_fired by itself --
++ * only this addon (bore-warp) does. A consumer built against a tree that
++ * has CONFIG_SCHED_BORE but not this patch must not reference the field
++ * at all, or it fails to compile; checking this define instead of
++ * CONFIG_SCHED_BORE lets it degrade to a clean no-op in that case. */
++#define SAGA_HAVE_BORE_WARP_HINT 1
 +#endif
 +
  	/*
