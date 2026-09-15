@@ -63,8 +63,26 @@ if [ -n "${SUSFS_REF:-}" ]; then
         rm -rf "$SUSFS_DIR"
         retry 3 run_quiet git clone -q -b "$SUSFS_BRANCH" "$SUSFS_REPO" "$SUSFS_DIR" \
             || error "SuSFS: full clone fallback failed after 3 attempts!"
-        (cd "$SUSFS_DIR" && git checkout -q "$SUSFS_REF") \
-            || error "SuSFS: ${SUSFS_REF} not found on ${SUSFS_BRANCH} even after full clone!"
+        if ! (cd "$SUSFS_DIR" && git checkout -q "$SUSFS_REF") 2>/dev/null; then
+            # susfs4ksu's branches are maintained as a clean patch series on
+            # top of a given kernel version, not append-only history —
+            # simonpunk periodically rebases/force-pushes $SUSFS_BRANCH,
+            # which silently orphans a previously-good pinned commit with no
+            # relation to whether that commit ever actually built (confirmed
+            # 2026-09-15: susfs_ksunext's pin, promoted hours earlier off a
+            # real build success, had vanished from the branch — checked
+            # both gitlab.com/simonpunk and the github.com/ShirkNeko mirror,
+            # gone from both). A missing ref here means "this commit doesn't
+            # exist anymore", not "this commit is bad" — so fall back to
+            # whatever the branch currently has instead of hard-failing the
+            # whole build over a pin that's stale through no fault of its
+            # own. checkpoint/engine.sh still promotes/blacklists based on
+            # whether THIS build succeeds, same as always — this only stops
+            # a dead pin from being a hard blocker.
+            warn "SuSFS: ${SUSFS_REF} no longer exists on ${SUSFS_BRANCH} (likely rebased upstream) — falling back to current branch tip"
+            (cd "$SUSFS_DIR" && git checkout -q "$SUSFS_BRANCH") \
+                || error "SuSFS: couldn't check out ${SUSFS_BRANCH} tip either!"
+        fi
     }
 else
     retry 3 run_quiet git clone -q --depth=1 -b "$SUSFS_BRANCH" "$SUSFS_REPO" "$SUSFS_DIR" \
