@@ -60,10 +60,10 @@ index 99bdd96f4..c35ebc6bc 100644
  #endif
 diff --git a/kernel/sched/cpufreq_pccg.c b/kernel/sched/cpufreq_pccg.c
 new file mode 100644
-index 000000000..9da06a48c
+index 000000000..342ec432c
 --- /dev/null
 +++ b/kernel/sched/cpufreq_pccg.c
-@@ -0,0 +1,1301 @@
+@@ -0,0 +1,1392 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA PCCG (Pre CPU Clutch Governor) — CPUFreq governor
@@ -108,6 +108,20 @@ index 000000000..9da06a48c
 + * README for bore-warp (kernel/addons/bore-warp/), which is the
 + * intentionally-small, intentionally-off-by-default piece of that idea
 + * that *was* judged safe to ship this way.
++ *
++ * SHARED POLICIES / CPU-LOCALITY: on a shared cpufreq policy (the normal
++ * case for an Android cluster), pccg_next_freq_shared() walks every CPU
++ * in the policy to aggregate utilization, so pccg_get_util() runs for
++ * CPUs that are remote from the one actually executing it. The
++ * utilization reads are fine that way -- aggregating them is the whole
++ * point. The three instantaneous trigger checks (wake_edge, bore,
++ * bore_warp) are NOT, and run only for the local CPU: each inspects or
++ * mutates state belonging to one specific CPU (that CPU's nr_running,
++ * its rq->curr, its own streak ring buffer), so running them remotely
++ * would mean sampling a scheduler snapshot nobody is holding still and
++ * writing per-CPU state from an arbitrary other CPU. See the @local
++ * parameter on pccg_get_util() for the full reasoning -- that gating is
++ * also what lets the streak ring buffer stay lock-free.
 + *
 + * All tunables are per-policy sysfs knobs (same gov_attr_set mechanism
 + * schedutil/reflex use), so a single kernel build stays usable across
@@ -354,15 +368,6 @@ index 000000000..9da06a48c
 +}
 +
 +/*
-+ * pccg_update_hispeed() - sample real busy% since the last window and fold
-+ * it into the decaying floor.
-+ *
-+ * Runs at most once per hispeed_window_us per CPU — cheap on the common
-+ * "already sampled this window" path (one u64 compare), so calling it from
-+ * every update_util callback (same call frequency schedutil already runs
-+ * at) is fine.
-+ */
-+/*
 + * pccg_target_util() - where the floor should land for this CPU, given the
 + * configured hispeed_freq_pct and (if enabled) this CPU's own relative
 + * capacity.
@@ -420,17 +425,46 @@ index 000000000..9da06a48c
 +{
 +	struct pccg_tunables *tunables = pccg_cpu->pccg_policy->tunables;
 +
-+	if (target > pccg_cpu->hispeed_floor)
-+		pccg_cpu->hispeed_floor = target;
++	/* @target (and hispeed_floor with it) is in CAPACITY units, the
++	 * 0..SCHED_CAPACITY_SCALE (1024) scale the scheduler uses -- NOT
++	 * kHz, and not a percentage. It ends up compared against, and
++	 * max()'d into, pccg_cpu->util in pccg_get_util(), which is also a
++	 * capacity figure; the conversion to an actual frequency happens
++	 * once, later, in pccg_get_next_freq()'s map_util_freq(). */
++	/* Only a trigger that actually RAISES the floor extends the hold.
++	 * Extending it unconditionally meant a stream of triggers landing
++	 * below the current floor (every wake edge once instant_trigger_pct
++	 * scales them down, every BORE check on an already-boosted CPU)
++	 * kept pushing the decay point out without contributing anything --
++	 * pinning the floor high long after the work that justified it was
++	 * over. Simulation of a light-use trace attributed a large majority
++	 * of total energy to that decay tail rather than to the actual
++	 * work, which is what this guard is for. */
++	if (target <= pccg_cpu->hispeed_floor)
++		return;
 +
-+	/* Push the earliest-allowed-decay point out every time something
-+	 * re-triggers the floor, so a steady stream of touch events (with
-+	 * gaps longer than one window but shorter than the hold) keeps the
-+	 * floor pinned instead of sawtoothing between two OPPs. */
++	pccg_cpu->hispeed_floor = target;
++
++	/* Push the earliest-allowed-decay point out on a real raise, so a
++	 * steady stream of touch events (with gaps longer than one window
++	 * but shorter than the hold) keeps the floor pinned instead of
++	 * sawtoothing between two OPPs. */
 +	pccg_cpu->hispeed_hold_until = time_ns +
 +		(u64)tunables->hispeed_hold_us * NSEC_PER_USEC;
 +}
 +
++/*
++ * pccg_update_hispeed() - sample real busy% since the last window and fold
++ * it into the decaying floor.
++ *
++ * Runs at most once per hispeed_window_us per CPU — cheap on the common
++ * "already sampled this window" path (one u64 compare), so calling it from
++ * every update_util callback (same call frequency schedutil already runs
++ * at) is fine. Unlike the instantaneous trigger checks, this one is safe
++ * (and intended) to run for remote CPUs on the shared path too: it reads
++ * that CPU's own idle-time counters, which are globally visible and need
++ * no snapshot consistency with anything else.
++ */
 +static void pccg_update_hispeed(struct pccg_cpu *pccg_cpu, u64 time_ns)
 +{
 +	struct pccg_tunables *tunables = pccg_cpu->pccg_policy->tunables;
@@ -501,14 +535,22 @@ index 000000000..9da06a48c
 +{
 +	struct pccg_tunables *tunables = pccg_cpu->pccg_policy->tunables;
 +	struct task_struct *curr;
++	unsigned int penalty;
 +	unsigned long cap;
 +
 +	if (!tunables->bore_boost_max_score)
 +		return;
 +
 +	curr = READ_ONCE(cpu_rq(pccg_cpu->cpu)->curr);
-+	if (!curr || is_idle_task(curr) ||
-+	    (curr->se.burst_penalty >> 8) > tunables->bore_boost_max_score)
++	if (!curr || is_idle_task(curr))
++		return;
++
++	/* READ_ONCE: burst_penalty is updated by the scheduler (update_curr()
++	 * and friends) without any lock we hold here, so a plain read leaves
++	 * the compiler free to reload it or tear it across the shift and the
++	 * comparison below. One stable snapshot is all this decision needs. */
++	penalty = READ_ONCE(curr->se.burst_penalty) >> 8;
++	if (penalty > tunables->bore_boost_max_score)
 +		return;
 +
 +	cap = arch_scale_cpu_capacity(pccg_cpu->cpu);
@@ -533,43 +575,36 @@ index 000000000..9da06a48c
 + * CONFIRMED trigger (full target, like the idle-time window), not an
 + * unconfirmed one.
 + *
-+ * A no-op with zero overhead beyond one bool read when
-+ * sched_bore_warp_enabled=0 -- bore_warp_preempt() never sets the flag in
++ * A no-op with zero overhead when the bore-warp addon is not applied at
++ * all (SAGA_HAVE_BORE_WARP_HINT undefined -- CONFIG_SCHED_BORE alone does
++ * NOT provide bore_warp_fired, that field comes from the bore-warp patch),
++ * and likewise a no-op when it is applied but disabled at runtime
++ * (sched_bore_warp_enabled=0): bore_warp_preempt() never sets the bit in
 + * that case, so there's nothing here to consume.
 + */
++#ifdef SAGA_HAVE_BORE_WARP_HINT
 +static void pccg_bore_warp_check(struct pccg_cpu *pccg_cpu, u64 time_ns)
 +{
 +	struct cfs_rq *cfs_rq = &cpu_rq(pccg_cpu->cpu)->cfs;
 +	unsigned long cap;
 +
-+	if (!cfs_rq->bore_warp_fired)
++	/* Atomic test-and-clear, not a plain read-then-write: under a
++	 * shared policy this runs for remote CPUs without their rq lock
++	 * held -- see the field comment on bore_warp_fired in sched.h. */
++	if (!test_and_clear_bit(0, &cfs_rq->bore_warp_fired))
 +		return;
-+	cfs_rq->bore_warp_fired = false;
 +
 +	cap = arch_scale_cpu_capacity(pccg_cpu->cpu);
 +	pccg_hispeed_raise(pccg_cpu, time_ns, pccg_target_util(pccg_cpu, cap));
 +}
 +#else
++static inline void pccg_bore_warp_check(struct pccg_cpu *pccg_cpu, u64 time_ns) {}
++#endif
++#else
 +static inline void pccg_bore_check(struct pccg_cpu *pccg_cpu, u64 time_ns) {}
 +static inline void pccg_bore_warp_check(struct pccg_cpu *pccg_cpu, u64 time_ns) {}
 +#endif
 +
-+/*
-+ * pccg_wake_edge_check() - self-sufficient primary trigger: fire the floor
-+ * the instant this CPU's rq->nr_running goes from 0 to nonzero.
-+ *
-+ * This needs nothing beyond what every Linux scheduler build already
-+ * maintains unconditionally -- no BORE, no NO_HZ idle-call accounting, no
-+ * EAS. A CPU with rq->nr_running == 0 has nothing runnable queued (it is,
-+ * or is about to go, idle); the transition to nonzero is the earliest
-+ * possible point at which "this CPU just became busy" can be known at
-+ * all, strictly earlier than either the idle-time window (which needs a
-+ * full hispeed_window_us to confirm it) or even BORE's burst_penalty
-+ * (which needs the task to have actually been picked and started running
-+ * first). This is what makes PCCG work without depending on anything else
-+ * SAGA ships -- BORE and the idle-time path only add extra corroboration
-+ * on top when they're present.
-+ */
 +/*
 + * pccg_streak_confirmed() - records this edge's timestamp and reports
 + * whether streak_min_count edges have landed within streak_window_us of
@@ -599,10 +634,33 @@ index 000000000..9da06a48c
 +	return count >= min_count;
 +}
 +
++/*
++ * pccg_wake_edge_check() - self-sufficient primary trigger: fire the floor
++ * the instant this CPU's rq->nr_running goes from 0 to nonzero.
++ *
++ * This needs nothing beyond what every Linux scheduler build already
++ * maintains unconditionally -- no BORE, no NO_HZ idle-call accounting, no
++ * EAS. A CPU with rq->nr_running == 0 has nothing runnable queued (it is,
++ * or is about to go, idle); the transition to nonzero is the earliest
++ * possible point at which "this CPU just became busy" can be known at
++ * all, strictly earlier than either the idle-time window (which needs a
++ * full hispeed_window_us to confirm it) or even BORE's burst_penalty
++ * (which needs the task to have actually been picked and started running
++ * first). This is what makes PCCG work without depending on anything else
++ * SAGA ships -- BORE and the idle-time path only add extra corroboration
++ * on top when they're present.
++ *
++ * CPU-local only -- see pccg_get_util()'s @local parameter.
++ */
 +static void pccg_wake_edge_check(struct pccg_cpu *pccg_cpu, u64 time_ns)
 +{
 +	struct pccg_tunables *tunables = pccg_cpu->pccg_policy->tunables;
-+	unsigned int nr_running = cpu_rq(pccg_cpu->cpu)->nr_running;
++	/* READ_ONCE: nr_running is written by the scheduler on every
++	 * enqueue/dequeue without any lock held here. One stable snapshot,
++	 * used for both the edge test and the saved value below -- a
++	 * reloaded second read could make those two disagree and either
++	 * miss an edge or fabricate one. */
++	unsigned int nr_running = READ_ONCE(cpu_rq(pccg_cpu->cpu)->nr_running);
 +
 +	if (tunables->wake_edge_boost && !pccg_cpu->prev_nr_running && nr_running) {
 +		unsigned long cap = arch_scale_cpu_capacity(pccg_cpu->cpu);
@@ -612,10 +670,41 @@ index 000000000..9da06a48c
 +				    confirmed ? pccg_target_util(pccg_cpu, cap)
 +					      : pccg_target_util_instant(pccg_cpu, cap));
 +	}
++	/* Updated unconditionally, including while wake_edge_boost is 0:
++	 * this is edge *tracking*, not the boost itself. Skipping it when
++	 * the knob is off would leave a stale snapshot behind, so the first
++	 * sample after someone re-enables the knob at runtime would be
++	 * compared against whatever nr_running happened to be when it was
++	 * switched off -- fabricating or swallowing one edge on the way
++	 * back in. Keeping it current costs one store and makes the knob
++	 * take effect cleanly from the next real transition. */
 +	pccg_cpu->prev_nr_running = nr_running;
 +}
 +
-+static void pccg_get_util(struct pccg_cpu *pccg_cpu, u64 time)
++/*
++ * pccg_get_util() - refresh this CPU's cached util/max/bw_dl, and (only
++ * when @local) run the instantaneous floor triggers for it.
++ *
++ * @local distinguishes "this is the CPU whose update_util callback we are
++ * currently servicing" from "this is just another CPU in the same shared
++ * policy that we are polling for its utilization". The distinction matters
++ * because pccg_next_freq_shared() loops over every CPU in the policy --
++ * on a typical Android cluster that is every CPU in that cluster, most of
++ * them remote from whichever one is actually running the loop.
++ *
++ * The utilization reads (max/bw_dl/util) are meaningful for any CPU and
++ * stay unconditional: aggregating them across the policy is the entire
++ * point of the shared path. The three trigger checks are NOT: each of
++ * them inspects or mutates state that only belongs to one specific CPU --
++ * pccg_wake_edge_check() reads that CPU's nr_running and updates its
++ * per-CPU streak ring buffer, and pccg_bore_check() dereferences that
++ * CPU's rq->curr. Running those for a remote CPU means sampling a
++ * scheduler snapshot nobody is holding still, and (for the streak buffer)
++ * writing per-CPU state from an arbitrary other CPU. Gating them on
++ * @local keeps every one of them a purely CPU-local operation, which is
++ * also what makes the streak buffer safe without any locking of its own.
++ */
++static void pccg_get_util(struct pccg_cpu *pccg_cpu, u64 time, bool local)
 +{
 +	struct rq *rq = cpu_rq(pccg_cpu->cpu);
 +
@@ -625,9 +714,11 @@ index 000000000..9da06a48c
 +					   FREQUENCY_UTIL, NULL);
 +
 +	pccg_update_hispeed(pccg_cpu, time);
-+	pccg_wake_edge_check(pccg_cpu, time);
-+	pccg_bore_check(pccg_cpu, time);
-+	pccg_bore_warp_check(pccg_cpu, time);
++	if (local) {
++		pccg_wake_edge_check(pccg_cpu, time);
++		pccg_bore_check(pccg_cpu, time);
++		pccg_bore_warp_check(pccg_cpu, time);
++	}
 +	if (pccg_cpu->hispeed_floor > pccg_cpu->util)
 +		pccg_cpu->util = pccg_cpu->hispeed_floor;
 +}
@@ -729,7 +820,7 @@ index 000000000..9da06a48c
 +	if (!pccg_should_update_freq(pccg_cpu->pccg_policy, time))
 +		return false;
 +
-+	pccg_get_util(pccg_cpu, time);
++	pccg_get_util(pccg_cpu, time, true);
 +	pccg_iowait_apply(pccg_cpu, time);
 +
 +	return true;
@@ -806,7 +897,7 @@ index 000000000..9da06a48c
 +		struct pccg_cpu *j_pccg_cpu = &per_cpu(pccg_cpu_data, j);
 +		unsigned long j_util, j_max;
 +
-+		pccg_get_util(j_pccg_cpu, time);
++		pccg_get_util(j_pccg_cpu, time, j == pccg_cpu->cpu);
 +		pccg_iowait_apply(j_pccg_cpu, time);
 +		j_util = j_pccg_cpu->util;
 +		j_max = j_pccg_cpu->max;
@@ -915,7 +1006,7 @@ index 000000000..9da06a48c
 + * the sysfs files named exactly like REFLEX's (hispeed_window_us, etc.)
 + * while the backing C symbols stay distinct per file. */
 +#define PCCG_ATTR(_name) \
-+static struct governor_attr _name##_attr = {	\
++static struct governor_attr pccg_##_name##_attr = {	\
 +	.attr	= { .name = #_name, .mode = 0644 },	\
 +	.show	= pccg_##_name##_show,			\
 +	.store	= pccg_##_name##_store,			\
@@ -1012,18 +1103,18 @@ index 000000000..9da06a48c
 +
 +static struct attribute *pccg_attrs[] = {
 +	&pccg_rate_limit_us.attr,
-+	&hispeed_window_us_attr.attr,
-+	&hispeed_load_pct_attr.attr,
-+	&hispeed_freq_pct_attr.attr,
-+	&hispeed_decay_shift_attr.attr,
-+	&hispeed_hold_us_attr.attr,
-+	&wake_edge_boost_attr.attr,
-+	&auto_capacity_scale_attr.attr,
-+	&instant_trigger_pct_attr.attr,
-+	&streak_window_us_attr.attr,
-+	&streak_min_count_attr.attr,
++	&pccg_hispeed_window_us_attr.attr,
++	&pccg_hispeed_load_pct_attr.attr,
++	&pccg_hispeed_freq_pct_attr.attr,
++	&pccg_hispeed_decay_shift_attr.attr,
++	&pccg_hispeed_hold_us_attr.attr,
++	&pccg_wake_edge_boost_attr.attr,
++	&pccg_auto_capacity_scale_attr.attr,
++	&pccg_instant_trigger_pct_attr.attr,
++	&pccg_streak_window_us_attr.attr,
++	&pccg_streak_min_count_attr.attr,
 +#ifdef CONFIG_SCHED_BORE
-+	&bore_boost_max_score_attr.attr,
++	&pccg_bore_boost_max_score_attr.attr,
 +#endif
 +	NULL
 +};
