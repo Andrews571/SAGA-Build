@@ -635,6 +635,173 @@ block/adios.c (prior v3.3.5 state applied first) -- zero rejects,
 zero fuzz, zero offset on Kconfig.iosched, adios.c, elevator.c, and
 genhd.c.
 ---
+From: ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.5-SAGA -- a full, unscoped review pass
+ (14 findings), every one individually verified against real source
+ before acting
+
+Unlike prior rounds in this file, this review was not scoped to "what
+hasn't been checked yet" -- it re-examined the whole patch from
+scratch. Went through all 14 findings one at a time; each verified
+result below states exactly what was checked and against what. 8 were
+real and got fixed, 3 were false alarms once checked against this
+specific tree, 1 needs a tuning decision this patch can't make alone,
+1 was already correct, 1 is a real gap outside this patch's scope.
+
+REAL, fixed:
+
+1. Priority inversion in dispatch_from_pq(): pq_idx = pq_state >> 1
+   gave 3 >> 1 == 1 when both prio_queue[0] (Tier 0,
+   BLK_MQ_INSERT_AT_HEAD) and prio_queue[1] (pre-model-stability
+   fallback) were non-empty -- picking the lower-priority queue while
+   a Tier-0 request waited. Traced both insert sites to confirm which
+   index means what before fixing: prio_queue[1] is only ever used
+   during the brief pre-stability window early in device life (once
+   both READ/WRITE models get a first sample, nothing inserts into it
+   again), so this could only manifest in that narrow window, not as
+   an ongoing steady-state problem -- still a real, confirmed logic
+   bug with a trivial fix: pq_idx = (pq_state & 1) ? 0 : 1.
+
+2. .next_request/.former_request (elv_rb_latter_request/
+   elv_rb_former_request) operate on rq->rb_node directly, assuming
+   one rb-tree node per request -- ADIOS's dl_tree groups requests by
+   struct dl_group (one node per distinct deadline, requests chained
+   via rd->dl_node, a plain list) and never touches rq->rb_node at
+   all. Traced the actual call path: block/blk-merge.c's
+   attempt_back_merge()/attempt_front_merge() call
+   elv_latter_request()/elv_former_request() directly, independent of
+   ADIOS's own .bio_merge/.request_merged/.requests_merged -- so this
+   is reachable, not dead code, and would read stale/garbage
+   rq->rb_node contents. Confirmed elv_latter_request/elv_former_
+   request (block/elevator.c) already null-check
+   ops.next_request/.former_request before calling, so removing both
+   assignments is a safe, zero-risk fix -- that one generic merge
+   fallback becomes a no-op, ADIOS's own real merge logic is
+   unaffected.
+
+3. fill_batch_queues() classified sync vs async by comparing
+   rd->deadline against rq->start_time_ns -- but interactive-boost and
+   the top-app deadline bonus (this file's own earlier addition) both
+   subtract from rd->deadline for genuinely sync requests, so a
+   boosted sync read ends up misclassified as async (the "can be
+   delayed freely" tier) -- exactly backwards from what the boost is
+   for. Added an explicit is_sync bool to adios_rq_data, set once from
+   rq->cmd_flags & REQ_SYNC before anything touches rd->deadline, used
+   instead of the deadline comparison.
+
+4. adios_prepare_request(): mempool_alloc(..., GFP_ATOMIC) has no
+   guarantee of success, fed straight into memset(rd, 0, ...) with no
+   NULL check -- an immediate crash under exactly the memory pressure
+   this scheduler's own shrink logic exists to survive. Added the
+   NULL check. Explicitly NOT a complete fix: get_rq_data() is a raw
+   pointer return with no NULL check, and roughly 8 call sites
+   dereference its result immediately, so a request left with
+   priv[0] == NULL here still crashes a few lines later in the insert
+   path instead of right here. A real fix needs either auditing every
+   get_rq_data() call site or pre-allocating per-tag private data at
+   init time (bounded by q->nr_requests, never fails) instead of a
+   mempool -- both bigger, separate pieces of work.
+
+5. CONFIG_MQ_IOSCHED_ADIOS is tristate (can be =m), but
+   subsys_initcall(adios_init) was unconditional -- the module loader
+   doesn't process initcall sections at all, so a =m build would
+   insmod "successfully" with elv_register() never called. Wrapped in
+   #ifdef MODULE / module_init() / #else / subsys_initcall() / #endif,
+   keeping the existing UFS-MTK probe-race comment scoped to the =y
+   branch it actually applies to (a =m build can't win that race
+   regardless of initcall level, since modules load after every
+   built-in initcall has already run).
+
+10. update_elv_direction() in pop_next_bq_request_elevator() checked
+    `bq_idx == 0 && !(bq_state & 0x1)` using bq_state captured BEFORE
+    the pop -- but bq_idx == 0 requires bit 0 already set in that same
+    snapshot (__builtin_ctz found it), so `bq_state & 0x1` was always
+    true whenever bq_idx == 0, making the condition impossible to
+    satisfy. Confirmed pop_bq_request() clears the bit in
+    ad->bq_state[page] directly when the pop empties the queue -- so
+    re-reading ad->bq_state[ad->bq_page] (post-pop, live) instead of
+    the stale local snapshot is the fix.
+
+11. Three more sysfs tunables read in a hot path without READ_ONCE
+    (lm_adapt_window_samples, lm_overrun_ratio_pct,
+    lm_overrun_trigger_count) -- missed in this file's earlier
+    READ_ONCE/WRITE_ONCE audit round, a different family of tunables
+    than the ones checked then. Write side was already WRITE_ONCE'd in
+    all three cases (SYSFS_INT_DECL's generic macro already does
+    this) -- only the reads needed fixing. (The fourth field this
+    review named, lm_adapt_bad_threshold_pct, was checked and found to
+    already have READ_ONCE at its actual use site -- false alarm on
+    that one specifically.)
+
+14. adios_batch_limit_##name##_store(): struct adios_data *ad =
+    e->elevator_data was declared after the kstrtou32()/range-check
+    statements -- valid C, but mixed declarations-and-code, which can
+    trigger -Wdeclaration-after-statement on stricter toolchain
+    configs. Purely cosmetic, zero functional risk -- moved the
+    declaration to the top.
+
+7 (partial, real gap found beyond what the review itself flagged):
+   elv_iosched_store() (block/elevator.c) is non-static so it links,
+   but checked every header genhd.c would plausibly already include
+   (block/blk.h, include/linux/elevator.h) and found no prototype for
+   it anywhere -- calling it from genhd.c's enforcer with no visible
+   declaration is an implicit-function-declaration situation, which
+   real toolchains (Clang especially) can treat as a hard build error,
+   not just a warning. Added a local extern declaration in the same
+   genhd.c block rather than editing a shared header this patch
+   otherwise never touches. (q->sysfs_lock being a mutex, and
+   elv_iosched_store's own locking expectations, were also part of
+   this item -- checked and confirmed fine, see below.)
+
+REAL, but needs a decision this patch can't make alone:
+
+12. The batch_limit auto-scale block's own comment says it targets
+    "the batch_limit=128-on-a-QD32-device regression observed
+    empirically on UFS 2.2" -- but baseline_qd is 32, so for a device
+    with q->nr_requests == 32 (exactly the case named), scale_permille
+    computes to exactly 1000 (1.0x), leaving batch_limit[WRITE] at its
+    full default of 128, completely unscaled. The math only changes
+    anything for devices *other* than the one the comment says it
+    fixes. This means either baseline_qd is wrong (should be some
+    higher value representing the depth 128 was actually tuned for,
+    so a QD32 device scales down from it) or the default itself needs
+    revisiting -- not something to guess a replacement number for
+    without knowing what depth 128 was empirically validated against.
+    Left as-is pending that input.
+
+Checked, confirmed already correct or a false alarm for this tree
+specifically (no change made):
+
+6. guard()/scoped_guard() -- re-confirmed already verified true in an
+   earlier round of this same file's changelog (real, present natively
+   in this tree's include/linux/cleanup.h and spinlock.h).
+8. req_get_ioprio(), blk_mq_is_shared_tags(q->tag_set->flags), and
+   QUEUE_FLAG_SQ_SCHED -- all three checked directly against this
+   tree's real headers/source (include/linux/blk-mq.h,
+   include/linux/blkdev.h, and blk_mq_is_shared_tags's real call sites
+   in block/elevator.c itself, block/blk-mq.c, block/blk-mq-sched.c).
+   All exist with the exact signatures already used. False alarm.
+13. RQF_STARTED set manually in adios_dispatch_request(), suspected
+    redundant with blk_mq_start_request(). Checked this tree's actual
+    blk_mq_start_request() (block/blk-mq.c): it does NOT set
+    RQF_STARTED at all in this kernel version -- it uses a newer,
+    separate mechanism (WRITE_ONCE(rq->state, MQ_RQ_IN_FLIGHT)).
+    RQF_STARTED is legacy/vestigial for this code path here; setting
+    it manually isn't redundant with anything blk_mq_start_request()
+    does in this tree, and may be relied on by something else that
+    still checks that specific flag. The review's concern appears
+    based on a different kernel version's blk_mq_start_request()
+    behavior. False alarm for this tree.
+9. Truncation on 32-bit (kstrtoul into unsigned long, 32-bit on arm32)
+   -- correctly caveated by the review itself as conditional on
+   32-bit being a real target. This kernel/device family is arm64
+   only; not applicable.
+
+Verified: `patch -p1 --fuzz=0` against a freshly reconstructed
+block/adios.c (prior v3.3.5 state applied first) -- zero rejects,
+zero fuzz, zero offset on Kconfig.iosched, adios.c, elevator.c, and
+genhd.c.
+---
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
 index 08b8af92f..ee5d322a0 100644
 --- a/block/Kconfig.iosched
@@ -697,7 +864,7 @@ new file mode 100644
 index 000000000..7a1c4d5e2
 --- /dev/null
 +++ b/block/adios.c
-@@ -0,0 +1,3154 @@
+@@ -0,0 +1,3266 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Adaptive Deadline I/O Scheduler (ADIOS)
@@ -1260,6 +1427,19 @@ index 000000000..7a1c4d5e2
 +	u64 pred_lat;
 +	u32 block_size;
 +	bool managed;
++	/*
++	 * REVIEW FIX: fill_batch_queues() used to infer sync/async by
++	 * comparing rd->deadline against rq->start_time_ns -- but
++	 * interactive-boost and/or the top-app deadline bonus both
++	 * subtract from rd->deadline for genuinely sync requests too, so a
++	 * boosted sync read ends up with rd->deadline != start_time_ns and
++	 * gets misclassified as async (dest_idx=1, the "can be delayed
++	 * freely" tier) -- the exact opposite of what the boost was for.
++	 * Ground truth recorded explicitly here instead, set once in
++	 * add_to_dl_tree() from rq->cmd_flags & REQ_SYNC before anything
++	 * touches rd->deadline.
++	 */
++	bool is_sync;
 +} __attribute__((aligned(64)));
 +
 +static const int adios_prio_to_wmult[40] = {
@@ -1806,7 +1986,7 @@ index 000000000..7a1c4d5e2
 +	// else: dead zone, counts toward total only
 +
 +	total = atomic_inc_return(&ad->window_total[buf][optype]);
-+	if (total < ad->lm_adapt_window_samples)
++	if (total < READ_ONCE(ad->lm_adapt_window_samples))
 +		return;
 +
 +	// Try to become the evaluator by atomically swapping the active
@@ -2019,6 +2199,8 @@ index 000000000..7a1c4d5e2
 +	struct dl_group *dlg;
 +	u64 deadline;
 +	bool was_empty = RB_EMPTY_ROOT(&root->rb_root);
++
++	rd->is_sync = !!(rq->cmd_flags & REQ_SYNC);
 +
 +	/* Tier-2: Synchronous Requests
 +	 * - Needs to be FIFO within a same optype
@@ -2332,7 +2514,33 @@ index 000000000..7a1c4d5e2
 +	struct adios_data *ad = rq->q->elevator->elevator_data;
 +	struct adios_rq_data *rd;
 +
++	/*
++	 * REVIEW FIX (partial -- see this patch's own changelog for the
++	 * scope note): mempool_alloc() under GFP_ATOMIC is NOT guaranteed
++	 * to succeed -- if the pool's reserved elements are all checked
++	 * out AND the backing allocator also fails under atomic/no-wait
++	 * conditions, it returns NULL. The old code fed that straight into
++	 * memset(rd, 0, ...) with no check -- an immediate NULL-pointer
++	 * deref/panic under exactly the memory-pressure conditions this
++	 * scheduler's own shrink-model logic exists to survive. This check
++	 * prevents that specific, guaranteed crash. It does NOT make the
++	 * rest of the file NULL-safe: get_rq_data() is a raw
++	 * `return rq->elv.priv[0];` with no NULL check, and every one of
++	 * its ~8 call sites dereferences the result immediately -- so a
++	 * request left with priv[0] == NULL here will still crash a few
++	 * lines later in the insert path, just not right here. A complete
++	 * fix needs either auditing/hardening every get_rq_data() call
++	 * site, or restructuring this scheduler to pre-allocate per-tag
++	 * private data at init time (bounded by q->nr_requests, so it
++	 * could never fail here at all) instead of a mempool -- both are
++	 * real, larger pieces of work, deliberately out of scope for this
++	 * pass.
++	 */
 +	rd = mempool_alloc(ad->rq_data_pool, GFP_ATOMIC);
++	if (unlikely(!rd)) {
++		rq->elv.priv[0] = NULL;
++		return;
++	}
 +	memset(rd, 0, sizeof(*rd));
 +	rd->rq = rq;
 +	rq->elv.priv[0] = rd;
@@ -2490,7 +2698,7 @@ index 000000000..7a1c4d5e2
 +
 +		// Add request to the corresponding batch queue
 +		dest_idx = (bq_batch_order == ADIOS_BO_OPTYPE || optype == ADIOS_OTHER)?
-+			optype : !!(rd->deadline != rq->start_time_ns);
++			optype : !rd->is_sync;
 +		dest_q = &ad->batch_queue[page][dest_idx];
 +		list_add_tail(&rq->queuelist, dest_q);
 +		ad->bq_state[page] |= 1U << dest_idx;
@@ -2568,8 +2776,20 @@ index 000000000..7a1c4d5e2
 +	// Tier-3 (async) uses the pre-calculated elevator direction
 +	rq = pop_bq_request(ad, bq_idx, direction);
 +
++	/*
++	 * REVIEW FIX: was `!(bq_state & 0x1)` -- bq_state here is the
++	 * snapshot taken BEFORE the pop above. bq_idx == 0 is only reached
++	 * when __builtin_ctz(bq_state) == 0, which requires bit 0 to
++	 * already be set in that same pre-pop snapshot -- so
++	 * `bq_state & 0x1` was always true whenever bq_idx == 0, making
++	 * this condition impossible to satisfy: this update_elv_direction()
++	 * call could never fire. pop_bq_request() clears the bit in
++	 * ad->bq_state[page] directly (in place) when the pop empties the
++	 * queue, so re-reading the live state after the pop is what
++	 * actually reflects whether it just became empty.
++	 */
 +	/* If batch queue for the sync requests just became empty */
-+	if (bq_idx == 0 && rq && !(bq_state & 0x1))
++	if (bq_idx == 0 && rq && !(ad->bq_state[ad->bq_page] & 0x1))
 +		update_elv_direction(ad);
 +
 +	return rq;
@@ -2628,7 +2848,18 @@ index 000000000..7a1c4d5e2
 +
 +	guard(spinlock_irqsave)(&ad->pq_lock);
 +	u32 pq_state = eval_adios_state(ad, ADIOS_STATE_PQ);
-+	u8  pq_idx = pq_state >> 1;
++	/*
++	 * REVIEW FIX: was `pq_idx = pq_state >> 1`. pq_state's bit0 means
++	 * prio_queue[0] (Tier 0, BLK_MQ_INSERT_AT_HEAD -- the highest
++	 * priority queue) is non-empty, bit1 means prio_queue[1] (the
++	 * pre-model-stability fallback queue, only ever used very early
++	 * before both READ/WRITE models get their first sample) is
++	 * non-empty. When BOTH are set (pq_state == 3), the old formula
++	 * gave 3 >> 1 == 1 -- picking the lower-priority queue 1 while a
++	 * genuine Tier-0 request sat waiting in queue 0. Correct rule: 0
++	 * wins whenever it has anything, 1 only otherwise.
++	 */
++	u8  pq_idx = (pq_state & 1) ? 0 : 1;
 +	struct list_head *q = &ad->prio_queue[pq_idx];
 +
 +	if (unlikely(list_empty(q))) return NULL;
@@ -2812,12 +3043,12 @@ index 000000000..7a1c4d5e2
 +	// -- see true_latency's own comment above for why.
 +	if (rd->pred_lat > 0) {
 +		struct latency_model *lm = &ad->latency_model[optype];
-+		u64 threshold = (rd->pred_lat * ad->lm_overrun_ratio_pct) / 100;
++		u64 threshold = (rd->pred_lat * READ_ONCE(ad->lm_overrun_ratio_pct)) / 100;
 +		bool is_overrun = true_latency > threshold;
 +
 +		if (is_overrun) {
 +			if (atomic_inc_return(&lm->consec_overruns) >=
-+					ad->lm_overrun_trigger_count) {
++					READ_ONCE(ad->lm_overrun_trigger_count)) {
 +				atomic_set(&lm->consec_overruns, 0);
 +				// CHATGPT-REVIEW: defer the actual shrink (allocation +
 +				// RCU swap) to the timer instead of doing it here, on
@@ -3315,10 +3546,10 @@ index 000000000..7a1c4d5e2
 +	 * width instead of relying on an unwritten range check. */ \
 +	u32 max_batch; \
 +	int ret; \
++	struct adios_data *ad = e->elevator_data; \
 +	ret = kstrtou32(page, 10, &max_batch); \
 +	if (ret || max_batch == 0) \
 +		return -EINVAL; \
-+	struct adios_data *ad = e->elevator_data; \
 +	ad->batch_limit[optype] = max_batch; \
 +	return count; \
 +}
@@ -3791,8 +4022,32 @@ index 000000000..7a1c4d5e2
 +// Define the ADIOS scheduler type
 +static struct elevator_type mq_adios = {
 +	.ops = {
-+		.next_request		= elv_rb_latter_request,
-+		.former_request		= elv_rb_former_request,
++		/*
++		 * REVIEW FIX: these were elv_rb_latter_request/elv_rb_former_
++		 * request -- generic block-layer helpers that operate directly
++		 * on rq->rb_node, assuming one rb-tree node per request (how
++		 * mq-deadline uses its tree). ADIOS's dl_tree doesn't work that
++		 * way: nodes are struct dl_group (one per distinct deadline),
++		 * each holding every same-deadline request on a plain list
++		 * (rd->dl_node) -- rq->rb_node is never touched by ADIOS's own
++		 * insert/remove code at all. These callbacks ARE reachable from
++		 * a generic path independent of ADIOS's own .bio_merge/
++		 * .request_merged/.requests_merged: block/blk-merge.c's
++		 * attempt_back_merge()/attempt_front_merge() call
++		 * elv_latter_request()/elv_former_request() directly, which
++		 * would read whatever garbage/stale data happens to be sitting
++		 * in rq->rb_node (uninitialized, or leftover from a prior
++		 * scheduler's use of the same request slot) and walk it as if
++		 * it were a real tree.
++		 * Confirmed safe to just omit both: elv_latter_request()/
++		 * elv_former_request() (block/elevator.c) already check
++		 * `if (e->type->ops.next_request)` / `.former_request` before
++		 * calling, so a NULL op here means that one generic fallback
++		 * merge attempt becomes a no-op instead of undefined behavior --
++		 * ADIOS's own bio_merge/request_merged/requests_merged remain
++		 * fully in effect either way, since they're a separate,
++		 * independent merge path.
++		 */
 +		.limit_depth		= adios_limit_depth,
 +		.depth_updated		= adios_depth_updated,
 +		.request_merged		= adios_request_merged,
@@ -3830,12 +4085,23 @@ index 000000000..7a1c4d5e2
 +}
 +
 +/*
-+ * subsys_initcall, not module_init (== device_initcall): the UFS-MTK
-+ * platform driver that actually creates these block devices registers
-+ * at device_initcall too (module_platform_driver() in ufs-mediatek.c),
-+ * so it's a link-order coin flip which one wins the race to run first —
-+ * and elevator_init_mq() only ever calls elevator_get_default() once,
-+ * at queue creation, before the disk is even added. Lose that race and
++ * REVIEW FIX: CONFIG_MQ_IOSCHED_ADIOS is `tristate` (can be built as
++ * =m), but this used to call subsys_initcall(adios_init)
++ * unconditionally with no #ifdef MODULE branch. subsys_initcall (like
++ * every initcall level) only ever runs for code linked directly into
++ * vmlinux -- the module loader does not process initcall sections at
++ * all, it calls whatever module_init()'s argument function is. For a
++ * =m build, that means adios_init() would never run: insmod would
++ * "succeed" with elv_register() never called, and selecting "adios"
++ * via sysfs would just fail with no explanation.
++ *
++ * subsys_initcall, not module_init (== device_initcall), for the
++ * *built-in* (=y) case specifically: the UFS-MTK platform driver that
++ * actually creates these block devices registers at device_initcall
++ * too (module_platform_driver() in ufs-mediatek.c), so it's a
++ * link-order coin flip which one wins the race to run first — and
++ * elevator_init_mq() only ever calls elevator_get_default() once, at
++ * queue creation, before the disk is even added. Lose that race and
 + * elevator_get(q, "adios", false) below finds nothing registered yet,
 + * elevator_init_mq() just returns with no scheduler set, and nothing
 + * ever retries — that queue is stuck without a default forever. Same
@@ -3845,8 +4111,21 @@ index 000000000..7a1c4d5e2
 + * subsys_initcall strictly precedes every device_initcall system-wide
 + * (no exceptions, no probe-deferral timing games), so this closes the
 + * race outright instead of leaving it to link order.
++ *
++ * None of that race-avoidance reasoning applies to a =m build at all:
++ * a module loads long after every built-in driver's initcalls have
++ * already run (UFS-MTK included, if it's built-in, which is the usual
++ * case for core storage), so a loadable ADIOS could never win that
++ * race regardless of initcall level -- it can only ever be selected
++ * manually via sysfs after loading, a case elevator_init_mq()'s
++ * default-selection timing doesn't even apply to. module_init() is
++ * simply the correct, and only working, option there.
 + */
++#ifdef MODULE
++module_init(adios_init);
++#else
 +subsys_initcall(adios_init);
++#endif
 +module_exit(adios_exit);
 +
 +MODULE_AUTHOR(ADIOS_AUTHOR);
@@ -3891,7 +4170,7 @@ diff --git a/block/genhd.c b/block/genhd.c
 index c9dc2f2c..a17b7705 100644
 --- a/block/genhd.c
 +++ b/block/genhd.c
-@@ -1525,3 +1525,77 @@ void inc_diskseq(struct gendisk *disk)
+@@ -1525,3 +1525,91 @@ void inc_diskseq(struct gendisk *disk)
  {
  	disk->diskseq = atomic64_inc_return(&diskseq);
  }
@@ -3918,6 +4197,20 @@ index c9dc2f2c..a17b7705 100644
 +
 +static struct delayed_work saga_adios_enforce_work;
 +static int saga_adios_enforce_count;
++
++/*
++ * REVIEW FIX: elv_iosched_store() (block/elevator.c) is non-static,
++ * so it links fine, but it has no prototype in any header genhd.c
++ * would already be including (not in block/blk.h, not in
++ * include/linux/elevator.h) -- calling it here with no visible
++ * declaration at all is an implicit-function-declaration situation,
++ * which several real toolchains (Clang especially, and GCC in
++ * stricter modes) treat as a hard error, not just a warning. Local
++ * forward declaration instead of editing a shared header this patch
++ * doesn't otherwise touch.
++ */
++extern ssize_t elv_iosched_store(struct request_queue *q, const char *name,
++				  size_t count);
 +
 +static void saga_adios_enforce_fn(struct work_struct *work)
 +{
