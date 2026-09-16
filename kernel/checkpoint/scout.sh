@@ -214,14 +214,30 @@ case "$KERNEL_VARIANT" in
         ;;
     KSUNEXT)
         if [ "$SUSFS_ENABLED" = "true" ]; then
-            # Official KernelSU-Next's dev branch dropped the manual hook
-            # API SuSFS's kernel patch depends on (moved to
-            # syscall_hook_manager) — confirmed by a real build (undefined
-            # ksu_handle_*/susfs_* symbols at link time, run 28714488530).
-            # pershoot maintains a KernelSU-Next fork with a dev-susfs
-            # branch that keeps SUSFS-compatible hooks, paired with their
-            # own susfs4ksu fork/branch below. Maintainer flags this fork
-            # as not production-ready — tracked like any other candidate.
+            # 2026-09-15 correction: tried routing this to official
+            # KernelSU-Next + official simonpunk/susfs4ksu, reasoning that
+            # susfs4ksu's "VFS Hooks v1.4" made pershoot's fork unnecessary
+            # (community pipelines appeared to build "KernelSU-Next" +
+            # susfs4ksu successfully with no fork mentioned). Verified false
+            # two ways: (1) the "dev_susfs" ref those pipelines pass to
+            # setup.sh doesn't exist as a branch or tag on
+            # KernelSU-Next/KernelSU-Next — checked out directly, git
+            # confirms no match, so that argument silently no-ops there too;
+            # (2) a real build against official dev produced a long list of
+            # undefined symbols at link time (ksu_handle_execveat,
+            # susfs_ksu_sid, fake_state, etc, run 34926879573) — confirmed
+            # fake_state is `static` (file-local) in
+            # kernel/feature/selinux_hide.c on official dev, while
+            # susfs4ksu's patch expects it exported. This is a real
+            # architecture divergence between official KernelSU-Next's
+            # current hook implementation and what susfs4ksu's patch
+            # targets, not a missing Kconfig flag or wrong branch name.
+            # pershoot's fork bakes in hooks that match what susfs4ksu
+            # expects (confirmed working via real build, run 34877439974,
+            # before this whole detour) — reverted back to it. If revisiting
+            # this again: the actual fix would mean diffing pershoot's fork
+            # against official dev to find exactly what hook-compatibility
+            # code to port, not just pointing at a different ref.
             latest=$(latest_sha_or_empty "KernelSU-Next (pershoot dev-susfs fork)" \
                 "https://api.github.com/repos/pershoot/KernelSU-Next/commits/dev-susfs" '.sha')
             resolve_component "ksunext_susfs_fork" "KSUNEXT_SUSFS_FORK" "$latest"
