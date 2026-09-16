@@ -1281,7 +1281,7 @@ index 000000000..d19529a61
 +#endif
 +	NULL
 +};
-+ATTRIBUTE_GROUPS(pccg);
++ATTRIBUTE_GROUPS(cc);
 +
 +static void cc_tunables_free(struct kobject *kobj)
 +{
