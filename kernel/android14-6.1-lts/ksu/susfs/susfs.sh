@@ -3,29 +3,26 @@
 # ======================================================
 # 🧬 SuSFS — shared apply logic (any KSU fork, android14-6.1-lts)
 # ======================================================
-# Repo: https://gitlab.com/simonpunk/susfs4ksu (same upstream for every
-# root solution as of 2026-09 — see the pin-resolution comment below for
-# the KSUNEXT history)
+# Repo: https://gitlab.com/simonpunk/susfs4ksu (pershoot/susfs4ksu fork for
+# KernelSU-Next — see the pin-resolution comment below)
 
 # SuSFS pin resolution — SukiSU-Ultra needs an exact commit paired with a
 # matching susfs4ksu commit (community-verified combo, not just "old enough").
 # ReSukiSU is generally compatible with SuSFS's branch tip, so it isn't
 # pinned as tightly. kernel/checkpoint/scout.sh exports the right *_REF beforehand.
 #
-# KernelSU-Next used to be a special case routed to pershoot's fork: its
-# dev branch had dropped the manual hook API (ksu_handle_*) that
-# simonpunk/susfs4ksu's patch targeted at the time (confirmed by a real
-# build with undefined ksu_handle_*/susfs_* symbols at link time, run
-# 28714488530). That's no longer the situation — simonpunk/susfs4ksu now
-# ships "VFS Hooks v1.4", which upstream KernelSU-Next supports directly
-# (community pipelines, e.g. zzh20188/GKI_KernelSU_SUSFS, build official
-# KernelSU-Next/KernelSU-Next + official simonpunk/susfs4ksu gki-android14-6.1
-# together successfully as of SUSFS v1.5.9+ — no fork needed). Reverted to
-# the same upstream source SUKISU/RESUKISU already use (2026-09).
-#
-# If this ever needs falling back to pershoot's fork again (upstream
-# regresses, VFS Hooks breaks), that's still tracked in git history — see
-# the commit that made this change.
+# KernelSU-Next is a special case: its official dev branch's own hook
+# implementation (kernel/feature/selinux_hide.c etc.) doesn't match what
+# susfs4ksu's patch expects to link against — e.g. fake_state is `static`
+# there, but susfs4ksu's patch references it as an exported symbol.
+# Confirmed via a real build (undefined ksu_handle_*/susfs_* symbols at
+# link time, run 28714488530; re-confirmed 2026-09-15 after trying official
+# simonpunk/susfs4ksu instead, run 34926879573 — same class of failure).
+# pershoot maintains a KernelSU-Next fork (dev-susfs branch, see
+# ksunext.sh) paired with their own susfs4ksu fork/branch, which is what's
+# tracked below instead of upstream simonpunk/susfs4ksu for this one root
+# solution. Maintainer flags pershoot's fork as not production-ready;
+# tracked like any other candidate via kernel/checkpoint/scout.sh.
 if [ "$KERNEL_VARIANT" = "SUKISU" ]; then
     SUSFS_REF="${SUSFS_SUKISU_REF:-}"
     [ -n "$SUSFS_REF" ] || warn "SuSFS+SukiSU: no pin resolved — build will likely fail (see wishlist for known-good combos)"
@@ -33,8 +30,8 @@ if [ "$KERNEL_VARIANT" = "SUKISU" ]; then
     SUSFS_BRANCH="gki-android14-6.1"
 elif [ "$KERNEL_VARIANT" = "KSUNEXT" ]; then
     SUSFS_REF="${SUSFS_KSUNEXT_REF:-}"
-    SUSFS_REPO="https://gitlab.com/simonpunk/susfs4ksu.git"
-    SUSFS_BRANCH="gki-android14-6.1"
+    SUSFS_REPO="https://gitlab.com/pershoot/susfs4ksu.git"
+    SUSFS_BRANCH="gki-android14-6.1-dev"
 else
     SUSFS_REF="${SUSFS_RESUKISU_REF:-}"
     SUSFS_REPO="https://gitlab.com/simonpunk/susfs4ksu.git"
@@ -142,18 +139,23 @@ python3 "${PATCHER_DIR}/fix_namespace.py" "${KERNEL_SRC}/fs/namespace.c" \
     || error "SuSFS: namespace.c fix failed!"
 log "namespace.c fixed ✅"
 
-# NOTE (stale as of 2026-09, kept for history): this used to explain why
-# nothing needed to happen here for KSUNEXT — pershoot's dev-susfs fork
-# shipped the manual-hook/SuSFS integration directly in KernelSU-Next's
-# own source (kernel/feature, kernel/hook, kernel/selinux, etc.), so the
-# patch step above used to warn-and-skip for it (no
-# 50_add_susfs_in_gki-android14-6.1.patch in that fork's layout) and there
-# was nothing left to apply here. Now that KSUNEXT+SUSFS points at official
-# KernelSU-Next + simonpunk/susfs4ksu (see the pin-resolution comment near
-# the top of this file), KSUNEXT goes through the exact same patch
-# application as SUKISU/RESUKISU above — this section is no longer a
-# special case. Left unverified by an actual build+boot as of this
-# comment; treat as needing that confirmation, not as settled.
+# NOTE: pershoot's susfs4ksu fork used to ship a second patch
+# (kernel_patches/60_scope-minimized_manual_hooks.patch) that scoped down
+# KernelSU-Next's manual hooks so they wouldn't collide with its
+# syscall_hook_manager wiring. That patch — and syscall_hook_manager
+# itself — is gone as of the fork's current dev-susfs branch: the branch
+# now ships the manual-hook/SuSFS integration directly in KernelSU-Next's
+# own source (kernel/feature, kernel/hook, kernel/selinux, etc.), so
+# there's nothing left to apply here for KSUNEXT. Confirmed via on-device
+# check (2026-07-05): CONFIG_KSU_SUSFS and its sub-options compile in,
+# and dmesg shows the integration's sucompat log line firing at runtime.
+# (2026-09-15: briefly tried routing KSUNEXT+SUSFS at official
+# KernelSU-Next instead, on the theory this had become unnecessary —
+# confirmed false by a real build, undefined-symbol link errors, see
+# scout.sh's pin-resolution comment for KSUNEXT. Reverted.)
+# If pershoot's fork restructures again and SuSFS stops working on
+# KSUNEXT, check kernel_patches/ in that fork first before assuming this
+# comment is still accurate.
 
 rm -rf "$SUSFS_DIR"
 
@@ -183,18 +185,13 @@ CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
 CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 CONFIG_KSU_SUSFS_SUS_MAP=y
 CONFIGS
-    # SUS_SU (fake_state/fake_status/ksu_selinux_hide_enabled) was disabled
-    # here because it wasn't implemented in pershoot/KernelSU-Next's
-    # dev-susfs fork's own selinux.c/selinuxfs.c — only referenced there,
-    # with no definitions, causing undefined-symbol link errors for
-    # KSUNEXT+SUSFS specifically (confirmed via real build, run
-    # 28793310460). Now that KSUNEXT+SUSFS uses official KernelSU-Next
-    # instead of that fork (see susfs.sh's pin-resolution comment), this
-    # specific reason no longer applies — but that's not the same as
-    # confirming official KernelSU-Next's selinux.c implements sus_su.c
-    # fully. Left disabled here until a real build confirms one way or the
-    # other; safe to try re-enabling for KSUNEXT as a follow-up test once
-    # the base switch itself is verified.
+    # SUS_SU (fake_state/fake_status/ksu_selinux_hide_enabled) isn't
+    # implemented in pershoot/KernelSU-Next's dev-susfs fork's own
+    # selinux.c/selinuxfs.c — only referenced there, with no definitions,
+    # causing undefined-symbol link errors for KSUNEXT+SUSFS specifically
+    # (confirmed via real build, run 28793310460). SukiSU/ReSukiSU use
+    # simonpunk/susfs4ksu, which does implement sus_su.c fully, so they're
+    # unaffected. Leave disabled for KSUNEXT until pershoot's fork ships it.
     if [ "$KERNEL_VARIANT" != "KSUNEXT" ]; then
         echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> "${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
     fi
