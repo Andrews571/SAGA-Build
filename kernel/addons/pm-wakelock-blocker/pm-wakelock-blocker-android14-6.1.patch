@@ -1,0 +1,173 @@
+--- a/kernel/power/Kconfig
++++ b/kernel/power/Kconfig
+@@ -203,6 +203,16 @@
+ 	depends on PM_WAKELOCKS
+ 	default y
+ 
++config PM_WAKELOCK_BLOCKER
++	bool "Named wakelock blocker for user space wakeup sources (SAGA)"
++	depends on PM_WAKELOCKS
++	default n
++	help
++	  Allow blocking specific user space wakeup sources (created via
++	  /sys/power/wake_lock, e.g. by the SystemSuspend HAL or vendor
++	  blobs) by name, through the new /sys/power/wake_lock_blocker
++	  sysfs node. Concept based on the Boeffla Wakelock Blocker.
++
+ config PM
+ 	bool "Device power management core functionality"
+ 	help
+--- a/kernel/power/power.h
++++ b/kernel/power/power.h
+@@ -336,6 +336,11 @@
+ extern int pm_wake_lock(const char *buf);
+ extern int pm_wake_unlock(const char *buf);
+ 
++#ifdef CONFIG_PM_WAKELOCK_BLOCKER
++extern ssize_t pm_show_wakelock_blocker(char *buf);
++extern int pm_set_wakelock_blocker(const char *buf, size_t n);
++#endif
++
+ #endif /* !CONFIG_PM_WAKELOCKS */
+ 
+ static inline int pm_sleep_disable_secondary_cpus(void)
+--- a/kernel/power/wakelock.c
++++ b/kernel/power/wakelock.c
+@@ -18,12 +18,84 @@
+ #include <linux/list.h>
+ #include <linux/rbtree.h>
+ #include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/string.h>
+ #include <linux/workqueue.h>
+ 
+ #include "power.h"
+ 
+ static DEFINE_MUTEX(wakelocks_lock);
+ 
++#ifdef CONFIG_PM_WAKELOCK_BLOCKER
++/*
++ * Named wakelock blocker (SAGA) -- concept based on the Boeffla
++ * Wakelock Blocker, adapted to the current /sys/power/wake_lock
++ * (kernel/power/wakelock.c) mainline interface instead of the old
++ * pre-refactor Android wakelock code the original driver targeted.
++ *
++ * SCOPE: this only sees wakeup sources created through this legacy
++ * sysfs interface (SystemSuspend HAL, some vendor blobs, old-style
++ * PowerManager wakelocks). It does NOT see wakeup_source objects a
++ * driver registers directly via wakeup_source_register() -- most
++ * modem/Wi-Fi/NFC IRQ wakelocks go that second route and are outside
++ * what this can block.
++ */
++#define WL_BLOCKER_LIST_LEN 2048
++
++static DEFINE_SPINLOCK(wl_blocker_lock);
++static char wl_blocker_list[WL_BLOCKER_LIST_LEN] = { 0 };
++
++/* buf/len: the wakelock name as passed to pm_wake_lock(), NOT
++ * NUL-terminated. Matches against a ';'-separated list of exact
++ * names, e.g. "eventpoll;wlan_wow_wl;qcom_rx_wakelock". */
++static bool wl_blocker_matches(const char *buf, size_t len)
++{
++	char list_copy[WL_BLOCKER_LIST_LEN];
++	char *rest, *tok;
++	bool blocked = false;
++
++	spin_lock(&wl_blocker_lock);
++	if (!wl_blocker_list[0]) {
++		spin_unlock(&wl_blocker_lock);
++		return false;
++	}
++	strscpy(list_copy, wl_blocker_list, sizeof(list_copy));
++	spin_unlock(&wl_blocker_lock);
++
++	rest = list_copy;
++	while ((tok = strsep(&rest, ";")) != NULL) {
++		if (!*tok)
++			continue;
++		if (strlen(tok) == len && !strncmp(tok, buf, len)) {
++			blocked = true;
++			break;
++		}
++	}
++
++	return blocked;
++}
++
++ssize_t pm_show_wakelock_blocker(char *buf)
++{
++	ssize_t ret;
++
++	spin_lock(&wl_blocker_lock);
++	ret = sysfs_emit(buf, "%s\n", wl_blocker_list);
++	spin_unlock(&wl_blocker_lock);
++
++	return ret;
++}
++
++int pm_set_wakelock_blocker(const char *buf, size_t n)
++{
++	spin_lock(&wl_blocker_lock);
++	strscpy(wl_blocker_list, buf, sizeof(wl_blocker_list));
++	spin_unlock(&wl_blocker_lock);
++
++	return 0;
++}
++#endif /* CONFIG_PM_WAKELOCK_BLOCKER */
++
+ struct wakelock {
+ 	char			*name;
+ 	struct rb_node		node;
+@@ -221,6 +293,14 @@
+ 	if (!len)
+ 		return -EINVAL;
+ 
++#ifdef CONFIG_PM_WAKELOCK_BLOCKER
++	if (wl_blocker_matches(buf, len)) {
++		pr_info_ratelimited("PM: wakelock '%.*s' blocked by wake_lock_blocker\n",
++				     (int)len, buf);
++		return 0;
++	}
++#endif
++
+ 	if (*str && *str != '\n') {
+ 		/* Find out if there's a valid timeout string appended. */
+ 		ret = kstrtou64(skip_spaces(str), 10, &timeout_ns);
+--- a/kernel/power/main.c
++++ b/kernel/power/main.c
+@@ -858,6 +858,25 @@
+ 
+ power_attr(wake_unlock);
+ 
++#ifdef CONFIG_PM_WAKELOCK_BLOCKER
++static ssize_t wake_lock_blocker_show(struct kobject *kobj,
++				       struct kobj_attribute *attr,
++				       char *buf)
++{
++	return pm_show_wakelock_blocker(buf);
++}
++
++static ssize_t wake_lock_blocker_store(struct kobject *kobj,
++					struct kobj_attribute *attr,
++					const char *buf, size_t n)
++{
++	int error = pm_set_wakelock_blocker(buf, n);
++	return error ? error : n;
++}
++
++power_attr(wake_lock_blocker);
++#endif /* CONFIG_PM_WAKELOCK_BLOCKER */
++
+ #endif /* CONFIG_PM_WAKELOCKS */
+ #endif /* CONFIG_PM_SLEEP */
+ 
+@@ -943,6 +962,9 @@
+ #ifdef CONFIG_PM_WAKELOCKS
+ 	&wake_lock_attr.attr,
+ 	&wake_unlock_attr.attr,
++#ifdef CONFIG_PM_WAKELOCK_BLOCKER
++	&wake_lock_blocker_attr.attr,
++#endif
+ #endif
+ #ifdef CONFIG_PM_SLEEP_DEBUG
+ 	&pm_test_attr.attr,
