@@ -19,18 +19,19 @@ PATCHER_DIR="${SAGA_PATCH_DIR}/kernel/android14-6.1-lts/ksu/ksunext"
 log "Integrating KernelSU-Next..."
 cd "$KERNEL_SRC"
 if [ "${SUSFS_ENABLED:-false}" = "true" ]; then
-    # Used to route to pershoot's dev-susfs fork here: official KernelSU-Next
-    # had dropped the SUSFS-compatible hook API on its dev branch at the
-    # time (see susfs.sh). That's no longer the case — susfs4ksu now ships
-    # VFS Hooks v1.4, which official KernelSU-Next supports directly, so
-    # this uses the same upstream source as the non-SUSFS path below
-    # (2026-09). ksunext_susfs_fork stays a separate manifest.json pin from
-    # plain ksunext — a commit can still be fine on its own and not yet
-    # verified paired with SUSFS's patch, so checkpoint keeps testing them
-    # independently — it's just no longer pershoot's fork underneath.
-    log "SUSFS enabled — using official KernelSU-Next (susfs4ksu VFS Hooks v1.4)"
-    KSUNEXT_SETUP_URL="https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh"
-    KSUNEXT_SETUP_REF="${KSUNEXT_SUSFS_FORK_REF:-}"
+    # Official KernelSU-Next's dev branch doesn't link against susfs4ksu's
+    # patch as-is (confirmed 2026-09-15: fake_state etc. are `static` in
+    # kernel/feature/selinux_hide.c there, but susfs4ksu's patch expects
+    # them exported — undefined-symbol errors at link time, run
+    # 34926879573; also confirmed "dev_susfs", the ref some community
+    # pipelines pass to setup.sh for this, isn't an actual branch or tag on
+    # this repo). pershoot's fork keeps a dev-susfs branch that does match
+    # what susfs4ksu's patch expects. Maintainer flags this fork as not
+    # production-ready; tracked like any other candidate via
+    # kernel/checkpoint/scout.sh.
+    log "SUSFS enabled — using pershoot/KernelSU-Next's dev-susfs fork"
+    KSUNEXT_SETUP_URL="https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh"
+    KSUNEXT_SETUP_REF="${KSUNEXT_SUSFS_FORK_REF:-dev-susfs}"
 else
     KSUNEXT_SETUP_URL="https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh"
     KSUNEXT_SETUP_REF="${KSUNEXT_REF:-}"
@@ -64,12 +65,27 @@ log "Branding applied ✅"
 # ======================================================
 # Official KernelSU-Next's Kbuild: KSU_VERSION = 30000 + rev-list --count
 # HEAD, KSU_VERSION_TAG = `git describe --tags --abbrev=0` at HEAD (fallback
-# v0.0.1). Simple and purely local, like ReSukiSU's formula. Both the
-# SUSFS and non-SUSFS paths use the same upstream repo/branch now (see
-# section 1), so both compute this the same way — the merge-base-against-
-# a-fork-branch dance this section used to do only mattered while SUSFS
-# was routed through pershoot's differently-branched fork.
-KSUNEXT_BASE_COMMIT="HEAD"
+# v0.0.1). Simple and purely local, like ReSukiSU's formula.
+#
+# pershoot/KernelSU-Next's dev-susfs fork (used when SUSFS_ENABLED) computes
+# both from a BASE_COMMIT instead of raw HEAD — the merge-base between HEAD
+# and origin/<branch-with-suffix-stripped> (falls back to origin/main, then
+# HEAD itself) — so fork-specific commits on top of upstream don't inflate
+# the version number. Replicated here rather than simplified to raw HEAD,
+# since that would give a different number than what's actually compiled.
+# This fork is flagged not-production-ready upstream (see section 1's
+# comment), so treat this version string as unverified until a real build
+# confirms it.
+
+if [ "${SUSFS_ENABLED:-false}" = "true" ]; then
+    KSUNEXT_CUR_BRANCH=$(git -C "$KSU_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD")
+    KSUNEXT_BASE_BRANCH="${KSUNEXT_CUR_BRANCH%%-*}"
+    KSUNEXT_BASE_COMMIT=$(git -C "$KSU_DIR" merge-base HEAD "refs/remotes/origin/${KSUNEXT_BASE_BRANCH}" 2>/dev/null \
+        || git -C "$KSU_DIR" merge-base HEAD refs/remotes/origin/main 2>/dev/null \
+        || echo HEAD)
+else
+    KSUNEXT_BASE_COMMIT="HEAD"
+fi
 
 KSU_LOCAL_VERSION=$(git -C "$KSU_DIR" rev-list --count "$KSUNEXT_BASE_COMMIT" 2>/dev/null || echo 0)
 KSU_VERSION_CODE=$((30000 + KSU_LOCAL_VERSION))
