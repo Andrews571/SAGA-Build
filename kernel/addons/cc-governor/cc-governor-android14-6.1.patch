@@ -1,0 +1,1641 @@
+diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
+index c93954613..60fc237ec 100644
+--- a/drivers/cpufreq/Kconfig
++++ b/drivers/cpufreq/Kconfig
+@@ -113,6 +113,16 @@ config CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+ 	  have a look at the help section of that governor. The fallback
+ 	  governor will be 'performance'.
+ 
++config CPU_FREQ_DEFAULT_GOV_CC
++	bool "cc_governor (SAGA)"
++	depends on SMP
++	select CPU_FREQ_GOV_CC
++	select CPU_FREQ_GOV_PERFORMANCE
++	help
++	  Use the 'cc_governor' CPUFreq governor by default. If unsure,
++	  have a look at the help section of that governor. The fallback
++	  governor will be 'performance'.
++
+ endchoice
+ 
+ config CPU_FREQ_GOV_PERFORMANCE
+@@ -211,6 +221,27 @@ config CPU_FREQ_GOV_SCHEDUTIL
+ 
+ 	  If in doubt, say N.
+ 
++config CPU_FREQ_GOV_CC
++	bool "'cc_governor' cpufreq policy governor (SAGA)"
++	depends on CPU_FREQ && SMP
++	select CPU_FREQ_GOV_ATTR_SET
++	select IRQ_WORK
++	help
++	  "Cerebral Clutch Governor" -- a conservatively-tuned descendant of
++	  PCCG, rebalanced toward efficiency after real-world reports of
++	  PCCG pinning small cores near their ceiling most of the time.
++	  Headroom-correct target calculation, a busy%-gated floor that
++	  snaps back toward idle once the CPU genuinely goes quiet, a
++	  kthread filter on wake-edges, a recalibrated streak detector, and
++	  built-in sysfs telemetry (stat_triggers_total and friends) for
++	  further calibration against real device data. Self-sufficient;
++	  takes BORE and bore-warp as optional, independent enhancements
++	  when present. Tunable per policy via sysfs — safe to enable
++	  alongside schedutil, reflex and pccg, does not replace any of
++	  them.
++
++	  If in doubt, say N.
++
+ comment "CPU frequency scaling drivers"
+ 
+ config CPUFREQ_DT
+diff --git a/kernel/sched/build_utility.c b/kernel/sched/build_utility.c
+index 99bdd96f4..ac094ea90 100644
+--- a/kernel/sched/build_utility.c
++++ b/kernel/sched/build_utility.c
+@@ -69,6 +69,10 @@
+ # include "cpufreq_schedutil.c"
+ #endif
+ 
++#ifdef CONFIG_CPU_FREQ_GOV_CC
++# include "cc_governor.c"
++#endif
++
+ #ifdef CONFIG_SCHED_DEBUG
+ # include "debug.c"
+ #endif
+diff --git a/kernel/sched/cc_governor.c b/kernel/sched/cc_governor.c
+new file mode 100644
+index 000000000..d19529a61
+--- /dev/null
++++ b/kernel/sched/cc_governor.c
+@@ -0,0 +1,1571 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * SAGA CC_GOVERNOR (Cerebral Clutch Governor) — CPUFreq governor
++ *
++ * A conservatively-tuned descendant of PCCG (cpufreq_pccg.c), built after
++ * two independent real-world reports (this device and a Dimensity 8300
++ * device) showed PCCG's original "go all in" defaults pinning small
++ * cores near their frequency ceiling something like 87% of awake time,
++ * and burning 25-30% more battery than plain schedutil for no measured
++ * responsiveness gain over it. Same underlying mechanism as PCCG and
++ * REFLEX before it (idle-time hispeed floor, inspired by -- not ported
++ * from -- Apple's Clutch/Edge scheduler concepts, iOS 27), rebalanced
++ * toward efficiency at every point that history identified as the
++ * actual cause, not by guessing new numbers:
++ *
++ *   - HEADROOM-CORRECT (see cc_target_util()): the previous formula
++ *     never compensated for the +25% DVFS headroom map_util_perf() adds
++ *     downstream, so hispeed_freq_pct=70 was already computing out to
++ *     ~87% of a LITTLE core's max frequency, and 100 pinned it at the
++ *     ceiling outright, regardless of the nominal setting. Fixed by
++ *     pre-dividing by 125 instead of 100 -- hispeed_freq_pct now means
++ *     approximately what its name says, linearly, across its range.
++ *   - BUSY%-GATED FLOOR (cc_update_hispeed()'s fast-decay branch): a
++ *     floor no longer rides out its normal hold/decay schedule once the
++ *     idle-time window confirms the CPU has actually gone quiet
++ *     (busy_threshold_pct, default 15%) -- it snaps back toward idle
++ *     instead of decaying gradually as if a sustained burst had merely
++ *     dipped for a moment.
++ *   - KTHREAD-FILTERED WAKE-EDGES (cc_wake_edge_check()): a wake edge
++ *     observed while rq->curr is a kthread doesn't trigger the floor by
++ *     default -- best-effort, see the filter_kthreads field comment for
++ *     the real precision limit (cpufreq's update_util interface doesn't
++ *     hand this code the specific task that just became runnable).
++ *   - RECALIBRATED STREAK DETECTION: the previous streak_min_count=3 in
++ *     120ms was tuned against a synthetic trace with background noise
++ *     every 200-300ms. Real Android with the screen on typically runs
++ *     tens of wakeups/sec per CPU, which satisfied that threshold on
++ *     background noise alone -- meaning nearly every trigger counted as
++ *     "confirmed" and instant_trigger_pct never actually applied. Raised
++ *     to 6-in-60ms as a firmer starting point, and this file now exports
++ *     the counters (stat_triggers_total/_confirmed, stat_instant_applied,
++ *     stat_streak_applied -- see the CC_STAT_ATTR block) needed to
++ *     calibrate it against a real device's wakeup pattern instead of
++ *     guessing again.
++ *   - auto_capacity_scale now defaults OFF: it pushes smaller cores
++ *     toward the *nominal* hispeed_freq_pct regardless of how
++ *     conservatively that's set, which is backwards for a
++ *     battery-conscious default on the exact cluster (LITTLE) that
++ *     showed the worst real-world drain.
++ *
++ * "INPUT BOOST, SEPARATE FROM THE FLOOR" -- addressed, not built as a
++ * literal touchscreen-driver hook: a genuine input-subsystem boost would
++ * mean registering an input_handler against evdev, a new subsystem
++ * touchpoint with its own locking and failure modes, for a signal this
++ * governor already has a faster path to. The wake-edge + streak
++ * mechanism already IS a boost that's architecturally separate from the
++ * confirmed/idle-time-window floor (different trigger, different target
++ * via instant_trigger_pct, same hold/decay lifecycle) and fires on the
++ * same event (a UI thread waking to handle the touch) strictly earlier
++ * than an evdev notifier chain would reach this code. Building the
++ * literal input-subsystem hook on top would add real cross-subsystem
++ * risk for a signal this file already receives, sooner, through a path
++ * already validated in PCCG/REFLEX.
++ *
++ * SELF-SUFFICIENT, ENHANCED WHEN AVAILABLE: needs nothing beyond what
++ * every 6.1 GKI kernel already has (the wake-edge is a plain
++ * rq->nr_running 0->1 transition); takes BORE's burst_penalty
++ * (cc_bore_check()) and bore-warp's cross-subsystem hint
++ * (cc_bore_warp_check()) as additional, independent triggers when
++ * CONFIG_SCHED_BORE (and, for the latter, the bore-warp addon) are
++ * present. Neither is required.
++ *
++ * Everything else (idle-time sampling via get_cpu_idle_time(), the hold/
++ * decay hysteresis, iowait boost, fast-switch/adjust_perf paths) is
++ * identical to REFLEX and, transitively, to schedutil -- see
++ * cpufreq_reflex.c's header for why each of those pieces is safe to
++ * reuse unchanged on 6.1.
++ *
++ * NOT included: an actual Clutch-style scheduling class (hierarchical
++ * QoS-bucket EDF, thread-group interactivity scoring, cross-cluster
++ * "Edge" placement). That is scheduler-core surgery, not governor work,
++ * and is deliberately out of scope here -- see the SAGA-Build addon
++ * README for bore-warp (kernel/addons/bore-warp/), which is the
++ * intentionally-small, intentionally-off-by-default piece of that idea
++ * that *was* judged safe to ship this way.
++ *
++ * SHARED POLICIES / CPU-LOCALITY: on a shared cpufreq policy (the normal
++ * case for an Android cluster), cc_next_freq_shared() walks every CPU
++ * in the policy to aggregate utilization, so cc_get_util() runs for
++ * CPUs that are remote from the one actually executing it. The
++ * utilization reads are fine that way -- aggregating them is the whole
++ * point. The three instantaneous trigger checks (wake_edge, bore,
++ * bore_warp) are NOT, and run only for the local CPU: each inspects or
++ * mutates state belonging to one specific CPU (that CPU's nr_running,
++ * its rq->curr, its own streak ring buffer), so running them remotely
++ * would mean sampling a scheduler snapshot nobody is holding still and
++ * writing per-CPU state from an arbitrary other CPU. See the @local
++ * parameter on cc_get_util() for the full reasoning -- that gating is
++ * also what lets the streak ring buffer stay lock-free.
++ *
++ * All tunables are per-policy sysfs knobs (same gov_attr_set mechanism
++ * schedutil/reflex/pccg use), so a single kernel build stays usable
++ * across any android14-6.1 device: /sys/devices/system/cpu/cpufreq/policyN/cc_governor/
++ */
++
++#define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
++/* Ring buffer size for cc_streak_confirmed()'s recent-edge tracking --
++ * generous upper bound for streak_min_count (sysfs-capped to this same
++ * value), not a tunable itself. */
++#define CC_STREAK_MAX		8
++
++/* SCHED_FLAG_SUGOV is private to kernel/sched/sched.h; already visible here
++ * since this file is #included from build_utility.c after sched.h. */
++
++struct cc_tunables {
++	struct gov_attr_set	attr_set;
++	unsigned int		rate_limit_us;
++
++	/* Observation window for the real busy% sample (usec). This is now
++	 * a backstop/confirmation path, not the primary trigger -- the
++	 * wake-edge and (if present) BORE checks below fire immediately on
++	 * their own signals, faster than any window could. Kept the same
++	 * 8ms as REFLEX for the cases neither of those catches. */
++	unsigned int		hispeed_window_us;
++
++	/* Busy% (0-100) over hispeed_window_us above which the floor snaps
++	 * to hispeed_freq_pct, for whatever the wake-edge/BORE paths missed. */
++	unsigned int		hispeed_load_pct;
++
++	/* Where the floor lands when triggered, as a percentage of the
++	 * policy's max capacity -- BEFORE cc_target_util()'s per-CPU
++	 * capacity scaling is applied (see file header). 100 = full jump,
++	 * CC's default; REFLEX defaults to 70 for the same knob. */
++	unsigned int		hispeed_freq_pct;
++
++	/* Geometric decay: each window, the floor is reduced by
++	 * floor >>= hispeed_decay_shift. */
++	unsigned int		hispeed_decay_shift;
++
++	/* Hold time (usec) after the floor last triggered before decay is
++	 * allowed to start. See REFLEX's identical knob for the rationale
++	 * (scroll gestures with gaps longer than one window). */
++	unsigned int		hispeed_hold_us;
++
++	/* Self-sufficient primary trigger: fire the floor the instant this
++	 * CPU's rq->nr_running goes 0->1 (see cc_wake_edge_check()). No
++	 * dependency on anything beyond the core scheduler. 1 = on
++	 * (default), 0 = disable this path (pure idle-time + BORE, if
++	 * present). */
++	unsigned int		wake_edge_boost;
++
++	/* Scale the effective jump percentage by each CPU's own capacity
++	 * (see cc_target_util()) instead of applying hispeed_freq_pct
++	 * flat across every cluster. 1 = on (default), 0 = flat like
++	 * REFLEX. */
++	unsigned int		auto_capacity_scale;
++
++	/* Percentage (0-100) of the full cc_target_util() that
++	 * UNCONFIRMED triggers (wake_edge_boost, and the BORE early check
++	 * below) are allowed to reach -- as opposed to the idle-time
++	 * window path in cc_update_hispeed(), which has an actual
++	 * measured busy% behind it and always gets the full target.
++	 *
++	 * Without this, every single idle->busy edge (a 2ms binder call, a
++	 * background housekeeping wakeup, anything) snapped straight to a
++	 * full capacity-scaled jump -- the same reaction as genuinely
++	 * sustained load, just because *something* started running. That
++	 * is the most likely cause of "gets a bit warm even in light use":
++	 * the governor cannot yet tell a real burst apart from routine
++	 * background noise at the instant it fires, so it treated both the
++	 * same. Default 50 -- an unconfirmed wakeup still gets a real,
++	 * fast bump (still much quicker than waiting on PELT), just not
++	 * the same jump reserved for load the idle-time window has
++	 * actually measured. 100 restores the original all-in behaviour. */
++	unsigned int		instant_trigger_pct;
++
++	/* Streak detection: distinguishes "one isolated wakeup" (a binder
++	 * call, background housekeeping -- exactly what instant_trigger_pct
++	 * exists to throttle) from "a rapid train of separate short wakeups"
++	 * (a scroll gesture: each touch is its own brief idle->busy edge,
++	 * spaced further apart than they last, so the idle-time window
++	 * almost never sees enough sustained busy% to CONFIRM it the normal
++	 * way -- simulation against a synthetic scroll trace showed this
++	 * meant scroll responsiveness was being throttled by
++	 * instant_trigger_pct just as much as genuine background noise,
++	 * which was never the intent).
++	 *
++	 * If streak_min_count edges land within streak_window_us of each
++	 * other, the CPU is very likely mid-gesture rather than handling a
++	 * one-off wakeup: subsequent triggers in that streak are treated as
++	 * CONFIRMED (full target) instead of instant (scaled by
++	 * instant_trigger_pct). A single isolated edge never reaches the
++	 * count, so background noise stays throttled exactly as before.
++	 * streak_min_count=0 disables this (every trigger stays instant,
++	 * the original behaviour before this knob existed). */
++	unsigned int		streak_window_us;
++	unsigned int		streak_min_count;
++
++	/* Floor gate: below this measured busy% (the same idle-time window
++	 * sample cc_update_hispeed() already takes), the floor is not
++	 * allowed to persist on hold/gradual-decay alone -- it snaps hard
++	 * toward idle instead. This is what keeps a CPU that has gone
++	 * genuinely idle from riding out the full hold+decay schedule that
++	 * exists for sustained bursts, not single wakeups nothing followed
++	 * up on. 0 disables the gate (old hold/decay-only behaviour). */
++	unsigned int		busy_threshold_pct;
++
++	/* Ignore wake-edges observed while rq->curr is a kthread
++	 * (PF_KTHREAD) -- see the field comment in cc_init() for the
++	 * precision caveat. 1 = on (default), 0 = boost on every edge
++	 * regardless of what's running. */
++	unsigned int		filter_kthreads;
++
++#ifdef CONFIG_SCHED_BORE
++	/* Optional second early trigger: see the identical knob in
++	 * cpufreq_reflex.c for the full rationale. Independent of, and
++	 * redundant with, wake_edge_boost above -- either alone already
++	 * covers the "just woke up" case; this adds BORE's own freshness
++	 * classification as a second opinion, useful mainly for the
++	 * "curr is a CPU hog, pse is fresh" case where nr_running was
++	 * already nonzero (no 0->1 edge) but the CPU still just started
++	 * doing meaningfully different work. */
++	unsigned int		bore_boost_max_score;
++#endif
++};
++
++struct cc_policy {
++	struct cpufreq_policy	*policy;
++
++	struct cc_tunables	*tunables;
++	struct list_head	tunables_hook;
++
++	raw_spinlock_t		update_lock;
++	u64			last_freq_update_time;
++	s64			freq_update_delay_ns;
++	unsigned int		next_freq;
++	unsigned int		cached_raw_freq;
++
++	/* The next fields are only needed if fast switch cannot be used: */
++	struct			irq_work irq_work;
++	struct			kthread_work work;
++	struct			mutex work_lock;
++	struct			kthread_worker worker;
++	struct task_struct	*thread;
++	bool			work_in_progress;
++
++	bool			limits_changed;
++	bool			need_freq_update;
++};
++
++struct cc_cpu {
++	struct update_util_data	update_util;
++	struct cc_policy	*cc_policy;
++	unsigned int		cpu;
++
++	bool			iowait_boost_pending;
++	unsigned int		iowait_boost;
++	u64			last_update;
++
++	unsigned long		util;
++	unsigned long		bw_dl;
++	unsigned long		max;
++
++	/* Hispeed floor state (idle-time based, see file header) */
++	u64			hispeed_prev_idle_time;
++	u64			hispeed_prev_wall_time;
++	u64			hispeed_next_sample_time;
++	unsigned long		hispeed_floor;	/* capacity units, decays */
++	u64			hispeed_hold_until;	/* ns; decay gated until this */
++
++	/* Self-sufficient wake-edge detector state (see
++	 * cc_wake_edge_check()). No CONFIG dependency at all -- plain
++	 * rq->nr_running is always present. */
++	unsigned int		prev_nr_running;
++
++	/* Telemetry -- read-only via sysfs (see stat_*_show()), meant for
++	 * calibrating streak_window_us/streak_min_count/instant_trigger_pct
++	 * against this device's actual wakeup pattern instead of guessing
++	 * from a synthetic trace again. Plain u64 counters, not atomic:
++	 * they're only ever incremented from this CPU's own update_util
++	 * context (see the @local gating in cc_get_util()), so nothing
++	 * else can race a write to them -- a concurrent sysfs read summing
++	 * across CPUs can still see a slightly stale value on some of them,
++	 * which is fine for a diagnostic counter. */
++	u64			stat_triggers_total;
++	u64			stat_triggers_confirmed;
++	u64			stat_instant_applied;
++	u64			stat_streak_applied;
++
++	/* Streak-detection ring buffer for cc_wake_edge_check() -- see
++	 * the streak_window_us/streak_min_count comment in struct
++	 * cc_tunables. Zero-initialized (by the memset in cc_start()),
++	 * which is safe: a 0 timestamp is always "ancient" relative to any
++	 * real time_ns, so unused slots never spuriously count as part of
++	 * a recent streak. */
++	u64			streak_times[CC_STREAK_MAX];
++	unsigned int		streak_idx;
++
++	/* The field below is for single-CPU policies only: */
++#ifdef CONFIG_NO_HZ_COMMON
++	unsigned long		saved_idle_calls;
++#endif
++};
++
++static DEFINE_PER_CPU(struct cc_cpu, cc_cpu_data);
++
++/************************ Governor internals ***********************/
++
++static bool cc_should_update_freq(struct cc_policy *cc_policy, u64 time)
++{
++	s64 delta_ns;
++
++	if (!cpufreq_this_cpu_can_update(cc_policy->policy))
++		return false;
++
++	if (unlikely(READ_ONCE(cc_policy->limits_changed))) {
++		WRITE_ONCE(cc_policy->limits_changed, false);
++		cc_policy->need_freq_update = true;
++		smp_mb();
++		return true;
++	}
++
++	delta_ns = time - cc_policy->last_freq_update_time;
++
++	return delta_ns >= cc_policy->freq_update_delay_ns;
++}
++
++static bool cc_update_next_freq(struct cc_policy *cc_policy, u64 time,
++				  unsigned int next_freq)
++{
++	if (cc_policy->need_freq_update) {
++		cc_policy->need_freq_update = false;
++		if (cc_policy->next_freq == next_freq &&
++		    !cpufreq_driver_test_flags(CPUFREQ_NEED_UPDATE_LIMITS))
++			return false;
++	} else if (cc_policy->next_freq == next_freq) {
++		return false;
++	}
++
++	cc_policy->next_freq = next_freq;
++	cc_policy->last_freq_update_time = time;
++
++	return true;
++}
++
++static void cc_deferred_update(struct cc_policy *cc_policy)
++{
++	if (!cc_policy->work_in_progress) {
++		cc_policy->work_in_progress = true;
++		irq_work_queue(&cc_policy->irq_work);
++	}
++}
++
++/* Identical mapping to schedutil's get_next_freq() (same 1.25x DVFS
++ * headroom, same frequency-invariance handling) — only the @util fed in
++ * differs (max(pelt_util, hispeed_floor) instead of plain pelt_util). */
++static unsigned int cc_get_next_freq(struct cc_policy *cc_policy,
++				       unsigned long util, unsigned long max)
++{
++	struct cpufreq_policy *policy = cc_policy->policy;
++	unsigned int freq = arch_scale_freq_invariant() ?
++				policy->cpuinfo.max_freq : policy->cur;
++
++	util = map_util_perf(util);
++	freq = map_util_freq(util, freq, max);
++
++	if (freq == cc_policy->cached_raw_freq && !cc_policy->need_freq_update)
++		return cc_policy->next_freq;
++
++	cc_policy->cached_raw_freq = freq;
++	return cpufreq_driver_resolve_freq(policy, freq);
++}
++
++/*
++ * cc_target_util() - where the floor should land for this CPU, given the
++ * configured hispeed_freq_pct and (if enabled) this CPU's own relative
++ * capacity.
++ *
++ * arch_scale_cpu_capacity() already returns a value normalized against
++ * SCHED_CAPACITY_SCALE (1024) system-wide -- the biggest/fastest core in
++ * the system sits at (close to) 1024, smaller cores proportionally lower
++ * (a Cortex-A55 next to a Cortex-A78 typically lands around 400-550). That
++ * ratio is exactly "how big is this core", already computed by the
++ * scheduler for EAS -- no extra bookkeeping needed to use it here.
++ *
++ * With auto_capacity_scale on, a core's effective jump percentage is
++ * pulled up towards 100 the smaller its relative capacity is, leaving
++ * hispeed_freq_pct as configured only for the single biggest core in the
++ * system (cap == SCHED_CAPACITY_SCALE exactly -> no adjustment). The
++ * reasoning: hispeed_freq_pct=70 is a very different absolute jump (and a
++ * very different power cost) on a Cortex-X-class prime core than on an
++ * A55 -- the same flat percentage applied to every cluster either
++ * overshoots the LITTLE cores' power budget or undershoots their latency
++ * benefit, depending which cluster you calibrated it for.
++ */
++/*
++ * cc_target_util() - where the floor should land for this CPU, given the
++ * configured hispeed_freq_pct and (if enabled) this CPU's own relative
++ * capacity.
++ *
++ * Pre-compensates for the +25% DVFS headroom that map_util_perf() (called
++ * later, once, when translating util to an actual frequency in
++ * cc_get_next_freq()) always adds on top of whatever util it's given --
++ * dividing by 125 instead of 100 cancels that multiplication back out.
++ * Without this, hispeed_freq_pct=70 already computed out to ~87% of a
++ * LITTLE core's max frequency (not 70%), and pct=100 pinned every
++ * confirmed trigger at the policy ceiling regardless of the nominal
++ * setting -- this is the single biggest cause of the "stuck near max,
++ * even idle" behaviour reported against earlier PCCG builds.
++ */
++static unsigned long cc_target_util(struct cc_cpu *cc_cpu, unsigned long cap)
++{
++	struct cc_tunables *tunables = cc_cpu->cc_policy->tunables;
++	unsigned int pct = tunables->hispeed_freq_pct;
++
++	if (tunables->auto_capacity_scale) {
++		unsigned int gap = SCHED_CAPACITY_SCALE - min(cap, (unsigned long)SCHED_CAPACITY_SCALE);
++
++		pct += ((100 - pct) * gap) / SCHED_CAPACITY_SCALE;
++	}
++
++	return (cap * pct) / 125;
++}
++
++/*
++ * cc_target_util_instant() - same as cc_target_util(), scaled down by
++ * instant_trigger_pct for triggers that fired without a measured busy%
++ * behind them (wake_edge_boost, the BORE early check). See the field
++ * comment on instant_trigger_pct in struct cc_tunables for why this
++ * split exists -- short version: an unconfirmed wakeup still gets a real
++ * bump, just not the same one reserved for load the idle-time window has
++ * actually measured.
++ */
++static unsigned long cc_target_util_instant(struct cc_cpu *cc_cpu, unsigned long cap)
++{
++	struct cc_tunables *tunables = cc_cpu->cc_policy->tunables;
++	unsigned long full = cc_target_util(cc_cpu, cap);
++
++	return (full * tunables->instant_trigger_pct) / 100;
++}
++
++static void cc_hispeed_raise(struct cc_cpu *cc_cpu, u64 time_ns,
++			       unsigned long target)
++{
++	struct cc_tunables *tunables = cc_cpu->cc_policy->tunables;
++
++	/* @target (and hispeed_floor with it) is in CAPACITY units, the
++	 * 0..SCHED_CAPACITY_SCALE (1024) scale the scheduler uses -- NOT
++	 * kHz, and not a percentage. It ends up compared against, and
++	 * max()'d into, cc_cpu->util in cc_get_util(), which is also a
++	 * capacity figure; the conversion to an actual frequency happens
++	 * once, later, in cc_get_next_freq()'s map_util_freq(). */
++	/* Only a trigger that actually RAISES the floor extends the hold.
++	 * Extending it unconditionally meant a stream of triggers landing
++	 * below the current floor (every wake edge once instant_trigger_pct
++	 * scales them down, every BORE check on an already-boosted CPU)
++	 * kept pushing the decay point out without contributing anything --
++	 * pinning the floor high long after the work that justified it was
++	 * over. Simulation of a light-use trace attributed a large majority
++	 * of total energy to that decay tail rather than to the actual
++	 * work, which is what this guard is for. */
++	if (target <= cc_cpu->hispeed_floor)
++		return;
++
++	cc_cpu->hispeed_floor = target;
++
++	/* Push the earliest-allowed-decay point out on a real raise, so a
++	 * steady stream of touch events (with gaps longer than one window
++	 * but shorter than the hold) keeps the floor pinned instead of
++	 * sawtoothing between two OPPs. */
++	cc_cpu->hispeed_hold_until = time_ns +
++		(u64)tunables->hispeed_hold_us * NSEC_PER_USEC;
++}
++
++/*
++ * cc_update_hispeed() - sample real busy% since the last window and fold
++ * it into the decaying floor.
++ *
++ * Runs at most once per hispeed_window_us per CPU — cheap on the common
++ * "already sampled this window" path (one u64 compare), so calling it from
++ * every update_util callback (same call frequency schedutil already runs
++ * at) is fine. Unlike the instantaneous trigger checks, this one is safe
++ * (and intended) to run for remote CPUs on the shared path too: it reads
++ * that CPU's own idle-time counters, which are globally visible and need
++ * no snapshot consistency with anything else.
++ */
++static void cc_update_hispeed(struct cc_cpu *cc_cpu, u64 time_ns)
++{
++	struct cc_tunables *tunables = cc_cpu->cc_policy->tunables;
++	u64 wall_us, idle_us, delta_wall, delta_idle, busy_pct;
++	unsigned long cap;
++	bool held = time_ns < cc_cpu->hispeed_hold_until;
++
++	if (time_ns < cc_cpu->hispeed_next_sample_time)
++		return;
++
++	idle_us = get_cpu_idle_time(cc_cpu->cpu, &wall_us, 0);
++
++	delta_wall = wall_us - cc_cpu->hispeed_prev_wall_time;
++	delta_idle = idle_us - cc_cpu->hispeed_prev_idle_time;
++
++	cc_cpu->hispeed_prev_wall_time = wall_us;
++	cc_cpu->hispeed_prev_idle_time = idle_us;
++	cc_cpu->hispeed_next_sample_time = time_ns +
++		(u64)tunables->hispeed_window_us * NSEC_PER_USEC;
++
++	/* First sample after start/hotplug, clock went backwards, or a
++	 * suspend/resume-sized jump landed between two samples (delta_wall
++	 * wraps huge as an unsigned subtraction if wall_us regressed, which
++	 * a bare "delta_idle > delta_wall" check does not reliably catch
++	 * once both sides have wrapped): skip this window rather than
++	 * compute garbage from it. Bounding delta_wall to a few windows'
++	 * worth is enough slack for normal scheduling jitter while still
++	 * rejecting a wrapped/bogus value. */
++	if (unlikely(!delta_wall || delta_idle > delta_wall ||
++		     delta_wall > (u64)tunables->hispeed_window_us * 4)) {
++		if (!held)
++			cc_cpu->hispeed_floor >>= tunables->hispeed_decay_shift;
++		return;
++	}
++
++	/* Plain u64 division: deltas are microseconds within one window
++	 * (default 8000us), nowhere near needing div64_u64's 32-bit-divisor
++	 * fast path, and no extra header dependency this way. */
++	busy_pct = ((delta_wall - delta_idle) * 100) / delta_wall;
++	cap = arch_scale_cpu_capacity(cc_cpu->cpu);
++
++	if (busy_pct >= tunables->hispeed_load_pct) {
++		cc_hispeed_raise(cc_cpu, time_ns, cc_target_util(cc_cpu, cap));
++	} else if (!held) {
++		/* Floor gate: below busy_threshold_pct, this window measured
++		 * close to nothing actually running -- don't ride the floor
++		 * out on the same gradual decay meant for a sustained burst
++		 * that's merely dipping under hispeed_load_pct for a moment.
++		 * Snap hard toward idle instead. 0 disables the gate (old
++		 * gradual-decay-always behaviour). */
++		if (tunables->busy_threshold_pct && busy_pct < tunables->busy_threshold_pct)
++			cc_cpu->hispeed_floor = 0;
++		else
++			cc_cpu->hispeed_floor >>= tunables->hispeed_decay_shift;
++	}
++}
++
++#ifdef CONFIG_SCHED_BORE
++/*
++ * cc_bore_check() - early hispeed trigger from BORE's own burst
++ * classification, instead of waiting for the idle-time window to confirm
++ * the same thing after the fact.
++ *
++ * BORE tags every sched_entity with a burst_penalty score (0-39, see
++ * kernel/sched/fair.c calc_burst_score()) that goes up the longer a task
++ * has been hogging the CPU since its last sleep, and resets to a low value
++ * on wake. A task currently running with a low score is, by BORE's own
++ * definition, one it just classified as fresh/interactive rather than a
++ * CPU hog -- available the instant that task starts running, strictly
++ * earlier than hispeed_window_us of idle-time can confirm the CPU turned
++ * busy. Runs on every cc_get_util() call (cheap: one struct field read
++ * under the rq lock update_util callbacks already hold), not gated by the
++ * window, since there is no expensive syscall-like read involved here
++ * unlike get_cpu_idle_time().
++ */
++static void cc_bore_check(struct cc_cpu *cc_cpu, u64 time_ns)
++{
++	struct cc_tunables *tunables = cc_cpu->cc_policy->tunables;
++	struct task_struct *curr;
++	unsigned int penalty;
++	unsigned long cap;
++
++	if (!tunables->bore_boost_max_score)
++		return;
++
++	curr = READ_ONCE(cpu_rq(cc_cpu->cpu)->curr);
++	if (!curr || is_idle_task(curr))
++		return;
++
++	/* READ_ONCE: burst_penalty is updated by the scheduler (update_curr()
++	 * and friends) without any lock we hold here, so a plain read leaves
++	 * the compiler free to reload it or tear it across the shift and the
++	 * comparison below. One stable snapshot is all this decision needs. */
++	penalty = READ_ONCE(curr->se.burst_penalty) >> 8;
++	if (penalty > tunables->bore_boost_max_score)
++		return;
++
++	cap = arch_scale_cpu_capacity(cc_cpu->cpu);
++	cc_hispeed_raise(cc_cpu, time_ns, cc_target_util_instant(cc_cpu, cap));
++}
++
++/*
++ * cc_bore_warp_check() - the actual bore-warp integration: consumes the
++ * cross-subsystem hint bore_warp_preempt() (kernel/sched/fair.c) sets the
++ * instant it forces a preemption.
++ *
++ * This is a strictly stronger signal than the plain burst_penalty read in
++ * cc_bore_check() above: that function fires whenever *any* low-score
++ * task happens to be curr, which includes plenty of ordinary cases where
++ * the soft vruntime-based preemption was already going to handle things
++ * fine on its own. A warp grant means BORE's own scheduler-side logic
++ * looked at the situation and judged it bad enough to force a hard
++ * preemption over the normal check -- i.e. it is BORE actively
++ * classifying this moment as more important, not just "a fresh task
++ * happens to be running". That's exactly the distinction
++ * instant_trigger_pct exists to make, so a warp grant is treated as a
++ * CONFIRMED trigger (full target, like the idle-time window), not an
++ * unconfirmed one.
++ *
++ * A no-op with zero overhead when the bore-warp addon is not applied at
++ * all (SAGA_HAVE_BORE_WARP_HINT undefined -- CONFIG_SCHED_BORE alone does
++ * NOT provide bore_warp_fired, that field comes from the bore-warp patch),
++ * and likewise a no-op when it is applied but disabled at runtime
++ * (sched_bore_warp_enabled=0): bore_warp_preempt() never sets the bit in
++ * that case, so there's nothing here to consume.
++ */
++#ifdef SAGA_HAVE_BORE_WARP_HINT
++static void cc_bore_warp_check(struct cc_cpu *cc_cpu, u64 time_ns)
++{
++	struct cfs_rq *cfs_rq = &cpu_rq(cc_cpu->cpu)->cfs;
++	unsigned long cap;
++
++	/* Atomic test-and-clear, not a plain read-then-write: under a
++	 * shared policy this runs for remote CPUs without their rq lock
++	 * held -- see the field comment on bore_warp_fired in sched.h. */
++	if (!test_and_clear_bit(0, &cfs_rq->bore_warp_fired))
++		return;
++
++	cap = arch_scale_cpu_capacity(cc_cpu->cpu);
++	cc_hispeed_raise(cc_cpu, time_ns, cc_target_util(cc_cpu, cap));
++}
++#else
++static inline void cc_bore_warp_check(struct cc_cpu *cc_cpu, u64 time_ns) {}
++#endif
++#else
++static inline void cc_bore_check(struct cc_cpu *cc_cpu, u64 time_ns) {}
++static inline void cc_bore_warp_check(struct cc_cpu *cc_cpu, u64 time_ns) {}
++#endif
++
++/*
++ * cc_streak_confirmed() - records this edge's timestamp and reports
++ * whether streak_min_count edges have landed within streak_window_us of
++ * each other, including this one. See the streak_window_us/
++ * streak_min_count comment in struct cc_tunables for the full
++ * rationale (short version: tells a scroll gesture's train of short
++ * wakeups apart from one isolated background wakeup, using nothing but
++ * the wake-edge timestamps CC already generates).
++ */
++static bool cc_streak_confirmed(struct cc_cpu *cc_cpu, u64 time_ns)
++{
++	struct cc_tunables *tunables = cc_cpu->cc_policy->tunables;
++	unsigned int min_count = tunables->streak_min_count;
++	u64 window_ns = (u64)tunables->streak_window_us * NSEC_PER_USEC;
++	unsigned int count = 0, i;
++
++	cc_cpu->streak_times[cc_cpu->streak_idx] = time_ns;
++	cc_cpu->streak_idx = (cc_cpu->streak_idx + 1) % CC_STREAK_MAX;
++
++	if (!min_count)
++		return false;
++
++	for (i = 0; i < CC_STREAK_MAX; i++) {
++		if (time_ns - cc_cpu->streak_times[i] <= window_ns)
++			count++;
++	}
++	return count >= min_count;
++}
++
++/*
++ * cc_wake_edge_check() - self-sufficient primary trigger: fire the floor
++ * the instant this CPU's rq->nr_running goes from 0 to nonzero.
++ *
++ * This needs nothing beyond what every Linux scheduler build already
++ * maintains unconditionally -- no BORE, no NO_HZ idle-call accounting, no
++ * EAS. A CPU with rq->nr_running == 0 has nothing runnable queued (it is,
++ * or is about to go, idle); the transition to nonzero is the earliest
++ * possible point at which "this CPU just became busy" can be known at
++ * all, strictly earlier than either the idle-time window (which needs a
++ * full hispeed_window_us to confirm it) or even BORE's burst_penalty
++ * (which needs the task to have actually been picked and started running
++ * first). This is what makes CC work without depending on anything else
++ * SAGA ships -- BORE and the idle-time path only add extra corroboration
++ * on top when they're present.
++ *
++ * CPU-local only -- see cc_get_util()'s @local parameter.
++ */
++static void cc_wake_edge_check(struct cc_cpu *cc_cpu, u64 time_ns)
++{
++	struct cc_tunables *tunables = cc_cpu->cc_policy->tunables;
++	/* READ_ONCE: nr_running is written by the scheduler on every
++	 * enqueue/dequeue without any lock held here. One stable snapshot,
++	 * used for both the edge test and the saved value below -- a
++	 * reloaded second read could make those two disagree and either
++	 * miss an edge or fabricate one. */
++	unsigned int nr_running = READ_ONCE(cpu_rq(cc_cpu->cpu)->nr_running);
++
++	if (tunables->wake_edge_boost && !cc_cpu->prev_nr_running && nr_running) {
++		unsigned long cap = arch_scale_cpu_capacity(cc_cpu->cpu);
++		bool confirmed;
++
++		cc_cpu->stat_triggers_total++;
++
++		/* Best-effort kthread filter -- see the field comment on
++		 * filter_kthreads in cc_init() for why this is "whichever
++		 * task rq->curr happens to be right now", not a guaranteed
++		 * identification of the task that just woke. */
++		if (tunables->filter_kthreads) {
++			struct task_struct *curr = READ_ONCE(cpu_rq(cc_cpu->cpu)->curr);
++
++			if (curr && (curr->flags & PF_KTHREAD) && !is_idle_task(curr))
++				return;
++		}
++
++		confirmed = cc_streak_confirmed(cc_cpu, time_ns);
++		if (confirmed) {
++			cc_cpu->stat_streak_applied++;
++			cc_cpu->stat_triggers_confirmed++;
++		} else {
++			cc_cpu->stat_instant_applied++;
++		}
++
++		cc_hispeed_raise(cc_cpu, time_ns,
++				    confirmed ? cc_target_util(cc_cpu, cap)
++					      : cc_target_util_instant(cc_cpu, cap));
++	}
++	/* Updated unconditionally, including while wake_edge_boost is 0:
++	 * this is edge *tracking*, not the boost itself. Skipping it when
++	 * the knob is off would leave a stale snapshot behind, so the first
++	 * sample after someone re-enables the knob at runtime would be
++	 * compared against whatever nr_running happened to be when it was
++	 * switched off -- fabricating or swallowing one edge on the way
++	 * back in. Keeping it current costs one store and makes the knob
++	 * take effect cleanly from the next real transition. */
++	cc_cpu->prev_nr_running = nr_running;
++}
++
++/*
++ * cc_get_util() - refresh this CPU's cached util/max/bw_dl, and (only
++ * when @local) run the instantaneous floor triggers for it.
++ *
++ * @local distinguishes "this is the CPU whose update_util callback we are
++ * currently servicing" from "this is just another CPU in the same shared
++ * policy that we are polling for its utilization". The distinction matters
++ * because cc_next_freq_shared() loops over every CPU in the policy --
++ * on a typical Android cluster that is every CPU in that cluster, most of
++ * them remote from whichever one is actually running the loop.
++ *
++ * The utilization reads (max/bw_dl/util) are meaningful for any CPU and
++ * stay unconditional: aggregating them across the policy is the entire
++ * point of the shared path. The three trigger checks are NOT: each of
++ * them inspects or mutates state that only belongs to one specific CPU --
++ * cc_wake_edge_check() reads that CPU's nr_running and updates its
++ * per-CPU streak ring buffer, and cc_bore_check() dereferences that
++ * CPU's rq->curr. Running those for a remote CPU means sampling a
++ * scheduler snapshot nobody is holding still, and (for the streak buffer)
++ * writing per-CPU state from an arbitrary other CPU. Gating them on
++ * @local keeps every one of them a purely CPU-local operation, which is
++ * also what makes the streak buffer safe without any locking of its own.
++ */
++static void cc_get_util(struct cc_cpu *cc_cpu, u64 time, bool local)
++{
++	struct rq *rq = cpu_rq(cc_cpu->cpu);
++
++	cc_cpu->max = arch_scale_cpu_capacity(cc_cpu->cpu);
++	cc_cpu->bw_dl = cpu_bw_dl(rq);
++	cc_cpu->util = effective_cpu_util(cc_cpu->cpu, cpu_util_cfs(cc_cpu->cpu),
++					   FREQUENCY_UTIL, NULL);
++
++	cc_update_hispeed(cc_cpu, time);
++	if (local) {
++		cc_wake_edge_check(cc_cpu, time);
++		cc_bore_check(cc_cpu, time);
++		cc_bore_warp_check(cc_cpu, time);
++	}
++	if (cc_cpu->hispeed_floor > cc_cpu->util)
++		cc_cpu->util = cc_cpu->hispeed_floor;
++}
++
++/* IO-wait boost: unchanged from schedutil, reused as-is (already correct
++ * and already proven on this exact tree). */
++static bool cc_iowait_reset(struct cc_cpu *cc_cpu, u64 time,
++			      bool set_iowait_boost)
++{
++	s64 delta_ns = time - cc_cpu->last_update;
++
++	if (delta_ns <= TICK_NSEC)
++		return false;
++
++	cc_cpu->iowait_boost = set_iowait_boost ? IOWAIT_BOOST_MIN : 0;
++	cc_cpu->iowait_boost_pending = set_iowait_boost;
++
++	return true;
++}
++
++static void cc_iowait_boost(struct cc_cpu *cc_cpu, u64 time,
++			      unsigned int flags)
++{
++	bool set_iowait_boost = flags & SCHED_CPUFREQ_IOWAIT;
++
++	if (cc_cpu->iowait_boost &&
++	    cc_iowait_reset(cc_cpu, time, set_iowait_boost))
++		return;
++
++	if (!set_iowait_boost)
++		return;
++
++	if (cc_cpu->iowait_boost_pending)
++		return;
++	cc_cpu->iowait_boost_pending = true;
++
++	if (cc_cpu->iowait_boost) {
++		cc_cpu->iowait_boost =
++			min_t(unsigned int, cc_cpu->iowait_boost << 1, SCHED_CAPACITY_SCALE);
++		return;
++	}
++
++	cc_cpu->iowait_boost = IOWAIT_BOOST_MIN;
++}
++
++static void cc_iowait_apply(struct cc_cpu *cc_cpu, u64 time)
++{
++	unsigned long boost;
++
++	if (!cc_cpu->iowait_boost)
++		return;
++
++	if (cc_iowait_reset(cc_cpu, time, false))
++		return;
++
++	if (!cc_cpu->iowait_boost_pending) {
++		cc_cpu->iowait_boost >>= 1;
++		if (cc_cpu->iowait_boost < IOWAIT_BOOST_MIN) {
++			cc_cpu->iowait_boost = 0;
++			return;
++		}
++	}
++
++	cc_cpu->iowait_boost_pending = false;
++
++	boost = (cc_cpu->iowait_boost * cc_cpu->max) >> SCHED_CAPACITY_SHIFT;
++	boost = uclamp_rq_util_with(cpu_rq(cc_cpu->cpu), boost, NULL);
++	if (cc_cpu->util < boost)
++		cc_cpu->util = boost;
++}
++
++#ifdef CONFIG_NO_HZ_COMMON
++static bool cc_cpu_is_busy(struct cc_cpu *cc_cpu)
++{
++	unsigned long idle_calls = tick_nohz_get_idle_calls_cpu(cc_cpu->cpu);
++	bool ret = idle_calls == cc_cpu->saved_idle_calls;
++
++	cc_cpu->saved_idle_calls = idle_calls;
++	return ret;
++}
++#else
++static inline bool cc_cpu_is_busy(struct cc_cpu *cc_cpu) { return false; }
++#endif
++
++static inline void cc_ignore_dl_rate_limit(struct cc_cpu *cc_cpu)
++{
++	if (cpu_bw_dl(cpu_rq(cc_cpu->cpu)) > cc_cpu->bw_dl)
++		WRITE_ONCE(cc_cpu->cc_policy->limits_changed, true);
++}
++
++static inline bool cc_update_single_common(struct cc_cpu *cc_cpu,
++					     u64 time, unsigned int flags)
++{
++	cc_iowait_boost(cc_cpu, time, flags);
++	cc_cpu->last_update = time;
++
++	cc_ignore_dl_rate_limit(cc_cpu);
++
++	if (!cc_should_update_freq(cc_cpu->cc_policy, time))
++		return false;
++
++	cc_get_util(cc_cpu, time, true);
++	cc_iowait_apply(cc_cpu, time);
++
++	return true;
++}
++
++static void cc_update_single_freq(struct update_util_data *hook, u64 time,
++				    unsigned int flags)
++{
++	struct cc_cpu *cc_cpu = container_of(hook, struct cc_cpu, update_util);
++	struct cc_policy *cc_policy = cc_cpu->cc_policy;
++	unsigned int cached_freq = cc_policy->cached_raw_freq;
++	unsigned int next_f;
++
++	if (!cc_update_single_common(cc_cpu, time, flags))
++		return;
++
++	next_f = cc_get_next_freq(cc_policy, cc_cpu->util, cc_cpu->max);
++
++	/* Same "don't drop early" guard as schedutil, but the hispeed floor
++	 * already covers the fast-response side of that trade-off, so this
++	 * mainly protects against a single idle sample racing the floor's
++	 * decay. */
++	if (!uclamp_rq_is_capped(cpu_rq(cc_cpu->cpu)) &&
++	    cc_cpu_is_busy(cc_cpu) && next_f < cc_policy->next_freq &&
++	    !cc_policy->need_freq_update) {
++		next_f = cc_policy->next_freq;
++		cc_policy->cached_raw_freq = cached_freq;
++	}
++
++	if (!cc_update_next_freq(cc_policy, time, next_f))
++		return;
++
++	if (cc_policy->policy->fast_switch_enabled) {
++		cpufreq_driver_fast_switch(cc_policy->policy, next_f);
++	} else {
++		raw_spin_lock(&cc_policy->update_lock);
++		cc_deferred_update(cc_policy);
++		raw_spin_unlock(&cc_policy->update_lock);
++	}
++}
++
++static void cc_update_single_perf(struct update_util_data *hook, u64 time,
++				    unsigned int flags)
++{
++	struct cc_cpu *cc_cpu = container_of(hook, struct cc_cpu, update_util);
++	unsigned long prev_util = cc_cpu->util;
++
++	if (!arch_scale_freq_invariant()) {
++		cc_update_single_freq(hook, time, flags);
++		return;
++	}
++
++	if (!cc_update_single_common(cc_cpu, time, flags))
++		return;
++
++	if (!uclamp_rq_is_capped(cpu_rq(cc_cpu->cpu)) &&
++	    cc_cpu_is_busy(cc_cpu) && cc_cpu->util < prev_util)
++		cc_cpu->util = prev_util;
++
++	cpufreq_driver_adjust_perf(cc_cpu->cpu, map_util_perf(cc_cpu->bw_dl),
++				   map_util_perf(cc_cpu->util), cc_cpu->max);
++
++	cc_cpu->cc_policy->last_freq_update_time = time;
++}
++
++static unsigned int cc_next_freq_shared(struct cc_cpu *cc_cpu, u64 time)
++{
++	struct cc_policy *cc_policy = cc_cpu->cc_policy;
++	struct cpufreq_policy *policy = cc_policy->policy;
++	unsigned long util = 0, max = 1;
++	unsigned int j;
++
++	for_each_cpu(j, policy->cpus) {
++		struct cc_cpu *j_cc_cpu = &per_cpu(cc_cpu_data, j);
++		unsigned long j_util, j_max;
++
++		cc_get_util(j_cc_cpu, time, j == cc_cpu->cpu);
++		cc_iowait_apply(j_cc_cpu, time);
++		j_util = j_cc_cpu->util;
++		j_max = j_cc_cpu->max;
++
++		if (j_util * max > j_max * util) {
++			util = j_util;
++			max = j_max;
++		}
++	}
++
++	return cc_get_next_freq(cc_policy, util, max);
++}
++
++static void
++cc_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
++{
++	struct cc_cpu *cc_cpu = container_of(hook, struct cc_cpu, update_util);
++	struct cc_policy *cc_policy = cc_cpu->cc_policy;
++	unsigned int next_f;
++
++	raw_spin_lock(&cc_policy->update_lock);
++
++	cc_iowait_boost(cc_cpu, time, flags);
++	cc_cpu->last_update = time;
++
++	cc_ignore_dl_rate_limit(cc_cpu);
++
++	if (cc_should_update_freq(cc_policy, time)) {
++		next_f = cc_next_freq_shared(cc_cpu, time);
++
++		if (!cc_update_next_freq(cc_policy, time, next_f))
++			goto unlock;
++
++		if (cc_policy->policy->fast_switch_enabled)
++			cpufreq_driver_fast_switch(cc_policy->policy, next_f);
++		else
++			cc_deferred_update(cc_policy);
++	}
++unlock:
++	raw_spin_unlock(&cc_policy->update_lock);
++}
++
++static void cc_work(struct kthread_work *work)
++{
++	struct cc_policy *cc_policy = container_of(work, struct cc_policy, work);
++	unsigned int freq;
++	unsigned long flags;
++
++	raw_spin_lock_irqsave(&cc_policy->update_lock, flags);
++	freq = cc_policy->next_freq;
++	cc_policy->work_in_progress = false;
++	raw_spin_unlock_irqrestore(&cc_policy->update_lock, flags);
++
++	mutex_lock(&cc_policy->work_lock);
++	__cpufreq_driver_target(cc_policy->policy, freq, CPUFREQ_RELATION_L);
++	mutex_unlock(&cc_policy->work_lock);
++}
++
++static void cc_irq_work(struct irq_work *irq_work)
++{
++	struct cc_policy *cc_policy;
++
++	cc_policy = container_of(irq_work, struct cc_policy, irq_work);
++
++	kthread_queue_work(&cc_policy->worker, &cc_policy->work);
++}
++
++/************************** sysfs interface ************************/
++
++static struct cc_tunables *cc_global_tunables;
++static DEFINE_MUTEX(cc_global_tunables_lock);
++
++static inline struct cc_tunables *to_cc_tunables(struct gov_attr_set *attr_set)
++{
++	return container_of(attr_set, struct cc_tunables, attr_set);
++}
++
++#define cc_attr_show(_name)						\
++static ssize_t cc_##_name##_show(struct gov_attr_set *attr_set, char *buf) \
++{									\
++	struct cc_tunables *tunables = to_cc_tunables(attr_set);	\
++	return sprintf(buf, "%u\n", tunables->_name);			\
++}
++
++#define cc_attr_store_uint(_name, _min, _max)			\
++static ssize_t cc_##_name##_store(struct gov_attr_set *attr_set,	\
++			      const char *buf, size_t count)		\
++{									\
++	struct cc_tunables *tunables = to_cc_tunables(attr_set);	\
++	unsigned int val;						\
++	if (kstrtouint(buf, 10, &val))					\
++		return -EINVAL;						\
++	if (val < (_min) || val > (_max))				\
++		return -EINVAL;						\
++	tunables->_name = val;						\
++	return count;							\
++}
++
++/* Every one of these is built by hand rather than via __ATTR_RW(name),
++ * which would tie the sysfs filename to the C function names via token
++ * pasting -- and cc_attr_show()/_store() above deliberately generate
++ * cc_<name>_show/_store, not <name>_show/_store, because
++ * cpufreq_reflex.c already defines plain <name>_show/_store for the same
++ * tunable names and both files land in the same translation unit
++ * (build_utility.c #includes both). Building the struct manually keeps
++ * the sysfs files named exactly like REFLEX's (hispeed_window_us, etc.)
++ * while the backing C symbols stay distinct per file. */
++#define CC_ATTR(_name) \
++static struct governor_attr cc_##_name##_attr = {	\
++	.attr	= { .name = #_name, .mode = 0644 },	\
++	.show	= cc_##_name##_show,			\
++	.store	= cc_##_name##_store,			\
++}
++
++cc_attr_show(hispeed_window_us);
++cc_attr_store_uint(hispeed_window_us, 500, 50000);
++CC_ATTR(hispeed_window_us);
++
++cc_attr_show(hispeed_load_pct);
++cc_attr_store_uint(hispeed_load_pct, 1, 100);
++CC_ATTR(hispeed_load_pct);
++
++cc_attr_show(hispeed_freq_pct);
++cc_attr_store_uint(hispeed_freq_pct, 1, 100);
++CC_ATTR(hispeed_freq_pct);
++
++cc_attr_show(hispeed_decay_shift);
++cc_attr_store_uint(hispeed_decay_shift, 1, 6);
++CC_ATTR(hispeed_decay_shift);
++
++cc_attr_show(hispeed_hold_us);
++cc_attr_store_uint(hispeed_hold_us, 0, 100000);
++CC_ATTR(hispeed_hold_us);
++
++cc_attr_show(wake_edge_boost);
++cc_attr_store_uint(wake_edge_boost, 0, 1);
++CC_ATTR(wake_edge_boost);
++
++cc_attr_show(auto_capacity_scale);
++cc_attr_store_uint(auto_capacity_scale, 0, 1);
++CC_ATTR(auto_capacity_scale);
++
++cc_attr_show(instant_trigger_pct);
++cc_attr_store_uint(instant_trigger_pct, 0, 100);
++CC_ATTR(instant_trigger_pct);
++
++cc_attr_show(streak_window_us);
++cc_attr_store_uint(streak_window_us, 1000, 1000000);
++CC_ATTR(streak_window_us);
++
++cc_attr_show(streak_min_count);
++cc_attr_store_uint(streak_min_count, 0, CC_STREAK_MAX);
++CC_ATTR(streak_min_count);
++
++cc_attr_show(busy_threshold_pct);
++cc_attr_store_uint(busy_threshold_pct, 0, 100);
++CC_ATTR(busy_threshold_pct);
++
++cc_attr_show(filter_kthreads);
++cc_attr_store_uint(filter_kthreads, 0, 1);
++CC_ATTR(filter_kthreads);
++
++#ifdef CONFIG_SCHED_BORE
++cc_attr_show(bore_boost_max_score);
++cc_attr_store_uint(bore_boost_max_score, 0, 39);
++CC_ATTR(bore_boost_max_score);
++#endif
++
++#undef cc_attr_show
++#undef cc_attr_store_uint
++#undef CC_ATTR
++
++static ssize_t cc_rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
++{
++	struct cc_tunables *tunables = to_cc_tunables(attr_set);
++
++	return sprintf(buf, "%u\n", tunables->rate_limit_us);
++}
++
++static ssize_t
++cc_rate_limit_us_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
++{
++	struct cc_tunables *tunables = to_cc_tunables(attr_set);
++	struct cc_policy *cc_policy;
++	unsigned int rate_limit_us;
++
++	if (kstrtouint(buf, 10, &rate_limit_us))
++		return -EINVAL;
++
++	tunables->rate_limit_us = rate_limit_us;
++
++	list_for_each_entry(cc_policy, &attr_set->policy_list, tunables_hook)
++		cc_policy->freq_update_delay_ns = rate_limit_us * NSEC_PER_USEC;
++
++	return count;
++}
++
++/* Deliberately NOT using __ATTR_RW(rate_limit_us) here: that macro ties
++ * the sysfs filename to the C function names via token pasting, and
++ * cc_rate_limit_us_show/_store are already renamed (see above) to avoid
++ * colliding with schedutil's own rate_limit_us_show/_store — both files
++ * live in the same translation unit (build_utility.c #includes both).
++ * Building the struct by hand keeps the sysfs file named "rate_limit_us"
++ * (matching schedutil's tunable, as documented in the addon) while the
++ * backing C symbols stay distinct. */
++static struct governor_attr cc_rate_limit_us = {
++	.attr	= { .name = "rate_limit_us", .mode = 0644 },
++	.show	= cc_rate_limit_us_show,
++	.store	= cc_rate_limit_us_store,
++};
++
++/*
++ * Telemetry: read-only, summed across every CPU in the policy. See the
++ * struct cc_cpu comment on stat_triggers_total for what each one counts
++ * and why they're safe to read without locking.
++ */
++#define CC_STAT_ATTR(_field)						\
++static ssize_t cc_stat_##_field##_show(struct gov_attr_set *attr_set, char *buf) \
++{									\
++	struct cc_tunables *tunables = to_cc_tunables(attr_set);	\
++	struct cc_policy *cc_policy;					\
++	u64 sum = 0;							\
++	list_for_each_entry(cc_policy, &attr_set->policy_list, tunables_hook) { \
++		unsigned int cpu;					\
++		for_each_cpu(cpu, cc_policy->policy->related_cpus)	\
++			sum += per_cpu(cc_cpu_data, cpu)._field;	\
++	}								\
++	return sprintf(buf, "%llu\n", sum);				\
++}									\
++static struct governor_attr cc_stat_##_field##_attr = {		\
++	.attr	= { .name = #_field, .mode = 0444 },			\
++	.show	= cc_stat_##_field##_show,				\
++}
++
++CC_STAT_ATTR(stat_triggers_total);
++CC_STAT_ATTR(stat_triggers_confirmed);
++CC_STAT_ATTR(stat_instant_applied);
++CC_STAT_ATTR(stat_streak_applied);
++
++#undef CC_STAT_ATTR
++
++static struct attribute *cc_attrs[] = {
++	&cc_stat_stat_triggers_total_attr.attr,
++	&cc_stat_stat_triggers_confirmed_attr.attr,
++	&cc_stat_stat_instant_applied_attr.attr,
++	&cc_stat_stat_streak_applied_attr.attr,
++	&cc_rate_limit_us.attr,
++	&cc_hispeed_window_us_attr.attr,
++	&cc_hispeed_load_pct_attr.attr,
++	&cc_hispeed_freq_pct_attr.attr,
++	&cc_hispeed_decay_shift_attr.attr,
++	&cc_hispeed_hold_us_attr.attr,
++	&cc_wake_edge_boost_attr.attr,
++	&cc_auto_capacity_scale_attr.attr,
++	&cc_instant_trigger_pct_attr.attr,
++	&cc_streak_window_us_attr.attr,
++	&cc_streak_min_count_attr.attr,
++	&cc_busy_threshold_pct_attr.attr,
++	&cc_filter_kthreads_attr.attr,
++#ifdef CONFIG_SCHED_BORE
++	&cc_bore_boost_max_score_attr.attr,
++#endif
++	NULL
++};
++ATTRIBUTE_GROUPS(pccg);
++
++static void cc_tunables_free(struct kobject *kobj)
++{
++	struct gov_attr_set *attr_set = to_gov_attr_set(kobj);
++
++	kfree(to_cc_tunables(attr_set));
++}
++
++static struct kobj_type cc_tunables_ktype = {
++	.default_groups = cc_groups,
++	.sysfs_ops = &governor_sysfs_ops,
++	.release = &cc_tunables_free,
++};
++
++/********************** cpufreq governor interface *********************/
++
++struct cpufreq_governor cc_gov;
++
++static struct cc_policy *cc_policy_alloc(struct cpufreq_policy *policy)
++{
++	struct cc_policy *cc_policy;
++
++	cc_policy = kzalloc(sizeof(*cc_policy), GFP_KERNEL);
++	if (!cc_policy)
++		return NULL;
++
++	cc_policy->policy = policy;
++	raw_spin_lock_init(&cc_policy->update_lock);
++	return cc_policy;
++}
++
++static void cc_policy_free(struct cc_policy *cc_policy)
++{
++	kfree(cc_policy);
++}
++
++static int cc_kthread_create(struct cc_policy *cc_policy)
++{
++	struct task_struct *thread;
++	struct sched_attr attr = {
++		.size		= sizeof(struct sched_attr),
++		.sched_policy	= SCHED_DEADLINE,
++		.sched_flags	= SCHED_FLAG_SUGOV,
++		.sched_nice	= 0,
++		.sched_priority	= 0,
++		.sched_runtime	=  1000000,
++		.sched_deadline = 10000000,
++		.sched_period	= 10000000,
++	};
++	struct cpufreq_policy *policy = cc_policy->policy;
++	int ret;
++
++	if (policy->fast_switch_enabled)
++		return 0;
++
++	kthread_init_work(&cc_policy->work, cc_work);
++	kthread_init_worker(&cc_policy->worker);
++	thread = kthread_create(kthread_worker_fn, &cc_policy->worker,
++				"cc_governor:%d",
++				cpumask_first(policy->related_cpus));
++	if (IS_ERR(thread)) {
++		pr_err("cc_governor: failed to create thread: %ld\n", PTR_ERR(thread));
++		return PTR_ERR(thread);
++	}
++
++	ret = sched_setattr_nocheck(thread, &attr);
++	if (ret) {
++		kthread_stop(thread);
++		pr_warn("cc_governor: failed to set SCHED_DEADLINE\n");
++		return ret;
++	}
++
++	cc_policy->thread = thread;
++	kthread_bind_mask(thread, policy->related_cpus);
++	init_irq_work(&cc_policy->irq_work, cc_irq_work);
++	mutex_init(&cc_policy->work_lock);
++
++	wake_up_process(thread);
++
++	return 0;
++}
++
++static void cc_kthread_stop(struct cc_policy *cc_policy)
++{
++	if (cc_policy->policy->fast_switch_enabled)
++		return;
++
++	kthread_flush_worker(&cc_policy->worker);
++	kthread_stop(cc_policy->thread);
++	mutex_destroy(&cc_policy->work_lock);
++}
++
++static struct cc_tunables *cc_tunables_alloc(struct cc_policy *cc_policy)
++{
++	struct cc_tunables *tunables;
++
++	tunables = kzalloc(sizeof(*tunables), GFP_KERNEL);
++	if (tunables) {
++		gov_attr_set_init(&tunables->attr_set, &cc_policy->tunables_hook);
++		if (!have_governor_per_policy())
++			cc_global_tunables = tunables;
++	}
++	return tunables;
++}
++
++static void cc_clear_global_tunables(void)
++{
++	if (!have_governor_per_policy())
++		cc_global_tunables = NULL;
++}
++
++static int cc_init(struct cpufreq_policy *policy)
++{
++	struct cc_policy *cc_policy;
++	struct cc_tunables *tunables;
++	int ret = 0;
++
++	if (policy->governor_data)
++		return -EBUSY;
++
++	cpufreq_enable_fast_switch(policy);
++
++	cc_policy = cc_policy_alloc(policy);
++	if (!cc_policy) {
++		ret = -ENOMEM;
++		goto disable_fast_switch;
++	}
++
++	ret = cc_kthread_create(cc_policy);
++	if (ret)
++		goto free_cc_policy;
++
++	mutex_lock(&cc_global_tunables_lock);
++
++	if (cc_global_tunables) {
++		if (WARN_ON(have_governor_per_policy())) {
++			ret = -EINVAL;
++			goto stop_kthread;
++		}
++		policy->governor_data = cc_policy;
++		cc_policy->tunables = cc_global_tunables;
++
++		gov_attr_set_get(&cc_global_tunables->attr_set, &cc_policy->tunables_hook);
++		goto out;
++	}
++
++	tunables = cc_tunables_alloc(cc_policy);
++	if (!tunables) {
++		ret = -ENOMEM;
++		goto stop_kthread;
++	}
++
++	tunables->rate_limit_us = cpufreq_policy_transition_delay_us(policy);
++	/* Conservative defaults, per explicit request after PCCG's "go all
++	 * in" (freq_pct=100, auto_capacity_scale on) measured 25-30% worse
++	 * battery than schedutil in real-world use, with the A55 cluster
++	 * pinned near max ~87% of awake time. These starting points trade
++	 * some of PCCG's aggressiveness back for headroom against exactly
++	 * that failure mode -- still fully re-tunable at runtime. */
++	tunables->hispeed_window_us   = 8000;
++	tunables->hispeed_load_pct    = 90;
++	/* 55% of max frequency (now that cc_target_util() actually delivers
++	 * that linearly -- see its comment) on a confirmed trigger. */
++	tunables->hispeed_freq_pct    = 55;
++	tunables->hispeed_decay_shift = 1;
++	tunables->hispeed_hold_us     = 16000;
++	tunables->wake_edge_boost     = 1;
++	/* Off by default: this pushes SMALLER cores toward the *nominal*
++	 * hispeed_freq_pct (100% of it) regardless of how low that nominal
++	 * value is set, which is exactly backwards from what a
++	 * battery-conscious default wants on the very cluster (LITTLE)
++	 * that showed the worst real-world drain. Turn it on explicitly if
++	 * a specific device's LITTLE cluster genuinely needs more push. */
++	tunables->auto_capacity_scale = 0;
++	/* Unconfirmed triggers get 40% of the (already lower) confirmed
++	 * target -- a real bump, well short of it. */
++	tunables->instant_trigger_pct = 40;
++	/* 6 edges within 60ms to count as a genuine gesture streak, not 3
++	 * within 120ms: on real wakeup densities (tens of wakeups/sec is
++	 * normal with the screen on) the old 3-in-120ms threshold was
++	 * satisfied by ordinary background noise alone, making almost
++	 * every trigger "confirmed" and defeating instant_trigger_pct
++	 * entirely. This pair is still a starting point, not a measured
++	 * value -- see CC_STAT_* below for how to calibrate it against
++	 * this device's actual wakeup pattern instead of guessing again. */
++	tunables->streak_window_us    = 60000;
++	tunables->streak_min_count    = 6;
++	/* Floor gate (new): a trigger only holds the CPU up while the
++	 * idle-time window keeps confirming real activity above this
++	 * busy% -- see cc_update_hispeed()'s fast-decay branch. Below it,
++	 * the floor decays hard back toward idle instead of riding out the
++	 * normal hold/decay schedule meant for sustained bursts. */
++	tunables->busy_threshold_pct  = 15;
++	/* Ignore wake-edges whose current task is a kthread (PF_KTHREAD) --
++	 * best-effort: cpufreq's update_util interface doesn't hand this
++	 * code the specific task that just became runnable, only whichever
++	 * task rq->curr happens to be when the edge is observed, so this
++	 * filters the common case (a kworker, ksoftirqd, etc. still shown
++	 * as curr at that instant) rather than guaranteeing precise
++	 * per-wakeup task identification. */
++	tunables->filter_kthreads     = 1;
++#ifdef CONFIG_SCHED_BORE
++	/* Conservative: only scores 0-2 (freshly-woken tasks and kthreads,
++	 * per BORE's own classification) trigger early. 0 disables this
++	 * path outright if kthread-triggered snaps turn out unwanted on a
++	 * given device. Redundant with wake_edge_boost in the common case;
++	 * see the field comment in struct cc_tunables for when it isn't. */
++	tunables->bore_boost_max_score = 2;
++#endif
++
++	policy->governor_data = cc_policy;
++	cc_policy->tunables = tunables;
++
++	ret = kobject_init_and_add(&tunables->attr_set.kobj, &cc_tunables_ktype,
++				   get_governor_parent_kobj(policy), "%s",
++				   cc_gov.name);
++	if (ret)
++		goto fail;
++
++out:
++	mutex_unlock(&cc_global_tunables_lock);
++	return 0;
++
++fail:
++	kobject_put(&tunables->attr_set.kobj);
++	policy->governor_data = NULL;
++	cc_clear_global_tunables();
++
++stop_kthread:
++	cc_kthread_stop(cc_policy);
++	mutex_unlock(&cc_global_tunables_lock);
++
++free_cc_policy:
++	cc_policy_free(cc_policy);
++
++disable_fast_switch:
++	cpufreq_disable_fast_switch(policy);
++
++	pr_err("cc_governor: initialization failed (error %d)\n", ret);
++	return ret;
++}
++
++static void cc_exit(struct cpufreq_policy *policy)
++{
++	struct cc_policy *cc_policy = policy->governor_data;
++	struct cc_tunables *tunables = cc_policy->tunables;
++	unsigned int count;
++
++	mutex_lock(&cc_global_tunables_lock);
++
++	count = gov_attr_set_put(&tunables->attr_set, &cc_policy->tunables_hook);
++	policy->governor_data = NULL;
++	if (!count)
++		cc_clear_global_tunables();
++
++	mutex_unlock(&cc_global_tunables_lock);
++
++	cc_kthread_stop(cc_policy);
++	cc_policy_free(cc_policy);
++	cpufreq_disable_fast_switch(policy);
++}
++
++static int cc_start(struct cpufreq_policy *policy)
++{
++	struct cc_policy *cc_policy = policy->governor_data;
++	void (*uu)(struct update_util_data *data, u64 time, unsigned int flags);
++	unsigned int cpu;
++	u64 now = ktime_get_ns();
++
++	cc_policy->freq_update_delay_ns	= cc_policy->tunables->rate_limit_us * NSEC_PER_USEC;
++	cc_policy->last_freq_update_time	= 0;
++	cc_policy->next_freq			= 0;
++	cc_policy->work_in_progress		= false;
++	cc_policy->limits_changed		= false;
++	cc_policy->cached_raw_freq		= 0;
++
++	cc_policy->need_freq_update = cpufreq_driver_test_flags(CPUFREQ_NEED_UPDATE_LIMITS);
++
++	for_each_cpu(cpu, policy->cpus) {
++		struct cc_cpu *cc_cpu = &per_cpu(cc_cpu_data, cpu);
++
++		memset(cc_cpu, 0, sizeof(*cc_cpu));
++		cc_cpu->cpu			= cpu;
++		cc_cpu->cc_policy		= cc_policy;
++		/* Seed the idle-time baseline so the first hispeed sample
++		 * measures a real window instead of "since CPU boot". */
++		cc_cpu->hispeed_prev_idle_time = get_cpu_idle_time(cpu,
++					&cc_cpu->hispeed_prev_wall_time, 0);
++		cc_cpu->hispeed_next_sample_time = now +
++			(u64)cc_policy->tunables->hispeed_window_us * NSEC_PER_USEC;
++	}
++
++	if (policy_is_shared(policy))
++		uu = cc_update_shared;
++	else if (policy->fast_switch_enabled && cpufreq_driver_has_adjust_perf())
++		uu = cc_update_single_perf;
++	else
++		uu = cc_update_single_freq;
++
++	for_each_cpu(cpu, policy->cpus) {
++		struct cc_cpu *cc_cpu = &per_cpu(cc_cpu_data, cpu);
++
++		cpufreq_add_update_util_hook(cpu, &cc_cpu->update_util, uu);
++	}
++	return 0;
++}
++
++static void cc_stop(struct cpufreq_policy *policy)
++{
++	struct cc_policy *cc_policy = policy->governor_data;
++	unsigned int cpu;
++
++	for_each_cpu(cpu, policy->cpus)
++		cpufreq_remove_update_util_hook(cpu);
++
++	synchronize_rcu();
++
++	if (!policy->fast_switch_enabled) {
++		irq_work_sync(&cc_policy->irq_work);
++		kthread_cancel_work_sync(&cc_policy->work);
++	}
++}
++
++static void cc_limits(struct cpufreq_policy *policy)
++{
++	struct cc_policy *cc_policy = policy->governor_data;
++
++	if (!policy->fast_switch_enabled) {
++		mutex_lock(&cc_policy->work_lock);
++		cpufreq_policy_apply_limits(policy);
++		mutex_unlock(&cc_policy->work_lock);
++	}
++
++	smp_wmb();
++
++	WRITE_ONCE(cc_policy->limits_changed, true);
++}
++
++struct cpufreq_governor cc_gov = {
++	.name			= "cc_governor",
++	.owner			= THIS_MODULE,
++	.flags			= CPUFREQ_GOV_DYNAMIC_SWITCHING,
++	.init			= cc_init,
++	.exit			= cc_exit,
++	.start			= cc_start,
++	.stop			= cc_stop,
++	.limits			= cc_limits,
++};
++
++#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_CC
++struct cpufreq_governor *cpufreq_default_governor(void)
++{
++	return &cc_gov;
++}
++#endif
++
++cpufreq_governor_init(cc_gov);
