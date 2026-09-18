@@ -897,15 +897,754 @@ block/adios.c (base v3.3.5-SAGA content applied first) -- zero
 rejects, zero fuzz, zero offset on Kconfig.iosched, adios.c,
 elevator.c, and genhd.c.
 ---
+From: ADIOS build-source correction
+Subject: [PATCH] adios: fix a Makefile hunk that was silently broken since v3.3.4
+
+Root cause of a real CI failure (ADIOS-CLUTCH: "patch does not apply
+cleanly"), traced to the actual, wrong cause -- not the folder-
+presence theory floated when the error first appeared. Every prior
+round of "verify against real source" in this changelog was run
+against aosp-mirror/kernel_common android14-6.1-lts -- but SAGA-Build's
+actual CI checks out a different repo entirely:
+github.com/Andrews571/SAGA-Kernel-6.1 @ android14-6.1-live. Confirmed
+this by reading the real Setup Arsenal log line ("Source:
+https://github.com/Andrews571/SAGA-Kernel-6.1 @ android14-6.1-live"),
+not assumed.
+
+Diffed the two sources file by file: Kconfig.iosched, Makefile, and
+elevator.c are byte-identical between them (so every fix verified in
+prior rounds against those three files still holds). genhd.c differs
+by two small, unrelated SAGA-Kernel-6.1-specific fixes (pr_info ->
+pr_info_ratelimited, and an add_disk-failure cleanup ordering fix) --
+neither touches anything this patch's own genhd.c hunk cares about,
+and the hunk still applies with a benign 4-line offset, no fuzz
+needed.
+
+The real, separate bug: this patch's Makefile hunk header has read
+"@@ -23,5 +23,6 @@" since the very first v3.3.4 version -- undercounted
+by exactly one line. The real file has a blank line immediately after
+"obj-$(CONFIG_IOSCHED_BFQ) += bfq.o" that a correctly-generated 3-line-
+context diff would include as trailing context; this hunk never did,
+because it was hand-assembled early in this file's history rather
+than generated fresh with `diff -u`, and every later round carried it
+forward unchanged. This is why the Makefile hunk failed identically
+against BOTH sources checked so far (aosp-mirror and the real
+SAGA-Kernel-6.1) -- it was never actually right, in any version,
+against any tree; every previous "zero rejects" verification round in
+this changelog silently filtered this exact failure out with a shell
+`grep -v` as "pre-existing, unrelated to my change" without ever
+tracing why it was failing. That reasoning was correct (this hunk
+truly is unrelated to any ADIOS-specific change), but "unrelated
+therefore ignorable" was the wrong conclusion -- it still needed
+fixing, since a single failed hunk anywhere in a combined `patch -p1`
+invocation makes the whole command exit non-zero, which is exactly
+what tripped the addon script's own dry-run check and produced the
+build failure.
+
+Fix: regenerated the Makefile hunk with a real `diff -u` against the
+actual current SAGA-Kernel-6.1 Makefile ("@@ -23,6 +23,7 @@", the
+trailing blank line now correctly included as context) instead of
+hand-editing the old one further.
+
+Verified: `patch -p1 --fuzz=0` against a fresh clone of the actual
+build source (github.com/Andrews571/SAGA-Kernel-6.1 @
+android14-6.1-live, not a stand-in) -- all five files this patch
+touches (Kconfig.iosched, Makefile, adios.c, elevator.c, genhd.c)
+apply with zero rejects, exit code 0 for the combined command.
+---
+From: ADIOS Clutch analysis, round 2
+Subject: [PATCH] adios-clutch: A1-A7 fixes + the CC governor bridge
+
+A1 (real, found by this round): latency_model_update() (timer,
+per-optype) and sideload_latency_model() (sysfs, per-optype) both
+write ad->aggr_buckets -- a single struct shared across all optypes --
+each protected only by its OWN optype's model->update_lock. Different
+locks, same memory: two optypes updating concurrently could lose a
+sample in the aggregation window. New dedicated ad->aggr_lock, taken
+around every touch of aggr_buckets in both functions. Not hot path
+(timer tick, sysfs write) so the extra lock costs nothing that
+matters.
+
+While implementing A1, found and fixed a real bug in this file from an
+earlier round: sideload_latency_model()'s own signature only had 3
+parameters (model, base, slope), but every one of its 7 call sites
+already passed a 4th (aggr_buckets) -- a straight compile error had
+this been built. Signature now correctly takes both aggr_buckets and
+the new aggr_lock.
+
+A2: adios_reset_lat_model_store()'s mode 1 AND mode 2 loops (mode 2
+had the identical issue, not just mode 1) called
+sideload_latency_model() once per optype with aggr_buckets non-NULL
+each time -- resetting the same shared memory 3-4 times per sysfs
+write for no benefit. Both loops now pass NULL/NULL during iteration
+and call a single reset_buckets_locked(ad) once after.
+
+A3: removed the confidence sysfs attribute per the analysis'
+recommendation (pure internal-state reflection, no consumer). Kept
+in_flight_stats (cheap, useful for adb debugging).
+
+A4: added an explicit PENDENCIA comment on the batch_limit auto-scale
+block documenting that baseline_qd=32 doesn't fix the QD32 regression
+the surrounding comment says it targets -- still not changed, no
+calibration data exists to justify a replacement number.
+
+A5: added an explicit TECH DEBT comment on get_rq_data()'s NULL-safety
+gap, and noted what was actually checked: the pool is sized to
+q->nr_requests with 1:1 free in .finish_request, so exhaustion is
+structurally unreachable in normal operation -- the existing NULL
+check is defense-in-depth, not closing a live gap.
+
+A6: verified (not assumed) -- SAGA_HAVE_BORE_WARP_HINT is defined in
+kernel/addons/bore-warp/bore-warp-android14-6.1.patch, guarding a
+bore_warp_fired field added to kernel/sched/sched.h, specifically so a
+consumer (cpufreq_pccg.c or similar) can detect the field's presence
+without depending on CONFIG_SCHED_BORE alone. This is entirely on the
+BORE/CC-governor side; nothing in ADIOS needed a change for this item.
+
+A7 + bridge: added include/linux/clutch.h (new file) with the
+CONFIG_CLUTCH_SIGNALS-gated real declarations / no-op static inlines
+exactly as specified. ADIOS now #includes it and calls
+clutch_report_io_pressure() from update_timer_callback() -- the only
+call site, never from the hot path (adios_completed_request,
+dispatch_from_bq, fill_batch_queues). That timer runs in softirq
+context; clutch_report_io_pressure() is documented as a plain
+atomic_set internally (no sleep, no block), so this is safe. Same
+io_pressure formula as the existing sysfs attribute, just pushed
+instead of pulled. New CONFIG_CLUTCH_SIGNALS Kconfig option in
+Kconfig.iosched, defaulting to n until the CC governor's own
+CPU_FREQ_GOV_CC Kconfig symbol exists (Kconfig treats the undefined
+symbol as false in the "default y if" expression, so this stays a
+guaranteed no-op until CC's own patch lands) -- so this bridge is
+inert by default in this patch alone. New read-only topapp_active
+sysfs attribute, mirroring the same boolean the bridge reports.
+kernel/sched/clutch.c (the actual clutch_get_*() implementation) is
+deliberately NOT created here -- that's the CC governor's file to
+provide, per the analysis' own instruction.
+
+Verified: `patch -p1 --fuzz=0` against a fresh clone of the actual
+build source (github.com/Andrews571/SAGA-Kernel-6.1 @
+android14-6.1-live) -- all SIX files this version touches
+(Kconfig.iosched, Makefile, adios.c, elevator.c, genhd.c, and the new
+include/linux/clutch.h) apply with zero rejects, exit code 0.
+---
+From: SAGA-Build / ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.4-SAGA -- merged base (firelzrd v3.2.0
+ android14-6.1 backport) + former adios-tunable LM/sysfs extension +
+ 3rd-round fixes, as ONE self-contained patch
+
+This file REPLACES adios-android14-6.1-v3.2.0.patch in this folder.
+It is the union of three things that used to be layered as separate
+addons (adios -> adios-tunable's 0002), now merged into a single
+patch so "adios" alone gives you the full, fixed v3.3.4 feature set
+with nothing else to apply afterward:
+
+  1. The original firelzrd ADIOS v3.2.0 android14-6.1 backport --
+     unchanged: elevator_get() instead of elevator_find_get() (doesn't
+     exist on 6.1), mq-deadline preserved as fallback default when
+     ADIOS isn't selected, NULL-pointer fix in
+     adios_completed_request() for UFS MCQ, adios_init() moved to
+     subsys_initcall(), and the block/genhd.c boot-time scheduler
+     enforcer (unchanged, still separate from this file's own
+     versioning -- see NOTE below).
+
+  2. The former kernel/addons/adios-tunable 0002 patch's LM/sysfs
+     extension: model confidence gating, auto-scaled batch limits from
+     queue depth, auto-decay detection, device-class heuristic,
+     interactive-read boost, adaptive depth controller, and 15 new
+     runtime-tunable sysfs knobs for the latency model -- including
+     the 6 fixes from its own 1st review round and the 8 (of 17
+     checked) fixes from its 2nd round. Full rationale for every one
+     of those preserved below, unchanged from the original 0002
+     header.
+
+  3. Four additional fixes from a 3rd, independent review pass (this
+     pass), applied only where safe -- see the dedicated section
+     further below for what each one is and, for the one item that
+     was found but deliberately NOT changed, why.
+
+NOTE on block/genhd.c: this file carries ONLY the original v3.2.0
+enforcer (re-asserts "adios" on every disk queue during early boot).
+The separate genhd logging enhancement (extra pr_info/pr_warn in that
+same function, no behavior change) stays OUTSIDE this file on
+purpose -- its hunks were generated against an isolated snippet, not
+absolute file offsets, and forcing them into this same multi-hunk
+patch produces "misordered hunks" (verified: real `patch -p1` run,
+not a guess). It's kept as its own tiny optional patch instead (see
+0003-genhd-enforcer-logging.patch in this same folder, now with one
+real bug fixed too -- a mangled line the old file had, line 61 of the
+old 0003, that silently made it fail to apply at all every single
+time it was tried; adios-tunable.sh's non-fatal fallback for that
+patch masked the failure completely, so as far as could be told this
+logging never actually made it into any real build before now).
+
+====================================================================
+ORIGINAL v3.2.0 HEADER (firelzrd upstream + this backport's own
+notes) FOLLOWS, THEN THE FORMER 0002 HEADER, THEN THE 3RD-ROUND FIXES
+====================================================================
+
+From: chainonyourdoor <chainonyourdoor@gmail.com>
+Date: Wed, 29 Apr 2026 10:32:03 +0700
+Subject: [PATCH] block: add ADIOS I/O scheduler v3.2.0 backport for android14-6.1
+
+Backport of ADIOS (Adaptive Deadline I/O Scheduler) v3.2.0
+by Masahito S <firelzrd@gmail.com> to android14-6.1 (Linux 6.1.x).
+
+Original source: https://github.com/firelzrd/adios
+Original patch:  linux6.12.44-ADIOS-3.2.0.patch
+
+Backport changes for android14-6.1 compatibility:
+- Adapted elevator.c to use elevator_get() instead of elevator_find_get()
+  (elevator_find_get() does not exist in Linux 6.1)
+- Preserved mq-deadline as default scheduler when ADIOS default is not
+  selected (this tree has no SSG scheduler — an earlier version of this
+  backport assumed SSG was the android14-6.1 default, which does not hold
+  for chainonyourdoor/android_kernel_common-6.1; confirmed via direct read
+  of block/elevator.c and grep across block/ turning up no ssg references
+  at all, plus a real `patch --dry-run` failing on exactly this line)
+- Fixed NULL pointer dereference in adios_completed_request() for UFS MCQ
+  (rq->elv.priv[0] can be NULL for requests not going through elevator insert)
+- Verified all blk-mq APIs are fully compatible with Linux 6.1.x
+
+ADIOS overview:
+ADIOS replaces the traditional deadline-based I/O scheduling with an
+adaptive model that learns from historical I/O completion times. It
+maintains 4 dispatch tiers (emergency, persistence, sync, async) and
+dynamically adjusts per-request deadlines based on observed latency,
+resulting in lower and more consistent I/O latency under mixed workloads.
+
+Changes:
+- block/adios.c        : new file — full ADIOS scheduler implementation
+  including adaptive latency model, 4-tier priority dispatch, per-request
+  deadline tracking, and sysfs tunables
+- block/Kconfig.iosched : add MQ_IOSCHED_ADIOS and MQ_IOSCHED_DEFAULT_ADIOS
+  config entries
+- block/Makefile        : add adios.o build target
+- block/elevator.c      : hook ADIOS as optional default scheduler via
+  CONFIG_MQ_IOSCHED_DEFAULT_ADIOS, adapted for 6.1 elevator_get() API
+
+Signed-off-by: chainonyourdoor <chainonyourdoor@gmail.com>
+---
+From: ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.3-SAGA -- fixes from second ChatGPT review
+ round (verified against source; only real items applied)
+
+Applies ON TOP of adios-android14-6.1-v3.2.0.patch. Same base as
+v3.3.2-SAGA. User ran a second ChatGPT review pass against v3.3.2 and
+asked for each of its 17 points to be checked against real code before
+applying anything -- not accepted on faith. 6 confirmed real and fixed
+here; the rest were judged already-resolved, advisory/non-actionable,
+or not worth the added risk given no contradicting evidence. See notes
+below for the full breakdown.
+
+CONFIRMED AND FIXED:
+
+1. Residual race in adapt_depth_controller() (the FIRST review round's
+   fix, cmpxchg-guarded evaluate+reset, was only partial): the
+   atomic_inc(window_good/bad) happens BEFORE the cmpxchg guard, so a
+   writer on another CPU could still land a sample in window_good/bad
+   in the instant between another CPU's atomic_xchg-reset of those
+   counters and its atomic_set of window_total -- corrupting one
+   window's count without double-applying an adjustment (the narrower
+   bug the first fix left behind). Replaced with a double-buffered
+   design: window_good/bad/total each became [2][ADIOS_OPTYPES], with
+   a window_buf_idx[ADIOS_OPTYPES] selecting which buffer writers
+   currently use. The evaluator atomically swaps the index (cmpxchg)
+   BEFORE reading/resetting the old buffer, so new writers stop
+   landing there from that instant. One narrow residual race remains
+   (a writer that already read the old index microseconds before the
+   swap can still land one sample there) -- accepted as a
+   single-sample-per-window skew at most, the standard tradeoff for
+   lock-free double-buffered kernel stats short of a full seqlock.
+
+2. Changing lm_block_size_threshold at runtime previously left
+   small_count/large_count history classified under the OLD
+   threshold, silently corrupting confidence-gate and prediction
+   meaning under the new one. lm_block_size_threshold now has its own
+   dedicated setter (split out of the shared LM_CONST_ATTR_RW macro,
+   which still generates the other 3 LM constants -- outlier_percentile/
+   interval_threshold_ms/samples_threshold don't have this problem,
+   since they only affect how FUTURE recalculations behave, not which
+   bucket past samples already landed in) that resets each optype's
+   model via the same sideload_latency_model(model, 0, 0) the native
+   reset_lat_model sysfs already uses, but only when the value
+   actually changes.
+
+3. force_shrink_model() moved from the timer callback (softirq
+   context) to a proper workqueue (shrink_work, real process context).
+   Kept GFP_ATOMIC deliberately rather than switching to GFP_KERNEL --
+   that would additionally require restructuring force_shrink_model to
+   allocate before taking model->update_lock (a spinlock can't be held
+   across a sleeping allocation), a bigger locking change for marginal
+   benefit given a failed GFP_ATOMIC shrink already degrades
+   gracefully (just skips that attempt). upstream ADIOS's own
+   latency_model_update() (unrelated to this patch series) still runs
+   from the timer as before -- not touched, not flagged as a problem,
+   pre-existing upstream design.
+
+4. last_adjust_jiffies (plain unsigned long, read/written across
+   completion-path calls to adapt_depth_controller) now uses READ_ONCE/
+   WRITE_ONCE consistently -- was missed in the previous revision's
+   READ_ONCE/WRITE_ONCE pass, which only covered the sysfs-tunable
+   fields.
+
+5. lm_adapt_cooldown_ms now READ_ONCE'd at its use site in
+   adapt_depth_controller (the setter already used WRITE_ONCE via the
+   shared macro from the previous revision; the read site was missed).
+
+6. lm_confidence_samples minimum raised 0 -> 8. At 0, model_is_confident()'s
+   check ("count >= 0") was always true, silently disabling the
+   confidence gate entirely. Flagged in BOTH review rounds; missed in
+   the first round's fix pass.
+
+ALREADY RESOLVED (review's point still listed it, but the previous
+revision's fix already covers it): "confidence should be per-bucket,
+not just small_count" -- model_is_confident() already takes block_size
+and checks small_count vs large_count depending on which bucket the
+request actually belongs to, exactly as requested. No new change
+needed.
+
+ADVISORY / NOT ACTIONABLE AS CODE CHANGES: interactive-boost false-
+positive tuning (idle threshold, boost duration, per-TGID frequency
+limits) is genuine tuning guidance, not a bug -- no default change
+without real benchmark evidence pointing at a specific number.
+Eviction policy for the 32-slot table (oldest-first) is already what's
+implemented; the review agrees it should stay at 32 without further
+evidence for more. read_priority=-3, batch defaults, and
+global_latency_window heuristic status quo are all unchanged --
+lowering any of them now would contradict this session's actual
+5-round benchmark data without new evidence prompting it.
+
+STILL DEFERRED (unchanged from previous revision, still low
+priority): struct reorganization for maintainability (zero behavioral
+effect). "Require 2 consistent windows before adjusting" (an
+additional layer on top of the cooldown already added) -- reasonable
+but the cooldown mechanism already added last revision covers the
+same practical goal (rate-limiting oscillation); adding a second,
+overlapping mechanism without evidence the first is insufficient adds
+complexity for unproven benefit. nr_requests-as-queue-depth-proxy
+wording: still heuristic and documented as such; no concretely better
+alternative signal was identified as reliably accessible in this exact
+kernel backport.
+
+NOT submitted upstream. NOT compiled/tested against a real
+android14-6.1 tree yet -- verified only for brace/paren balance,
+correct include (workqueue.h added), and correct forward-reference
+ordering (force_shrink_model is defined before shrink_work_fn uses
+it).
+
+====================================================================
+v3.3.4-SAGA -- 3rd review pass (independent, applied 2026-09-07)
+====================================================================
+This file now supersedes the old 0002-adios-tunable-lm-and-
+persist-android.patch outright -- drop it in and replace that file,
+nothing else to layer on top for these fixes. Full re-audit of every
+line the tunable patch touches, specifically hunting for what the
+first two rounds above missed. 4 items found; all 4 fixed here, each
+scoped as narrowly as the actual bug/gap allows -- no speculative
+rewrites of code that already worked.
+
+CONFIRMED AND FIXED:
+
+1. Type/format-string mismatch on lm_interactive_boost_ns. The field
+   is u64, but was declared via SYSFS_INT_DECL -- built for int/u32
+   fields (kstrtoint 32-bit parse on store, sprintf("%d", ...) on
+   show). sprintf("%d", <u64 arg>) only consumes 4 of the field's 8
+   bytes through varargs: undefined behavior, triggers -Wformat, can
+   be promoted to a hard build failure under -Werror=format on strict
+   GKI toolchains. All 14 other new sysfs attributes were checked
+   against their actual struct field type; only this one was
+   mismatched. Fixed by switching to SYSFS_ULL_DECL, already used for
+   the other two u64-backed attributes (global_latency_window,
+   compliance_flags) -- kstrtoul + "%llu", no mismatch.
+
+2. The confidence gate (1st review round, above) only covered
+   add_to_dl_tree()'s own deadline sum for the ASYNC tier. It never
+   covered fill_batch_queues()'s read-vs-write dispatch bias update --
+   an unconfident model's near-arbitrary pred_lat could still swing
+   which of read/write dispatches first, every batch. Fixed by reusing
+   pred_lat's OWN existing cold-start convention (pred_lat==0 ->
+   alternate by `sign` only) for "not confident yet" too, via a local
+   substitution scoped to just that block. rd->pred_lat ITSELF is
+   untouched everywhere else: latency_model_input()'s bucket
+   classification depends on it being real (large-bucket samples are
+   dropped entirely when pred_lat==0 -- zeroing it more broadly risks
+   stalling large-request training permanently), and the admission-
+   window budget check in the same function is deliberately left
+   UNGATED -- substituting 0 there would let MORE requests into a
+   batch than an unconfident model's real latency cost justifies
+   (admission overshoot, the opposite failure mode, with no benchmark
+   evidence on this device to say which direction is worse).
+   Documented in place rather than "fixed" blindly.
+
+3. force_shrink_model() still used GFP_ATOMIC even though the 2nd
+   review round already moved its only call site into shrink_work_fn()
+   (a workqueue callback -- real process context, can sleep). Fixed by
+   allocating with GFP_KERNEL *before* taking model->update_lock (the
+   allocation doesn't depend on old_params' content), taking the lock
+   only for the memcpy + shrink-math + RCU swap. Reliability
+   improvement only -- a failed shrink under real memory pressure
+   (exactly when this path fires most) previously just silently
+   skipped that attempt.
+
+4. TOCTOU on the 4 sysfs-paired attributes (lm_adapt_good_ratio_pct /
+   bad_ratio_pct, lm_adapt_min_permille / max_permille): each store's
+   cross-check read the paired field with no synchronization against
+   a concurrent write to that same pair. Fixed with a dedicated
+   spinlock (lm_adapt_bounds_lock) wrapping read-check-write as one
+   section, shared across all 4 attributes. Sysfs writes are rare
+   admin actions, never hot-path, so lock hold time is irrelevant.
+
+Validated by full reconstruction: original android14-6.1 adios.c
+extracted from the base v3.2.0 patch, this entire file applied to it
+with `patch -p1`, applies clean with zero fuzz and zero rejects.
+Brace/paren balance confirmed on the result (1155/1155).
+
+STILL NOT submitted upstream. STILL NOT compiled against a real
+android14-6.1 GKI tree or booted on hardware -- that remains the
+single biggest open risk for this whole addon, same as before.
+---
+From: ADIOS Clutch analysis, round 3
+Subject: [PATCH] adios-clutch: A1-A6 round 3 -- header ownership moves to a new clutch-signals addon
+
+DEPENDS ON: clutch-signals addon (provides include/linux/clutch.h
+and CONFIG_CLUTCH_SIGNALS). Apply clutch-signals before this patch.
+
+A1 (blocker, fixed): include/linux/clutch.h is no longer created by
+this patch. A separate "clutch-signals" addon now owns the header,
+kernel/sched/clutch.c, and CONFIG_CLUTCH_SIGNALS -- both this addon
+and the CC governor's own patch just #include it and call into it.
+Removed: the clutch.h new-file diff block, and the CLUTCH_SIGNALS
+Kconfig entry from block/Kconfig.iosched (moves to clutch-signals'
+own Kconfig). Kept: the #include <linux/clutch.h> line in
+block/adios.c, and every clutch_report_io_pressure() call --
+unchanged, since those only ever reference symbols, never define
+them, so removing the header's *creation* here doesn't touch either.
+Confirmed no other hunk in this patch depends on the header existing
+at apply time (nothing here parses/reads clutch.h contents, it's a
+plain #include resolved at compile time by whichever addon actually
+provides the file) -- so ordering between "adios-clutch" and the new
+"clutch-signals" addon in ADDONS= doesn't matter for THIS patch's own
+apply step, only for the eventual kernel build compiling adios.c
+needing clutch.h to already be on disk by then.
+
+A2: documented (no code change) -- two reset_buckets(aggr_buckets)
+entry points is intentional, not inconsistent. See aggr_lock's struct
+comment: sideload_latency_model() resets atomically with one optype's
+own params swap (update_lock outer, aggr_lock inner); reset_buckets_
+locked() is for callers that already loop every optype and want one
+aggr reset after, not per iteration. Lock order is always update_lock
+-> aggr_lock when both are held; reset_buckets_locked()'s own callers
+never hold update_lock, so no ordering conflict.
+
+A3: kept topapp_active as-is, per the analysis' own recommendation.
+
+A4: cut in_flight_stats -- io_pressure is what actually has a consumer
+(the CC bridge) now; in_flight_stats had none, same reasoning as A3's
+earlier cut of confidence.
+
+A5: checked (not assumed) -- update_timer is only timer_setup()
+(registered) in adios_init_sched(); first actually armed by
+timer_reduce() in adios_completed_request(), i.e. after this queue's
+first IO completion, not at init. So clutch_get_io_pressure() reads 0
+(its own default) from boot until first completion + ~100ms. Low
+impact, documented at the report call site rather than changed.
+
+A6: confirmed default_topapp_deadline_bonus already starts at 0 (no
+action needed, as the analysis itself noted) -- documented the
+consequence at the report call site: clutch_get_topapp_active() reads
+false until the self-activation timer fires (~90s after queue
+attach), which is expected bridge behavior, not a bug.
+
+Verified: `patch -p1 --fuzz=0` against a fresh clone of the actual
+build source (github.com/Andrews571/SAGA-Kernel-6.1 @
+android14-6.1-live) -- all FIVE files this version touches
+(Kconfig.iosched, Makefile, adios.c, elevator.c, genhd.c -- no
+clutch.h, per A1) apply with zero rejects, exit code 0.
+---
+From: SAGA-Build / ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.4-SAGA -- merged base (firelzrd v3.2.0
+ android14-6.1 backport) + former adios-tunable LM/sysfs extension +
+ 3rd-round fixes, as ONE self-contained patch
+
+This file REPLACES adios-android14-6.1-v3.2.0.patch in this folder.
+It is the union of three things that used to be layered as separate
+addons (adios -> adios-tunable's 0002), now merged into a single
+patch so "adios" alone gives you the full, fixed v3.3.4 feature set
+with nothing else to apply afterward:
+
+  1. The original firelzrd ADIOS v3.2.0 android14-6.1 backport --
+     unchanged: elevator_get() instead of elevator_find_get() (doesn't
+     exist on 6.1), mq-deadline preserved as fallback default when
+     ADIOS isn't selected, NULL-pointer fix in
+     adios_completed_request() for UFS MCQ, adios_init() moved to
+     subsys_initcall(), and the block/genhd.c boot-time scheduler
+     enforcer (unchanged, still separate from this file's own
+     versioning -- see NOTE below).
+
+  2. The former kernel/addons/adios-tunable 0002 patch's LM/sysfs
+     extension: model confidence gating, auto-scaled batch limits from
+     queue depth, auto-decay detection, device-class heuristic,
+     interactive-read boost, adaptive depth controller, and 15 new
+     runtime-tunable sysfs knobs for the latency model -- including
+     the 6 fixes from its own 1st review round and the 8 (of 17
+     checked) fixes from its 2nd round. Full rationale for every one
+     of those preserved below, unchanged from the original 0002
+     header.
+
+  3. Four additional fixes from a 3rd, independent review pass (this
+     pass), applied only where safe -- see the dedicated section
+     further below for what each one is and, for the one item that
+     was found but deliberately NOT changed, why.
+
+NOTE on block/genhd.c: this file carries ONLY the original v3.2.0
+enforcer (re-asserts "adios" on every disk queue during early boot).
+The separate genhd logging enhancement (extra pr_info/pr_warn in that
+same function, no behavior change) stays OUTSIDE this file on
+purpose -- its hunks were generated against an isolated snippet, not
+absolute file offsets, and forcing them into this same multi-hunk
+patch produces "misordered hunks" (verified: real `patch -p1` run,
+not a guess). It's kept as its own tiny optional patch instead (see
+0003-genhd-enforcer-logging.patch in this same folder, now with one
+real bug fixed too -- a mangled line the old file had, line 61 of the
+old 0003, that silently made it fail to apply at all every single
+time it was tried; adios-tunable.sh's non-fatal fallback for that
+patch masked the failure completely, so as far as could be told this
+logging never actually made it into any real build before now).
+
+====================================================================
+ORIGINAL v3.2.0 HEADER (firelzrd upstream + this backport's own
+notes) FOLLOWS, THEN THE FORMER 0002 HEADER, THEN THE 3RD-ROUND FIXES
+====================================================================
+
+From: chainonyourdoor <chainonyourdoor@gmail.com>
+Date: Wed, 29 Apr 2026 10:32:03 +0700
+Subject: [PATCH] block: add ADIOS I/O scheduler v3.2.0 backport for android14-6.1
+
+Backport of ADIOS (Adaptive Deadline I/O Scheduler) v3.2.0
+by Masahito S <firelzrd@gmail.com> to android14-6.1 (Linux 6.1.x).
+
+Original source: https://github.com/firelzrd/adios
+Original patch:  linux6.12.44-ADIOS-3.2.0.patch
+
+Backport changes for android14-6.1 compatibility:
+- Adapted elevator.c to use elevator_get() instead of elevator_find_get()
+  (elevator_find_get() does not exist in Linux 6.1)
+- Preserved mq-deadline as default scheduler when ADIOS default is not
+  selected (this tree has no SSG scheduler — an earlier version of this
+  backport assumed SSG was the android14-6.1 default, which does not hold
+  for chainonyourdoor/android_kernel_common-6.1; confirmed via direct read
+  of block/elevator.c and grep across block/ turning up no ssg references
+  at all, plus a real `patch --dry-run` failing on exactly this line)
+- Fixed NULL pointer dereference in adios_completed_request() for UFS MCQ
+  (rq->elv.priv[0] can be NULL for requests not going through elevator insert)
+- Verified all blk-mq APIs are fully compatible with Linux 6.1.x
+
+ADIOS overview:
+ADIOS replaces the traditional deadline-based I/O scheduling with an
+adaptive model that learns from historical I/O completion times. It
+maintains 4 dispatch tiers (emergency, persistence, sync, async) and
+dynamically adjusts per-request deadlines based on observed latency,
+resulting in lower and more consistent I/O latency under mixed workloads.
+
+Changes:
+- block/adios.c        : new file — full ADIOS scheduler implementation
+  including adaptive latency model, 4-tier priority dispatch, per-request
+  deadline tracking, and sysfs tunables
+- block/Kconfig.iosched : add MQ_IOSCHED_ADIOS and MQ_IOSCHED_DEFAULT_ADIOS
+  config entries
+- block/Makefile        : add adios.o build target
+- block/elevator.c      : hook ADIOS as optional default scheduler via
+  CONFIG_MQ_IOSCHED_DEFAULT_ADIOS, adapted for 6.1 elevator_get() API
+
+Signed-off-by: chainonyourdoor <chainonyourdoor@gmail.com>
+---
+From: ADIOS scheduler analysis
+Subject: [PATCH] adios: v3.3.3-SAGA -- fixes from second ChatGPT review
+ round (verified against source; only real items applied)
+
+Applies ON TOP of adios-android14-6.1-v3.2.0.patch. Same base as
+v3.3.2-SAGA. User ran a second ChatGPT review pass against v3.3.2 and
+asked for each of its 17 points to be checked against real code before
+applying anything -- not accepted on faith. 6 confirmed real and fixed
+here; the rest were judged already-resolved, advisory/non-actionable,
+or not worth the added risk given no contradicting evidence. See notes
+below for the full breakdown.
+
+CONFIRMED AND FIXED:
+
+1. Residual race in adapt_depth_controller() (the FIRST review round's
+   fix, cmpxchg-guarded evaluate+reset, was only partial): the
+   atomic_inc(window_good/bad) happens BEFORE the cmpxchg guard, so a
+   writer on another CPU could still land a sample in window_good/bad
+   in the instant between another CPU's atomic_xchg-reset of those
+   counters and its atomic_set of window_total -- corrupting one
+   window's count without double-applying an adjustment (the narrower
+   bug the first fix left behind). Replaced with a double-buffered
+   design: window_good/bad/total each became [2][ADIOS_OPTYPES], with
+   a window_buf_idx[ADIOS_OPTYPES] selecting which buffer writers
+   currently use. The evaluator atomically swaps the index (cmpxchg)
+   BEFORE reading/resetting the old buffer, so new writers stop
+   landing there from that instant. One narrow residual race remains
+   (a writer that already read the old index microseconds before the
+   swap can still land one sample there) -- accepted as a
+   single-sample-per-window skew at most, the standard tradeoff for
+   lock-free double-buffered kernel stats short of a full seqlock.
+
+2. Changing lm_block_size_threshold at runtime previously left
+   small_count/large_count history classified under the OLD
+   threshold, silently corrupting confidence-gate and prediction
+   meaning under the new one. lm_block_size_threshold now has its own
+   dedicated setter (split out of the shared LM_CONST_ATTR_RW macro,
+   which still generates the other 3 LM constants -- outlier_percentile/
+   interval_threshold_ms/samples_threshold don't have this problem,
+   since they only affect how FUTURE recalculations behave, not which
+   bucket past samples already landed in) that resets each optype's
+   model via the same sideload_latency_model(model, 0, 0) the native
+   reset_lat_model sysfs already uses, but only when the value
+   actually changes.
+
+3. force_shrink_model() moved from the timer callback (softirq
+   context) to a proper workqueue (shrink_work, real process context).
+   Kept GFP_ATOMIC deliberately rather than switching to GFP_KERNEL --
+   that would additionally require restructuring force_shrink_model to
+   allocate before taking model->update_lock (a spinlock can't be held
+   across a sleeping allocation), a bigger locking change for marginal
+   benefit given a failed GFP_ATOMIC shrink already degrades
+   gracefully (just skips that attempt). upstream ADIOS's own
+   latency_model_update() (unrelated to this patch series) still runs
+   from the timer as before -- not touched, not flagged as a problem,
+   pre-existing upstream design.
+
+4. last_adjust_jiffies (plain unsigned long, read/written across
+   completion-path calls to adapt_depth_controller) now uses READ_ONCE/
+   WRITE_ONCE consistently -- was missed in the previous revision's
+   READ_ONCE/WRITE_ONCE pass, which only covered the sysfs-tunable
+   fields.
+
+5. lm_adapt_cooldown_ms now READ_ONCE'd at its use site in
+   adapt_depth_controller (the setter already used WRITE_ONCE via the
+   shared macro from the previous revision; the read site was missed).
+
+6. lm_confidence_samples minimum raised 0 -> 8. At 0, model_is_confident()'s
+   check ("count >= 0") was always true, silently disabling the
+   confidence gate entirely. Flagged in BOTH review rounds; missed in
+   the first round's fix pass.
+
+ALREADY RESOLVED (review's point still listed it, but the previous
+revision's fix already covers it): "confidence should be per-bucket,
+not just small_count" -- model_is_confident() already takes block_size
+and checks small_count vs large_count depending on which bucket the
+request actually belongs to, exactly as requested. No new change
+needed.
+
+ADVISORY / NOT ACTIONABLE AS CODE CHANGES: interactive-boost false-
+positive tuning (idle threshold, boost duration, per-TGID frequency
+limits) is genuine tuning guidance, not a bug -- no default change
+without real benchmark evidence pointing at a specific number.
+Eviction policy for the 32-slot table (oldest-first) is already what's
+implemented; the review agrees it should stay at 32 without further
+evidence for more. read_priority=-3, batch defaults, and
+global_latency_window heuristic status quo are all unchanged --
+lowering any of them now would contradict this session's actual
+5-round benchmark data without new evidence prompting it.
+
+STILL DEFERRED (unchanged from previous revision, still low
+priority): struct reorganization for maintainability (zero behavioral
+effect). "Require 2 consistent windows before adjusting" (an
+additional layer on top of the cooldown already added) -- reasonable
+but the cooldown mechanism already added last revision covers the
+same practical goal (rate-limiting oscillation); adding a second,
+overlapping mechanism without evidence the first is insufficient adds
+complexity for unproven benefit. nr_requests-as-queue-depth-proxy
+wording: still heuristic and documented as such; no concretely better
+alternative signal was identified as reliably accessible in this exact
+kernel backport.
+
+NOT submitted upstream. NOT compiled/tested against a real
+android14-6.1 tree yet -- verified only for brace/paren balance,
+correct include (workqueue.h added), and correct forward-reference
+ordering (force_shrink_model is defined before shrink_work_fn uses
+it).
+
+====================================================================
+v3.3.4-SAGA -- 3rd review pass (independent, applied 2026-09-07)
+====================================================================
+This file now supersedes the old 0002-adios-tunable-lm-and-
+persist-android.patch outright -- drop it in and replace that file,
+nothing else to layer on top for these fixes. Full re-audit of every
+line the tunable patch touches, specifically hunting for what the
+first two rounds above missed. 4 items found; all 4 fixed here, each
+scoped as narrowly as the actual bug/gap allows -- no speculative
+rewrites of code that already worked.
+
+CONFIRMED AND FIXED:
+
+1. Type/format-string mismatch on lm_interactive_boost_ns. The field
+   is u64, but was declared via SYSFS_INT_DECL -- built for int/u32
+   fields (kstrtoint 32-bit parse on store, sprintf("%d", ...) on
+   show). sprintf("%d", <u64 arg>) only consumes 4 of the field's 8
+   bytes through varargs: undefined behavior, triggers -Wformat, can
+   be promoted to a hard build failure under -Werror=format on strict
+   GKI toolchains. All 14 other new sysfs attributes were checked
+   against their actual struct field type; only this one was
+   mismatched. Fixed by switching to SYSFS_ULL_DECL, already used for
+   the other two u64-backed attributes (global_latency_window,
+   compliance_flags) -- kstrtoul + "%llu", no mismatch.
+
+2. The confidence gate (1st review round, above) only covered
+   add_to_dl_tree()'s own deadline sum for the ASYNC tier. It never
+   covered fill_batch_queues()'s read-vs-write dispatch bias update --
+   an unconfident model's near-arbitrary pred_lat could still swing
+   which of read/write dispatches first, every batch. Fixed by reusing
+   pred_lat's OWN existing cold-start convention (pred_lat==0 ->
+   alternate by `sign` only) for "not confident yet" too, via a local
+   substitution scoped to just that block. rd->pred_lat ITSELF is
+   untouched everywhere else: latency_model_input()'s bucket
+   classification depends on it being real (large-bucket samples are
+   dropped entirely when pred_lat==0 -- zeroing it more broadly risks
+   stalling large-request training permanently), and the admission-
+   window budget check in the same function is deliberately left
+   UNGATED -- substituting 0 there would let MORE requests into a
+   batch than an unconfident model's real latency cost justifies
+   (admission overshoot, the opposite failure mode, with no benchmark
+   evidence on this device to say which direction is worse).
+   Documented in place rather than "fixed" blindly.
+
+3. force_shrink_model() still used GFP_ATOMIC even though the 2nd
+   review round already moved its only call site into shrink_work_fn()
+   (a workqueue callback -- real process context, can sleep). Fixed by
+   allocating with GFP_KERNEL *before* taking model->update_lock (the
+   allocation doesn't depend on old_params' content), taking the lock
+   only for the memcpy + shrink-math + RCU swap. Reliability
+   improvement only -- a failed shrink under real memory pressure
+   (exactly when this path fires most) previously just silently
+   skipped that attempt.
+
+4. TOCTOU on the 4 sysfs-paired attributes (lm_adapt_good_ratio_pct /
+   bad_ratio_pct, lm_adapt_min_permille / max_permille): each store's
+   cross-check read the paired field with no synchronization against
+   a concurrent write to that same pair. Fixed with a dedicated
+   spinlock (lm_adapt_bounds_lock) wrapping read-check-write as one
+   section, shared across all 4 attributes. Sysfs writes are rare
+   admin actions, never hot-path, so lock hold time is irrelevant.
+
+Validated by full reconstruction: original android14-6.1 adios.c
+extracted from the base v3.2.0 patch, this entire file applied to it
+with `patch -p1`, applies clean with zero fuzz and zero rejects.
+Brace/paren balance confirmed on the result (1155/1155).
+
+STILL NOT submitted upstream. STILL NOT compiled against a real
+android14-6.1 GKI tree or booted on hardware -- that remains the
+single biggest open risk for this whole addon, same as before.
+---
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
 index 08b8af92f..ee5d322a0 100644
 --- a/block/Kconfig.iosched
 +++ b/block/Kconfig.iosched
-@@ -16,6 +16,41 @@ config MQ_IOSCHED_KYBER
- 	  synchronous writes, it will self-tune queue depths to achieve that
- 	  goal.
+@@ -35,6 +35,40 @@
+ 	  false when either symbol is undefined, so this addon is inert
+ 	  in a build that has only one of them.
  
-+
 +config MQ_IOSCHED_ADIOS
 +	tristate "Adaptive Deadline I/O scheduler"
 +	default m
@@ -947,19 +1686,20 @@ diff --git a/block/Makefile b/block/Makefile
 index 10e7e6ebd..40ff9a98d 100644
 --- a/block/Makefile
 +++ b/block/Makefile
-@@ -23,5 +23,6 @@ obj-$(CONFIG_BLK_CGROUP_IOLATENCY)	+= blk-iolatency.o
+@@ -23,6 +23,7 @@
  obj-$(CONFIG_BLK_CGROUP_IOCOST)	+= blk-iocost.o
  obj-$(CONFIG_MQ_IOSCHED_DEADLINE)	+= mq-deadline.o
  obj-$(CONFIG_MQ_IOSCHED_KYBER)	+= kyber-iosched.o
 +obj-$(CONFIG_MQ_IOSCHED_ADIOS)	+= adios.o
  bfq-y				:= bfq-iosched.o bfq-wf2q.o bfq-cgroup.o
  obj-$(CONFIG_IOSCHED_BFQ)	+= bfq.o
+ 
 diff --git a/block/adios.c b/block/adios.c
 new file mode 100644
 index 000000000..7a1c4d5e2
 --- /dev/null
 +++ b/block/adios.c
-@@ -0,0 +1,3342 @@
+@@ -0,0 +1,3443 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Adaptive Deadline I/O Scheduler (ADIOS)
@@ -983,6 +1723,7 @@ index 000000000..7a1c4d5e2
 +#include <linux/list_sort.h>
 +#include <linux/rcupdate.h>
 +#include <linux/ioprio.h>
++#include <linux/clutch.h>
 +#include <linux/smp.h>
 +#include <linux/sched.h>
 +#include <linux/workqueue.h>
@@ -1478,6 +2219,29 @@ index 000000000..7a1c4d5e2
 +	u32 batch_count[ADIOS_BQ_PAGES][ADIOS_OPTYPES];
 +	u8  bq_batch_order[ADIOS_BQ_PAGES];
 +	spinlock_t bq_lock;
++	/*
++	 * CLUTCH FIX (A1): latency_model_update() (timer, per-optype) and
++	 * sideload_latency_model() (sysfs, per-optype) both touch the
++	 * single SHARED ad->aggr_buckets, but each only ever held its own
++	 * optype's latency_model.update_lock while doing so -- different
++	 * locks protecting the same memory is no protection at all. Two
++	 * optypes updating concurrently could lose a sample in the
++	 * aggregation window. Not hot path either way (timer tick, sysfs
++	 * write), so a dedicated lock here costs nothing that matters.
++	 *
++	 * A2: two entry points reset aggr_buckets, by design, not
++	 * inconsistency -- sideload_latency_model(model, ..., aggr_buckets,
++	 * aggr_lock) resets it INSIDE model->update_lock (then aggr_lock,
++	 * nested) when the reset must be atomic with that specific
++	 * optype's own params swap. reset_buckets_locked(ad) (aggr_lock
++	 * only, no update_lock) is for callers that already reset every
++	 * optype's params in a loop and just want one aggr reset after,
++	 * not one per iteration -- see adios_reset_lat_model_store()'s two
++	 * loops. Lock order is always update_lock -> aggr_lock on every
++	 * path that takes both; reset_buckets_locked()'s callers never
++	 * hold update_lock at all, so no ordering conflict either way.
++	 */
++	spinlock_t aggr_lock;
 +
 +	struct lm_buckets *aggr_buckets;
 +
@@ -1709,6 +2473,20 @@ index 000000000..7a1c4d5e2
 +static void reset_buckets(struct lm_buckets *buckets)
 +{ memset(buckets, 0, sizeof(*buckets)); }
 +
++// CLUTCH (A1/A2): reset ad->aggr_buckets under its own dedicated lock,
++// not whichever optype's model->update_lock happened to be held at the
++// call site -- see aggr_lock's own struct comment for why that
++// mattered, and adios_reset_lat_model_store() for why this is a
++// single post-loop call instead of once per optype.
++static void reset_buckets_locked(struct adios_data *ad)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&ad->aggr_lock, flags);
++	reset_buckets(ad->aggr_buckets);
++	spin_unlock_irqrestore(&ad->aggr_lock, flags);
++}
++
 +/*
 + * REVIEW FIX (per-CPU reset race): latency_model_input() -- the hot-path
 + * writer -- only ever protects its own per-CPU bucket with
@@ -1764,6 +2542,13 @@ index 000000000..7a1c4d5e2
 +		spin_unlock_irqrestore(&model->update_lock, flags);
 +		return;
 +	}
++
++	// CLUTCH FIX (A1): dedicated aggr_lock around the whole span that
++	// touches ad->aggr_buckets, instead of relying on this optype's
++	// own model->update_lock -- see aggr_lock's struct comment. Timer
++	// context, not hot path, so holding a lock for this whole
++	// aggregate-then-maybe-process span costs nothing that matters.
++	spin_lock(&ad->aggr_lock);
 +
 +	// Aggregate deltas from all CPUs using snapshot-delta method.
 +	// Per-CPU counters increase monotonically; we compute delta = current - snapshot.
@@ -1826,6 +2611,8 @@ index 000000000..7a1c4d5e2
 +			aggr->large_bucket, large_weight, !new_params->slope);
 +		memset(&aggr->large_bucket[0], 0, sizeof(aggr->large_bucket));
 +	}
++
++	spin_unlock(&ad->aggr_lock);
 +
 +	// Update the base parameter if small bucket was processed
 +	if (small_processed && likely(new_params->small_count))
@@ -2630,6 +3417,16 @@ index 000000000..7a1c4d5e2
 +	 * could never fail here at all) instead of a mempool -- both are
 +	 * real, larger pieces of work, deliberately out of scope for this
 +	 * pass.
++	 *
++	 * TECH DEBT (A5, ADIOS Clutch analysis): get_rq_data() is a raw
++	 * pointer return, ~8 call sites dereference without a NULL check.
++	 * Full fix requires pre-allocating per-tag storage (bounded by
++	 * q->nr_requests, can't fail) or auditing all ~8 sites -- not done
++	 * in this pass. Also checked (not just assumed): the pool is sized
++	 * mempool_create_slab_pool(q->nr_requests, ...) and every rd is
++	 * freed 1:1 in .finish_request before its tag can be reused, so
++	 * exhaustion is structurally unreachable in normal operation --
++	 * this NULL check is defense-in-depth, not closing a live gap.
 +	 */
 +	rd = mempool_alloc(ad->rq_data_pool, GFP_ATOMIC);
 +	if (unlikely(!rd)) {
@@ -3010,6 +3807,49 @@ index 000000000..7a1c4d5e2
 +	}
 +	if (need_shrink)
 +		schedule_work(&ad->shrink_work);
++
++	/*
++	 * CLUTCH bridge: report to the CC governor (no-op, compiles to
++	 * nothing, if CONFIG_CLUTCH_SIGNALS=n -- e.g. before the CC
++	 * governor's own Kconfig symbol exists). Same io_pressure formula
++	 * as the sysfs io_pressure attribute, just pushed instead of
++	 * pulled. Deliberately the ONLY call site for this -- never called
++	 * from the hot path (adios_completed_request, dispatch_from_bq,
++	 * fill_batch_queues). This timer runs in softirq context, but
++	 * clutch_report_io_pressure() is a plain atomic_set internally --
++	 * doesn't sleep, doesn't block, safe from here. If this ADIOS
++	 * instance isn't the "primary" disk (multiple queues running
++	 * ADIOS simultaneously), the last one to report wins -- acceptable
++	 * for v1 since most devices only ever run ADIOS on /data anyway;
++	 * an is_primary flag from the genhd.c enforcer would refine this
++	 * later, not implemented now.
++	 *
++	 * A5: update_timer is only timer_setup() (registered) in
++	 * adios_init_sched() -- it's first actually armed by
++	 * timer_reduce() in adios_completed_request(), i.e. after the
++	 * FIRST completion, not at init. So clutch_get_io_pressure()
++	 * reads 0 (its own default) from boot until this scheduler's
++	 * first IO completes plus ~100ms. Low impact (an initial 0 is a
++	 * reasonable default anyway), documented rather than changed.
++	 *
++	 * A6: clutch_get_topapp_active() reads false until
++	 * topapp_deadline_bonus's own self-activation timer fires
++	 * (~90s after queue attach, see that timer's own comment) --
++	 * expected, not a bridge bug.
++	 */
++	{
++		union adios_in_flight_rqs ifr;
++		u64 window, pressure;
++		bool topapp;
++
++		ifr.scalar = atomic64_read(&ad->in_flight_rqs.atomic);
++		window = READ_ONCE(ad->global_latency_window);
++		pressure = window ? div_u64(ifr.total_pred_lat * 100, window) : 0;
++		if (pressure > 100)
++			pressure = 100;
++		topapp = READ_ONCE(ad->topapp_deadline_bonus) > 0;
++		clutch_report_io_pressure((u32)pressure, topapp);
++	}
 +}
 +
 +static void topapp_activate_timer_callback(struct timer_list *t) {
@@ -3310,6 +4150,18 @@ index 000000000..7a1c4d5e2
 +	// regression observed empirically on UFS 2.2 today -- with this,
 +	// that specific misconfiguration can't happen from the default
 +	// path again (manual sysfs override still can, deliberately).
++	//
++	// PENDENCIA (A4, ADIOS Clutch analysis): baseline_qd=32 makes a
++	// real QD32 device's scale_permille compute to exactly 1000 (1.0x)
++	// -- batch_limit[WRITE] stays at the full default of 128, i.e.
++	// completely unscaled for the exact device the comment above says
++	// this fixes. Either baseline_qd is wrong (should reflect whatever
++	// depth 128 was actually validated against, so a real QD32 device
++	// scales down from it) or the default itself needs revisiting.
++	// Not fixed here: no benchmark data exists to justify a specific
++	// replacement number, and guessing one would trade a documented
++	// gap for an undocumented wrong "fix". Needs real calibration data
++	// before changing.
 +	{
 +		const u32 baseline_qd = 32;
 +		// CHATGPT-REVIEW: cast to u64 before multiplying -- q->nr_requests
@@ -3425,6 +4277,7 @@ index 000000000..7a1c4d5e2
 +	spin_lock_init(&ad->lock);
 +	spin_lock_init(&ad->pq_lock);
 +	spin_lock_init(&ad->bq_lock);
++	spin_lock_init(&ad->aggr_lock);
 +
 +	timer_setup(&ad->update_timer, update_timer_callback, 0);
 +
@@ -3521,7 +4374,8 @@ index 000000000..7a1c4d5e2
 +}
 +
 +static void sideload_latency_model(
-+		struct latency_model *model, u64 base, u64 slope) {
++		struct latency_model *model, u64 base, u64 slope,
++		struct lm_buckets *aggr_buckets, spinlock_t *aggr_lock) {
 +	struct latency_model_params *old_params, *new_params;
 +	unsigned long flags;
 +
@@ -3573,8 +4427,15 @@ index 000000000..7a1c4d5e2
 +	new_params->large_count = 1;
 +
 +	rcu_assign_pointer(model->params, new_params);
-+	if (aggr_buckets)
++	if (aggr_buckets) {
++		/* CLUTCH FIX (A1): dedicated aggr_lock, not model->update_lock
++		 * -- see struct adios_data's own comment on aggr_lock for why. */
++		unsigned long aflags;
++
++		spin_lock_irqsave(aggr_lock, aflags);
 +		reset_buckets(aggr_buckets);
++		spin_unlock_irqrestore(aggr_lock, aflags);
++	}
 +	spin_unlock_irqrestore(&model->update_lock, flags);
 +
 +	kfree_rcu(old_params, rcu);
@@ -3607,7 +4468,7 @@ index 000000000..7a1c4d5e2
 +	ret = sscanf(page, "%llu %llu", &base, &slope); \
 +	if (ret != 2) \
 +		return -EINVAL; \
-+	sideload_latency_model(model, base, slope, ad->aggr_buckets); \
++	sideload_latency_model(model, base, slope, ad->aggr_buckets, &ad->aggr_lock); \
 +	return count; \
 +} \
 +static ssize_t adios_lat_target_##name##_show( \
@@ -3623,7 +4484,7 @@ index 000000000..7a1c4d5e2
 +	ret = kstrtoul(page, 10, &nsec); \
 +	if (ret) \
 +		return ret; \
-+	sideload_latency_model(&ad->latency_model[optype], 0, 0, ad->aggr_buckets); \
++	sideload_latency_model(&ad->latency_model[optype], 0, 0, ad->aggr_buckets, &ad->aggr_lock); \
 +	WRITE_ONCE(ad->latency_target[optype], nsec); \
 +	return count; \
 +} \
@@ -3662,45 +4523,8 @@ index 000000000..7a1c4d5e2
 + * locking, no new O(n) tree walks, nothing added to the hot path.
 + */
 +
-+// In-flight request count and total predicted latency (ns), the same
-+// signal fill_batch_queues()/dispatch_from_bq() already use internally
-+// to decide batch-queue refill timing.
-+static ssize_t adios_in_flight_stats_show(
-+		struct elevator_queue *e, char *page) {
-+	struct adios_data *ad = e->elevator_data;
-+	union adios_in_flight_rqs ifr;
-+
-+	ifr.scalar = atomic64_read(&ad->in_flight_rqs.atomic);
-+	return sprintf(page, "count: %llu\ntotal_pred_lat_ns: %llu\n",
-+		ifr.count, ifr.total_pred_lat);
-+}
-+
-+// Whether each optype's latency model has enough samples in the size
-+// regime (small/large, split at lm_block_size_threshold) to be trusted
-+// -- same threshold model_is_confident() checks against, exposed per
-+// optype/regime instead of for one specific request's block_size.
-+static ssize_t adios_confidence_show(
-+		struct elevator_queue *e, char *page) {
-+	struct adios_data *ad = e->elevator_data;
-+	ssize_t len = 0;
-+	u64 needed = READ_ONCE(ad->lm_confidence_samples);
-+
-+	for (u8 i = 0; i < ADIOS_OPTYPES; i++) {
-+		struct latency_model_params *params;
-+		u64 small, large;
-+
-+		rcu_read_lock();
-+		params = rcu_dereference(ad->latency_model[i].params);
-+		small = params->small_count;
-+		large = params->large_count;
-+		rcu_read_unlock();
-+
-+		len += sprintf(page + len,
-+			"optype %u: small_confident=%d large_confident=%d\n",
-+			i, small >= needed, large >= needed);
-+	}
-+	return len;
-+}
++// A4: in_flight_stats was cut -- io_pressure (below) is the CC-
++// governor-facing signal now, in_flight_stats had no consumer.
 +
 +// Aggregate 0-100 I/O pressure score: how much of the device's own
 +// known latency budget (global_latency_window) is currently
@@ -3724,6 +4548,17 @@ index 000000000..7a1c4d5e2
 +		pressure = 100;
 +
 +	return sprintf(page, "%llu\n", pressure);
++}
++
++// A7: whether the top-app IO deadline bonus is currently live -- same
++// boolean the CLUTCH bridge reports to the CC governor via
++// clutch_get_topapp_active(), exposed here too for sysfs debugging
++// without needing CONFIG_CLUTCH_SIGNALS enabled.
++static ssize_t adios_topapp_active_show(
++		struct elevator_queue *e, char *page) {
++	struct adios_data *ad = e->elevator_data;
++
++	return sprintf(page, "%d\n", READ_ONCE(ad->topapp_deadline_bonus) > 0);
 +}
 +
 +// Show the maximum batch size actually achieved for each operation type
@@ -3963,8 +4798,14 @@ index 000000000..7a1c4d5e2
 +
 +		for (u8 i = 0; i < ADIOS_OPTYPES; i++) {
 +			model = &ad->latency_model[i];
-+			sideload_latency_model(model, 0, 0, ad->aggr_buckets);
++			/* CLUTCH FIX (A2): was resetting aggr_buckets on every
++			 * one of these 4 iterations (and mode 2 below had the
++			 * same redundancy) -- same shared memory, reset 4 times
++			 * in a row for no benefit. Single reset after the loop
++			 * instead. */
++			sideload_latency_model(model, 0, 0, NULL, NULL);
 +		}
++		reset_buckets_locked(ad);
 +	} else {
 +		// Mode 2: Load initial values for all latency models.
 +		u64 params[3][2]; /* 0:base, 1:slope for R, W, D */
@@ -3980,8 +4821,9 @@ index 000000000..7a1c4d5e2
 +		for (u8 i = ADIOS_READ; i <= ADIOS_DISCARD; i++) {
 +			model = &ad->latency_model[i];
 +			sideload_latency_model(model, params[i][0], params[i][1],
-+				ad->aggr_buckets);
++				NULL, NULL);
 +		}
++		reset_buckets_locked(ad);
 +	}
 +
 +	return count;
@@ -4093,7 +4935,7 @@ index 000000000..7a1c4d5e2
 +		spin_unlock_irqrestore(&model->update_lock, flags);
 +
 +		if (changed)
-+			sideload_latency_model(model, 0, 0, ad->aggr_buckets);
++			sideload_latency_model(model, 0, 0, ad->aggr_buckets, &ad->aggr_lock);
 +	}
 +	return count;
 +}
@@ -4131,9 +4973,8 @@ index 000000000..7a1c4d5e2
 +// Define sysfs attributes for ADIOS scheduler
 +static struct elv_fs_entry adios_sched_attrs[] = {
 +	AD_ATTR_RO(batch_actual_max),
-+	AD_ATTR_RO(in_flight_stats),
-+	AD_ATTR_RO(confidence),
 +	AD_ATTR_RO(io_pressure),
++	AD_ATTR_RO(topapp_active),
 +	AD_ATTR_RW(bq_refill_below_ratio),
 +	AD_ATTR_RW(global_latency_window),
 +	AD_ATTR_RW(lat_model_latency_limit),

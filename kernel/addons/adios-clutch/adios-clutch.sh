@@ -46,7 +46,9 @@ elif patch -p1 --fuzz=0 --dry-run --forward -d "$KERNEL_SRC" < "$PATCH" > /dev/n
         || error "ADIOS-CLUTCH: patch apply failed!"
     log "ADIOS-CLUTCH: patch applied ✅"
 else
-    error "ADIOS-CLUTCH: patch does not apply cleanly at fuzz=0 -- if you also have the 'adios' addon's file present, they conflict. Make sure only ONE of 'adios' / 'adios-clutch' is in ADDONS=."
+    log "ADIOS-CLUTCH: dry-run failed — re-running for real (not suppressed) so the actual per-hunk diagnostic below shows what's wrong, instead of guessing:"
+    patch -p1 --fuzz=0 --forward -d "$KERNEL_SRC" < "$PATCH"
+    error "ADIOS-CLUTCH: patch does not apply cleanly at fuzz=0 — see the per-file/per-hunk output immediately above for exactly which file and which hunk failed. A leftover 'adios' folder in kernel/addons/ that ADDONS= doesn't reference is NOT the cause on its own — the log above is definitive, don't guess past it."
 fi
 
 DEFCONFIG_FILE="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
