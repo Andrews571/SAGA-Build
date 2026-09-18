@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # ======================================================
-# ⚡ ADDON — BORE-WARP (SAGA)
+# ⚡ ADDON — BORE-WARP (SAGA) — Cerebral Clutch component
 # ======================================================
 # Extensão do BORE (kernel/addons/bore/): adiciona um mecanismo de
 # preempção "hard" e limitada, inspirado (não portado -- reescrito do
@@ -24,40 +24,49 @@
 # -- este patch só ativa código dentro de blocos `#ifdef
 # CONFIG_SCHED_BORE`. Sem o BORE aplicado, o patch ainda aplica limpo,
 # mas o novo código vira no-op (não compila nada, os #ifdef ficam
-# falsos). Ordem recomendada no build: bore → bore-warp → reflex (essa
-# foi a ordem testada; as 3 aplicam juntas sem conflito, tocam arquivos
-# diferentes exceto onde já é esperado).
+# falsos). Ordem recomendada no build: bore → bore-warp → CC Governor
+# (essa foi a ordem testada; aplicam juntas sem conflito).
 #
-# DESLIGADO POR PADRÃO. Isso mexe no caminho mais quente do scheduler
-# (toda decisão de preempção em wakeup) -- não faz sentido herdar isso
-# silenciosamente só por ativar CONFIG_SCHED_BORE. Pra testar, ligar em
-# runtime:
-#   echo 1 > /proc/sys/kernel/sched_bore_warp_enabled
-# E ajustar se quiser:
+# LIGADO POR PADRÃO (SAGA-Build). Isso é parte do sistema Cerebral
+# Clutch: o bore-warp fornece o sinal bore_warp_fired que o CC Governor
+# (kernel/addons/cc-governor/cc_governor.c) consome em
+# cc_bore_warp_check() como um dos seus gatilhos de confirmação -- o
+# sistema completo (ADIOS Clutch → clutch-signals → CC Governor) só faz
+# sentido de ponta a ponta com ele ligado. Era desligado por padrão
+# quando este addon existia isolado (mexe no caminho mais quente do
+# scheduler, toda decisão de preempção em wakeup); com o CC Governor
+# consumindo o sinal, o trade-off foi reavaliado. Desligar por
+# dispositivo se causar problema:
+#   echo 0 > /proc/sys/kernel/sched_bore_warp_enabled
+# Outros ajustes:
 #   /proc/sys/kernel/sched_bore_warp_max_score   (default 2,  faixa 0-39)
 #   /proc/sys/kernel/sched_bore_warp_us          (default 2000us, faixa 0-50000)
 #
-# NUNCA rodou em hardware. Validado só estruturalmente (aplica limpo
-# em conjunto com bore+reflex, chaves/parênteses batem, sem colisão de
-# símbolo). Testar em bancada com sched_bore_warp_enabled=0 primeiro
-# (comportamento idêntico a sem este addon) antes de ligar de vez.
+# Ligado por padrão nesta integração. Antes de considerar estável, medir
+# stat_bore_warp_confirmed em cc_governor sob uso real: se crescer em
+# ordem de centenas por segundo durante uso normal, aumentar
+# sched_bore_warp_us (hoje 2000us) para 4000-5000us e re-medir.
 
 PATCH_FILE="$(dirname "${BASH_SOURCE[0]}")/bore-warp-android14-6.1.patch"
 
 log "⚡ Applying BORE-WARP patch..."
 cd "${KERNEL_SRC}"
 
-if patch -p1 --fuzz=3 --dry-run --reverse < "$PATCH_FILE" > /dev/null 2>&1; then
+# --fuzz=0: política do projeto após um incidente real no ADIOS onde
+# --fuzz=3 aceitou silenciosamente um hunk com contexto deslocado, e o
+# erro só apareceu no boot. Um patch que só aplica com fuzz>0 deve ser
+# regenerado contra a árvore atual, não forçado com tolerância.
+if patch -p1 --fuzz=0 --dry-run --reverse < "$PATCH_FILE" > /dev/null 2>&1; then
     log "BORE-WARP: already applied, skipping."
-elif patch -p1 --fuzz=3 --dry-run --forward < "$PATCH_FILE" > /dev/null 2>&1; then
-    patch -p1 --fuzz=3 --forward < "$PATCH_FILE" || error "BORE-WARP: apply failed!"
+elif patch -p1 --fuzz=0 --dry-run --forward < "$PATCH_FILE" > /dev/null 2>&1; then
+    patch -p1 --fuzz=0 --forward < "$PATCH_FILE" || error "BORE-WARP: apply failed!"
     log "BORE-WARP: applied ✅"
 else
-    error "BORE-WARP: does not apply cleanly on top of BORE — verified clean against android14-6.1-live + bore-android14-6.1-v6.8.0.patch on $(date +%Y-%m-%d), needs re-verification!"
+    error "BORE-WARP: does not apply cleanly on top of BORE — verified clean (--fuzz=0) against android14-6.1-live + bore-android14-6.1-v6.8.0.patch on $(date +%Y-%m-%d), needs re-verification!"
 fi
 
 cd "${ROOT_DIR}"
 
 export BORE_WARP_ENABLED=true
 
-log "BORE-WARP integrated ✅ (off by default via sysctl — sched_bore_warp_enabled=0 — enable manually to test; untested on real hardware)"
+log "BORE-WARP integrated ✅ (enabled by default — Cerebral Clutch component; monitor cc_governor's stat_bore_warp_confirmed under real use)"

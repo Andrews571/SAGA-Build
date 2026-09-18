@@ -1,8 +1,8 @@
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 1830a2e46..38903993a 100644
+index 1830a2e46..7c0319199 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -170,6 +170,36 @@ u8   __read_mostly sched_bore_topapp_discount  = 6;
+@@ -170,6 +170,49 @@ u8   __read_mostly sched_bore_topapp_discount  = 6;
  u8   __read_mostly sched_bore_topapp_smooth_boost = 2;
  unsigned int __read_mostly sched_burst_penalty_scale   = 1536;
  unsigned int __read_mostly sched_burst_cache_lifetime  = 75000000;
@@ -19,13 +19,26 @@ index 1830a2e46..38903993a 100644
 + * outright, bounding worst-case wakeup latency without starving
 + * everything else. See bore_warp_preempt() below for the mechanism.
 + *
-+ * Off by default (0) -- deliberately not enabled out of the box. This
-+ * touches the single hottest path in the scheduler (every wakeup
-+ * preemption decision); it should be turned on and evaluated on its own,
-+ * after the rest of the burst-penalty tuning is already trusted, not
-+ * silently inherited by every device that enables CONFIG_SCHED_BORE.
++ * Enabled by default (1) in SAGA-Build, as part of the Cerebral Clutch
++ * system: this addon provides the bore_warp_fired hint that
++ * cc_governor.c consumes in cc_bore_warp_check() (see the comment on
++ * that field in sched.h). Disable per-device via sysctl
++ * (echo 0 > /proc/sys/kernel/sched_bore_warp_enabled) if it causes
++ * problems on specific hardware.
++ *
++ * Was originally off by default when this addon existed in isolation --
++ * it touches the hottest path of the scheduler, and the design principle
++ * was "don't inherit it silently just because CONFIG_SCHED_BORE is on".
++ * That changed when the CC Governor was added and made bore-warp one of
++ * its confirmation signals; the tradeoff was re-evaluated and the
++ * benefits now justify the default-on. The sysctl knob remains for
++ * per-device override.
++ *
++ * Monitor via cc_governor's stat_bore_warp_confirmed sysfs attribute:
++ * if it climbs at hundreds per second during normal use, raise
++ * sched_bore_warp_us before suspecting the score check.
 + */
-+u8   __read_mostly sched_bore_warp_enabled     = 0;
++u8   __read_mostly sched_bore_warp_enabled     = 1;
 +/* Max BORE score (0-39) the newly woken task may have to qualify as
 + * "fresh" -- same conservative default as Reflex/PCCG's
 + * bore_boost_max_score, kept independently tunable since the two
@@ -39,7 +52,7 @@ index 1830a2e46..38903993a 100644
  #endif
  
  int sched_thermal_decay_shift;
-@@ -7963,6 +7993,65 @@ static void set_skip_buddy(struct sched_entity *se)
+@@ -7963,6 +8006,65 @@ static void set_skip_buddy(struct sched_entity *se)
  		cfs_rq_of(se)->skip = se;
  }
  
@@ -105,7 +118,7 @@ index 1830a2e46..38903993a 100644
  /*
   * Preempt the current task with a newly woken task if needed:
   */
-@@ -8045,6 +8134,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+@@ -8045,6 +8147,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
  	if (ignore)
  		return;
  
