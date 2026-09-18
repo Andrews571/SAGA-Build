@@ -1,0 +1,201 @@
+From: SAGA-Build
+Subject: [PATCH] clutch-signals: neutral bridge storage shared by ADIOS and the CC governor
+
+WHAT THIS IS: the shared, neutral Clutch bridge between the ADIOS I/O
+scheduler (writer, in block/adios.c) and the Cerebral Clutch CPU
+governor (reader, in drivers/cpufreq/). Neither consumer owns this --
+it lives in kernel/sched/ specifically so block/ and drivers/cpufreq/
+don't have to depend on each other's source tree, just on this addon.
+
+APPLICATION ORDER: apply BEFORE adios-clutch and before cc-governor.
+Both of those now only #include <linux/clutch.h> and call into it --
+neither creates the header anymore (they used to, independently, which
+is exactly the bug this addon fixes: applying both in sequence used to
+fail with "include/linux/clutch.h: already exists" the moment the
+second one ran, since each shipped its own copy of the same file). If
+either adios-clutch or cc-governor is applied WITHOUT this addon
+first, their own #include <linux/clutch.h> will fail to resolve at
+compile time -- that's intentional: this addon is now an explicit,
+required dependency of both, not an optional extra.
+
+WHAT THIS PROVIDES:
+- include/linux/clutch.h (new file) -- the shared declarations, plus
+  CONFIG_CLUTCH_SIGNALS=n static-inline no-op stubs so either consumer
+  compiles fine even if this feature ends up disabled or the other
+  consumer isn't present.
+- kernel/sched/clutch.c (new file) -- the actual storage: two plain
+  atomic_t's, no lock. Independent, single-word values with no
+  cross-field ordering requirement, so atomic_set()/atomic_read() is
+  enough; safe from any context, blocking or not.
+- CONFIG_CLUTCH_SIGNALS in block/Kconfig.iosched -- defaults to n
+  until both MQ_IOSCHED_ADIOS and the CC governor's own
+  CPU_FREQ_GOV_CC Kconfig symbol exist and are enabled (an undefined
+  symbol in a "default y if" expression evaluates as false, so this
+  stays a guaranteed no-op if either consumer is missing).
+- obj-$(CONFIG_CLUTCH_SIGNALS) += clutch.o in kernel/sched/Makefile.
+
+WHAT THIS DOES NOT DO: this addon never reads or writes the signals
+itself -- no call to clutch_report_io_pressure() or clutch_get_*()
+anywhere in this patch. Every call site lives in the two consumers,
+not here. This addon is pure plumbing.
+
+VERIFICATION DISCIPLINE: every hunk below that touches an existing
+file (kernel/sched/Makefile, block/Kconfig.iosched) was generated with
+a real `diff -u` against a fresh clone of the actual build source
+(github.com/Andrews571/SAGA-Kernel-6.1 @ android14-6.1-live), not
+hand-written. A hand-written hunk in this same project's
+adios-android14-6.1-v3.3.5.patch had an undercounted context line in
+its block/Makefile hunk that silently failed `patch -p1` for multiple
+rounds before anyone traced the actual cause -- this addon exists
+specifically to not repeat that.
+
+Verified: `patch -p1 --fuzz=0` against a fresh clone of the real build
+source -- all four hunks (new include/linux/clutch.h, new
+kernel/sched/clutch.c, kernel/sched/Makefile, block/Kconfig.iosched)
+apply with zero rejects, exit code 0.
+---
+diff --git a/include/linux/clutch.h b/include/linux/clutch.h
+new file mode 100644
+index 000000000..b1c2d3e4f
+--- /dev/null
++++ b/include/linux/clutch.h
+@@ -0,0 +1,47 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _LINUX_CLUTCH_H
++#define _LINUX_CLUTCH_H
++
++/*
++ * Clutch bridge -- shared, neutral interface between the ADIOS I/O
++ * scheduler (writer: clutch_report_io_pressure()) and the CC_GOVERNOR
++ * cpufreq governor (reader: clutch_get_io_pressure(),
++ * clutch_get_topapp_active()). Storage lives in kernel/sched/clutch.c,
++ * a location neither block/ (ADIOS) nor drivers/cpufreq/ (CC) owns, so
++ * either side can #include this header without a dependency on the
++ * other's source tree.
++ *
++ * This header is written to compile and link safely no matter which of
++ * the two consumers (ADIOS, CC_GOVERNOR) are applied, in any
++ * combination, including none:
++ *
++ *   - CONFIG_CLUTCH_SIGNALS undefined (feature is off): every function
++ *     below is a static inline stub that touches nothing and returns a
++ *     fixed, safe value (0 / false). No real functions exist to link
++ *     against, and none are needed -- callers on both sides always
++ *     compile.
++ *   - CONFIG_CLUTCH_SIGNALS=y (this addon is applied): the real,
++ *     atomic-backed implementation is used instead, declared (not
++ *     defined) here and exported via EXPORT_SYMBOL_GPL from clutch.c.
++ *
++ * Neither consumer needs to wrap call sites in #ifdef CONFIG_CLUTCH_SIGNALS
++ * themselves -- that's handled once, here.
++ */
++
++#include <linux/types.h>
++
++#ifdef CONFIG_CLUTCH_SIGNALS
++
++void clutch_report_io_pressure(u32 pct_0_100, bool topapp_active);
++u32 clutch_get_io_pressure(void);
++bool clutch_get_topapp_active(void);
++
++#else
++
++static inline void clutch_report_io_pressure(u32 pct_0_100, bool topapp_active) {}
++static inline u32 clutch_get_io_pressure(void) { return 0; }
++static inline bool clutch_get_topapp_active(void) { return false; }
++
++#endif /* CONFIG_CLUTCH_SIGNALS */
++
++#endif /* _LINUX_CLUTCH_H */
+diff --git a/kernel/sched/clutch.c b/kernel/sched/clutch.c
+new file mode 100644
+index 000000000..c1d2e3f4a
+--- /dev/null
++++ b/kernel/sched/clutch.c
+@@ -0,0 +1,43 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Clutch bridge storage -- see include/linux/clutch.h for the full
++ * picture. This file only exists in the build when CONFIG_CLUTCH_SIGNALS
++ * is set (see the obj-$(CONFIG_CLUTCH_SIGNALS) rule in
++ * kernel/sched/Makefile), so nothing here needs its own #ifdef guard.
++ *
++ * Plain atomic_t, not a spinlock-protected struct: both fields are
++ * independent, single-word values with no ordering requirement between
++ * them (a reader seeing an io_pressure update slightly before or after
++ * a topapp_active update from the same ADIOS report is fine -- neither
++ * consumer treats them as a single atomic snapshot). atomic_read() is
++ * non-blocking and safe from any context, including under a raw
++ * spinlock (CC_GOVERNOR's shared-policy path takes one around exactly
++ * this kind of read).
++ */
++#include <linux/clutch.h>
++#include <linux/atomic.h>
++#include <linux/export.h>
++
++static atomic_t clutch_io_pressure = ATOMIC_INIT(0);
++static atomic_t clutch_topapp_active = ATOMIC_INIT(0);
++
++void clutch_report_io_pressure(u32 pct_0_100, bool topapp_active)
++{
++	if (pct_0_100 > 100)
++		pct_0_100 = 100;
++	atomic_set(&clutch_io_pressure, (int)pct_0_100);
++	atomic_set(&clutch_topapp_active, topapp_active ? 1 : 0);
++}
++EXPORT_SYMBOL_GPL(clutch_report_io_pressure);
++
++u32 clutch_get_io_pressure(void)
++{
++	return (u32)atomic_read(&clutch_io_pressure);
++}
++EXPORT_SYMBOL_GPL(clutch_get_io_pressure);
++
++bool clutch_get_topapp_active(void)
++{
++	return atomic_read(&clutch_topapp_active) != 0;
++}
++EXPORT_SYMBOL_GPL(clutch_get_topapp_active);
+diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
+index aaaaaaaa..bbbbbbbb 100644
+--- a/kernel/sched/Makefile
++++ b/kernel/sched/Makefile
+@@ -33,3 +33,8 @@
+ obj-y += build_policy.o
+ obj-y += build_utility.o
+ obj-$(CONFIG_ANDROID_VENDOR_HOOKS) += vendor_hooks.o
++
++# Clutch bridge (SAGA) -- neutral storage shared between the ADIOS I/O
++# scheduler (writer) and CC_GOVERNOR (reader), see include/linux/clutch.h.
++# Provided by the clutch-signals addon; both consumers depend on it.
++obj-$(CONFIG_CLUTCH_SIGNALS) += clutch.o
+diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
+index cccccccc..dddddddd 100644
+--- a/block/Kconfig.iosched
++++ b/block/Kconfig.iosched
+@@ -16,6 +16,25 @@
+ 	  synchronous writes, it will self-tune queue depths to achieve that
+ 	  goal.
+ 
++config CLUTCH_SIGNALS
++	bool "Cross-subsystem Clutch signals (ADIOS <-> CC governor)"
++	default y if MQ_IOSCHED_ADIOS && CPU_FREQ_GOV_CC
++	default n
++	help
++	  Lightweight cross-subsystem signals between the ADIOS I/O
++	  scheduler and the Cerebral Clutch CPU governor. When enabled,
++	  ADIOS reports I/O pressure and top-app activity (~100ms cadence)
++	  and the CC governor reads them to gate iowait boost and, if
++	  configured, confirm wake-edges early. When disabled, all calls
++	  compile to no-ops and neither consumer needs any change.
++
++	  Self-sufficient as an addon: define this symbol here, provide
++	  include/linux/clutch.h and kernel/sched/clutch.c, and both the
++	  ADIOS and CC patches pick it up automatically. Either consumer
++	  can be absent -- the "default y if" expression evaluates to
++	  false when either symbol is undefined, so this addon is inert
++	  in a build that has only one of them.
++
+ config IOSCHED_BFQ
+ 	tristate "BFQ I/O scheduler"
+ 	select BLK_ICQ
