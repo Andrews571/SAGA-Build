@@ -1,5 +1,5 @@
 diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
-index c93954613..60fc237ec 100644
+index c93954613..af0eeb93a 100644
 --- a/drivers/cpufreq/Kconfig
 +++ b/drivers/cpufreq/Kconfig
 @@ -113,6 +113,16 @@ config CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
@@ -19,7 +19,7 @@ index c93954613..60fc237ec 100644
  endchoice
  
  config CPU_FREQ_GOV_PERFORMANCE
-@@ -211,6 +221,27 @@ config CPU_FREQ_GOV_SCHEDUTIL
+@@ -211,6 +221,39 @@ config CPU_FREQ_GOV_SCHEDUTIL
  
  	  If in doubt, say N.
  
@@ -41,6 +41,18 @@ index c93954613..60fc237ec 100644
 +	  when present. Tunable per policy via sysfs — safe to enable
 +	  alongside schedutil, reflex and pccg, does not replace any of
 +	  them.
++
++	  If CONFIG_CLUTCH_SIGNALS is also enabled (see the clutch-signals
++	  addon, kernel/addons/clutch-signals/, which provides the
++	  include/linux/clutch.h header, kernel/sched/clutch.c storage, and
++	  this Kconfig symbol -- shared, neutral ground between ADIOS and
++	  this governor, owned by neither), cc_governor reads I/O pressure
++	  and top-app activity reported by ADIOS through that header to
++	  gate its iowait boost and, optionally, confirm wake-edges early.
++	  Self-sufficient without it -- every call through that bridge
++	  degrades to a safe, fixed value (0 / false) when
++	  CONFIG_CLUTCH_SIGNALS is off or clutch-signals isn't applied,
++	  with no behavior change.
 +
 +	  If in doubt, say N.
 +
@@ -64,10 +76,10 @@ index 99bdd96f4..ac094ea90 100644
  #endif
 diff --git a/kernel/sched/cc_governor.c b/kernel/sched/cc_governor.c
 new file mode 100644
-index 000000000..d19529a61
+index 000000000..20eeb243c
 --- /dev/null
 +++ b/kernel/sched/cc_governor.c
-@@ -0,0 +1,1571 @@
+@@ -0,0 +1,1647 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA CC_GOVERNOR (Cerebral Clutch Governor) — CPUFreq governor
@@ -172,6 +184,8 @@ index 000000000..d19529a61
 + * schedutil/reflex/pccg use), so a single kernel build stays usable
 + * across any android14-6.1 device: /sys/devices/system/cpu/cpufreq/policyN/cc_governor/
 + */
++
++#include <linux/clutch.h>
 +
 +#define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
 +/* Ring buffer size for cc_streak_confirmed()'s recent-edge tracking --
@@ -356,6 +370,21 @@ index 000000000..d19529a61
 +	u64			stat_triggers_confirmed;
 +	u64			stat_instant_applied;
 +	u64			stat_streak_applied;
++	/* Confirmations via ADIOS's topapp_active signal specifically (the
++	 * clutch bridge, optional) -- separate from stat_streak_applied so
++	 * the two confirmation paths stay distinguishable when calibrating.
++	 * Always 0 without the bridge. */
++	u64			stat_topapp_confirmed;
++	/* Number of bore-warp grants consumed by this CPU's
++	 * cc_bore_warp_check() -- how many times bore_warp_preempt() in
++	 * fair.c actually granted a warp and we picked it up. Separate
++	 * from stat_topapp_confirmed (ADIOS bridge) and stat_streak_applied
++	 * (CC's own streak detector). Meant for calibrating
++	 * sched_bore_warp_us: if this climbs at hundreds per second during
++	 * normal use, the cooldown is too short or the score check too
++	 * loose. Always 0 when CONFIG_SCHED_BORE is off or the bore-warp
++	 * addon isn't applied. */
++	u64			stat_bore_warp_confirmed;
 +
 +	/* Streak-detection ring buffer for cc_wake_edge_check() -- see
 +	 * the streak_window_us/streak_min_count comment in struct
@@ -692,6 +721,7 @@ index 000000000..d19529a61
 +	if (!test_and_clear_bit(0, &cfs_rq->bore_warp_fired))
 +		return;
 +
++	cc_cpu->stat_bore_warp_confirmed++;
 +	cap = arch_scale_cpu_capacity(cc_cpu->cpu);
 +	cc_hispeed_raise(cc_cpu, time_ns, cc_target_util(cc_cpu, cap));
 +}
@@ -780,10 +810,27 @@ index 000000000..d19529a61
 +		confirmed = cc_streak_confirmed(cc_cpu, time_ns);
 +		if (confirmed) {
 +			cc_cpu->stat_streak_applied++;
-+			cc_cpu->stat_triggers_confirmed++;
-+		} else {
-+			cc_cpu->stat_instant_applied++;
++		} else if (clutch_get_topapp_active()) {
++			/* CLUTCH BRIDGE (optional): if ADIOS has already
++			 * flagged the top-app cgroup as active (its own
++			 * I/O-priority-based detection, see
++			 * include/linux/clutch.h), that is itself a strong
++			 * signal of an interactive session in progress --
++			 * treat the edge as confirmed even if this CPU's own
++			 * streak hasn't reached streak_min_count yet, rather
++			 * than holding back a boost ADIOS already has
++			 * independent evidence for. Counted separately from
++			 * stat_streak_applied so the two confirmation paths
++			 * stay distinguishable when calibrating. Safe no-op
++			 * (always false) without the bridge. */
++			confirmed = true;
++			cc_cpu->stat_topapp_confirmed++;
 +		}
++
++		if (confirmed)
++			cc_cpu->stat_triggers_confirmed++;
++		else
++			cc_cpu->stat_instant_applied++;
 +
 +		cc_hispeed_raise(cc_cpu, time_ns,
 +				    confirmed ? cc_target_util(cc_cpu, cap)
@@ -904,6 +951,40 @@ index 000000000..d19529a61
 +	cc_cpu->iowait_boost_pending = false;
 +
 +	boost = (cc_cpu->iowait_boost * cc_cpu->max) >> SCHED_CAPACITY_SHIFT;
++
++	/* CLUTCH BRIDGE: if ADIOS reports the device is genuinely I/O-bound
++	 * (see include/linux/clutch.h), the disk is the bottleneck, not the
++	 * CPU -- boosting frequency here burns power without shortening the
++	 * wait, since the completion arrives when the disk is ready, not
++	 * when the CPU is fast. Halve the boost rather than zero it: some
++	 * CPU headroom still helps the completion get processed promptly
++	 * once it does arrive, and a single noisy reading shouldn't fully
++	 * suppress a boost that may still be warranted.
++	 *
++	 * Checked and applied on this call's local @boost (already scaled
++	 * by cc_cpu->max), not on the persistent cc_cpu->iowait_boost state
++	 * -- io_pressure can swing call to call, and mutating the stored
++	 * value would compound across consecutive calls instead of simply
++	 * reflecting the current reading each time.
++	 *
++	 * clutch_get_io_pressure() is a plain atomic_read(), safe from any
++	 * context including under cc_policy->update_lock (the shared-policy
++	 * path holds it here). Returns 0 whenever CONFIG_CLUTCH_SIGNALS is
++	 * off or the ADIOS addon isn't present -- no behavior change
++	 * without the bridge. 70%: reuses ADIOS's own
++	 * bq_refill_below_ratio threshold as a starting heuristic, not a
++	 * value derived for this specific purpose -- bq_refill_below_ratio
++	 * marks when ADIOS decides to refill its batch queue, which is
++	 * conceptually close to "disk no longer comfortably ahead of
++	 * demand" but not identical to it. First knob to revisit if real
++	 * benchmarking shows the gate firing too early or too late. */
++	if (clutch_get_io_pressure() >= 70) {
++		unsigned long min_boost = (IOWAIT_BOOST_MIN * cc_cpu->max) >> SCHED_CAPACITY_SHIFT;
++
++		if (boost > min_boost * 2)
++			boost >>= 1;
++	}
++
 +	boost = uclamp_rq_util_with(cpu_rq(cc_cpu->cpu), boost, NULL);
 +	if (cc_cpu->util < boost)
 +		cc_cpu->util = boost;
@@ -1255,6 +1336,8 @@ index 000000000..d19529a61
 +CC_STAT_ATTR(stat_triggers_confirmed);
 +CC_STAT_ATTR(stat_instant_applied);
 +CC_STAT_ATTR(stat_streak_applied);
++CC_STAT_ATTR(stat_topapp_confirmed);
++CC_STAT_ATTR(stat_bore_warp_confirmed);
 +
 +#undef CC_STAT_ATTR
 +
@@ -1263,6 +1346,8 @@ index 000000000..d19529a61
 +	&cc_stat_stat_triggers_confirmed_attr.attr,
 +	&cc_stat_stat_instant_applied_attr.attr,
 +	&cc_stat_stat_streak_applied_attr.attr,
++	&cc_stat_stat_topapp_confirmed_attr.attr,
++	&cc_stat_stat_bore_warp_confirmed_attr.attr,
 +	&cc_rate_limit_us.attr,
 +	&cc_hispeed_window_us_attr.attr,
 +	&cc_hispeed_load_pct_attr.attr,
@@ -1457,7 +1542,10 @@ index 000000000..d19529a61
 +	 * a specific device's LITTLE cluster genuinely needs more push. */
 +	tunables->auto_capacity_scale = 0;
 +	/* Unconfirmed triggers get 40% of the (already lower) confirmed
-+	 * target -- a real bump, well short of it. */
++	 * target -- a real bump, well short of it. Compounded with
++	 * hispeed_freq_pct=55: 40% x 55% = ~22% of nominal capacity on an
++	 * unconfirmed edge, versus 55% on a confirmed one -- a deliberate,
++	 * large gap between "maybe interactive" and "measured busy". */
 +	tunables->instant_trigger_pct = 40;
 +	/* 6 edges within 60ms to count as a genuine gesture streak, not 3
 +	 * within 120ms: on real wakeup densities (tens of wakeups/sec is
