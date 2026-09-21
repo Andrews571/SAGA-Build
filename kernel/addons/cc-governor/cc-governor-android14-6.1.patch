@@ -1,5 +1,5 @@
 diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
-index c93954613..af0eeb93a 100644
+index c93954613..daac1b628 100644
 --- a/drivers/cpufreq/Kconfig
 +++ b/drivers/cpufreq/Kconfig
 @@ -113,6 +113,16 @@ config CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
@@ -34,13 +34,13 @@ index c93954613..af0eeb93a 100644
 +	  PCCG pinning small cores near their ceiling most of the time.
 +	  Headroom-correct target calculation, a busy%-gated floor that
 +	  snaps back toward idle once the CPU genuinely goes quiet, a
-+	  kthread filter on wake-edges, a recalibrated streak detector, and
-+	  built-in sysfs telemetry (stat_triggers_total and friends) for
-+	  further calibration against real device data. Self-sufficient;
-+	  takes BORE and bore-warp as optional, independent enhancements
-+	  when present. Tunable per policy via sysfs — safe to enable
-+	  alongside schedutil, reflex and pccg, does not replace any of
-+	  them.
++	  kthread filter on wake-edges, a real-device-calibrated streak
++	  detector, and built-in sysfs telemetry (stat_triggers_total and
++	  friends) for further calibration against real device data.
++	  Self-sufficient; takes BORE and bore-warp as optional, independent
++	  enhancements when present. Tunable per policy via sysfs — safe to
++	  enable alongside schedutil, reflex and pccg, does not replace any
++	  of them.
 +
 +	  If CONFIG_CLUTCH_SIGNALS is also enabled (see the clutch-signals
 +	  addon, kernel/addons/clutch-signals/, which provides the
@@ -59,27 +59,12 @@ index c93954613..af0eeb93a 100644
  comment "CPU frequency scaling drivers"
  
  config CPUFREQ_DT
-diff --git a/kernel/sched/build_utility.c b/kernel/sched/build_utility.c
-index 99bdd96f4..ac094ea90 100644
---- a/kernel/sched/build_utility.c
-+++ b/kernel/sched/build_utility.c
-@@ -69,6 +69,10 @@
- # include "cpufreq_schedutil.c"
- #endif
- 
-+#ifdef CONFIG_CPU_FREQ_GOV_CC
-+# include "cc_governor.c"
-+#endif
-+
- #ifdef CONFIG_SCHED_DEBUG
- # include "debug.c"
- #endif
 diff --git a/kernel/sched/cc_governor.c b/kernel/sched/cc_governor.c
 new file mode 100644
-index 000000000..20eeb243c
+index 000000000..4e89f46e4
 --- /dev/null
 +++ b/kernel/sched/cc_governor.c
-@@ -0,0 +1,1647 @@
+@@ -0,0 +1,1670 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA CC_GOVERNOR (Cerebral Clutch Governor) — CPUFreq governor
@@ -276,7 +261,15 @@ index 000000000..20eeb243c
 +	 * instant_trigger_pct). A single isolated edge never reaches the
 +	 * count, so background noise stays throttled exactly as before.
 +	 * streak_min_count=0 disables this (every trigger stays instant,
-+	 * the original behaviour before this knob existed). */
++	 * the original behaviour before this knob existed).
++	 *
++	 * Default history: 3-in-120ms (PCCG) -> 6-in-60ms (this
++	 * governor's first attempt, still synthetic-trace-calibrated) ->
++	 * 6-in-15ms (current, real-device-measured -- see cc_init()'s
++	 * comment on this same pair for the actual numbers). Real wakeup
++	 * density with the screen on turned out far higher than either
++	 * synthetic trace assumed, so both earlier windows let 8 edges
++	 * accumulate trivially from background noise alone. */
 +	unsigned int		streak_window_us;
 +	unsigned int		streak_min_count;
 +
@@ -1547,15 +1540,30 @@ index 000000000..20eeb243c
 +	 * unconfirmed edge, versus 55% on a confirmed one -- a deliberate,
 +	 * large gap between "maybe interactive" and "measured busy". */
 +	tunables->instant_trigger_pct = 40;
-+	/* 6 edges within 60ms to count as a genuine gesture streak, not 3
-+	 * within 120ms: on real wakeup densities (tens of wakeups/sec is
-+	 * normal with the screen on) the old 3-in-120ms threshold was
-+	 * satisfied by ordinary background noise alone, making almost
-+	 * every trigger "confirmed" and defeating instant_trigger_pct
-+	 * entirely. This pair is still a starting point, not a measured
-+	 * value -- see CC_STAT_* below for how to calibrate it against
-+	 * this device's actual wakeup pattern instead of guessing again. */
-+	tunables->streak_window_us    = 60000;
++	/* 6 edges within 15ms to count as a genuine gesture streak, not 3
++	 * within 120ms (the PCCG default) and not 6 within 60ms (this
++	 * governor's first attempt). Both previous values were calibrated
++	 * against a *synthetic* scroll trace; measurement on real hardware
++	 * (~783 wake-edges/sec sustained with the screen on) showed that
++	 * both were trivially satisfied by ordinary background noise:
++	 * 8 slots always fit inside the window regardless of what the
++	 * device was actually doing, so every trigger became "confirmed"
++	 * and instant_trigger_pct never applied once in a 15-minute
++	 * session (measured: stat_instant_applied = 0 on both clusters).
++	 *
++	 * With 15ms: real-device measurement gives a ~50/45
++	 * streak/instant split across both clusters -- the streak catches
++	 * dense gesture trains, the instant path catches isolated wakeups.
++	 * This is the ratio the design was aiming for; instant_trigger_pct
++	 * now actually does something.
++	 *
++	 * Still tunable at runtime; if a device turns out to have a very
++	 * different wakeup density, adjust per-device via
++	 * /sys/.../policyN/cc_governor/streak_window_us. The telemetry
++	 * counters (stat_instant_applied, stat_streak_applied) are the
++	 * diagnostic -- if instant stays at 0 for a long session, the
++	 * window is still too wide. */
++	tunables->streak_window_us    = 15000;
 +	tunables->streak_min_count    = 6;
 +	/* Floor gate (new): a trigger only holds the CPU up while the
 +	 * idle-time window keeps confirming real activity above this
@@ -1727,3 +1735,15 @@ index 000000000..20eeb243c
 +#endif
 +
 +cpufreq_governor_init(cc_gov);
+diff --git a/kernel/sched/build_utility.c b/kernel/sched/build_utility.c
+index 99bdd96f4..ac094ea90 100644
+--- a/kernel/sched/build_utility.c
++++ b/kernel/sched/build_utility.c
+@@ -72,3 +72,7 @@
++#ifdef CONFIG_CPU_FREQ_GOV_CC
++# include "cc_governor.c"
++#endif
++
+ #ifdef CONFIG_SCHED_DEBUG
+ # include "debug.c"
+ #endif
