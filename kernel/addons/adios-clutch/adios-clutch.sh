@@ -34,7 +34,7 @@
 # estruturalmente inalcancavel em operacao normal, redesenho traria
 # risco sem ganho real).
 
-PATCH="${SAGA_PATCH_DIR}/kernel/addons/adios-clutch/ADIOS_Clutch-Android-14-6.1.patch"
+PATCH="$(dirname "${BASH_SOURCE[0]}")/ADIOS_Clutch-Android-14-6.1.patch"
 
 log "📦 Applying ADIOS Clutch patch (experimental variant)..."
 [ -f "$PATCH" ] || error "ADIOS-CLUTCH: patch file not found at ${PATCH}!"
