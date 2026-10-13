@@ -62,13 +62,29 @@ arquivos tocados (include/linux/clutch.h, kernel/sched/clutch.c,
 kernel/sched/Makefile, block/Kconfig.iosched) aplicam com zero
 rejects, exit code 0.
 -------------------------------------------------------------------------
+
+-------------------------------------------------------------------------
+Fix desta revisão (pós-CI real, build.sh do SAGA-Build):
+  A âncora do CONFIG_CLUTCH_SIGNALS em block/Kconfig.iosched estava
+  errada -- tinha sido inserida no fim do arquivo (antes de endmenu) em
+  vez de logo após "goal." / antes de "config IOSCHED_BFQ", que é onde
+  o ADIOS_Clutch-Android-14-6.1.patch espera encontrá-la (seu hunk de
+  Kconfig.iosched usa esse ponto como âncora, @@ -35,6 +35,40 @@,
+  "Hunk #1 FAILED at 35" no CI confirmou o descasamento). Corrigido:
+  CONFIG_CLUTCH_SIGNALS agora fica logo após o help de
+  MQ_IOSCHED_KYBER, antes de IOSCHED_BFQ -- mesma posição usada
+  historicamente pelos blocos MQ_IOSCHED_* do ADIOS. Reverificado:
+  clutch-signals sozinho (patch -p1 --fuzz=0, exit 0) e em sequência
+  com o ADIOS_Clutch-Android-14-6.1.patch real enviado (exit 0 nos
+  dois, zero rejects).
+-------------------------------------------------------------------------
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
-index 6155161..af3262a 100644
+index 6155161..120fd3e 100644
 --- a/block/Kconfig.iosched
 +++ b/block/Kconfig.iosched
-@@ -43,4 +43,23 @@ config BFQ_CGROUP_DEBUG
- 	Enable some debugging help. Currently it exports additional stat
- 	files in a cgroup which can be useful for debugging.
+@@ -16,6 +16,25 @@
+ 	  synchronous writes, it will self-tune queue depths to achieve that
+ 	  goal.
  
 +config CLUTCH_SIGNALS
 +	bool "Cross-subsystem Clutch signals (ADIOS <-> CC governor)"
@@ -89,7 +105,9 @@ index 6155161..af3262a 100644
 +	  false when either symbol is undefined, so this addon is inert
 +	  in a build that has only one of them.
 +
- endmenu
+ config IOSCHED_BFQ
+ 	tristate "BFQ I/O scheduler"
+ 	select BLK_ICQ
 diff --git a/include/linux/clutch.h b/include/linux/clutch.h
 new file mode 100644
 index 0000000..dff6b58
