@@ -32,8 +32,15 @@
 #     pro nominal cheio, exatamente ao contrário do que eficiência pede.
 #   - Telemetria via sysfs (stat_triggers_total, stat_triggers_confirmed,
 #     stat_instant_applied, stat_streak_applied, stat_topapp_confirmed,
-#     stat_bore_warp_confirmed) -- pra calibrar os próximos ajustes com
-#     dado real do aparelho, não simulação.
+#     stat_bore_warp_confirmed, stat_uclamp_gated, stat_uclamp_capped,
+#     stat_reclaim_suppressed, stat_eas_present) -- pra calibrar os
+#     próximos ajustes com dado real do aparelho, não simulação.
+#   - Refino pós-produção (opcional, no-op seguro se ausente): uclamp
+#     (gate quando uclamp_min já cobre o floor; cap do floor ao
+#     uclamp_max), consciência de reclaim/zram (PGSCAN_DIRECT reduz o
+#     alvo confirmado pela metade). EAS: investigado, NÃO implementado
+#     como pedido -- build_perf_domains() não depende do governor;
+#     só stat_eas_present (diagnóstico: existe Energy Model?).
 #
 # "Input boost separado do floor" foi endereçado sem criar um hook
 # literal no subsistema de input (evdev) -- ver o cabeçalho de
@@ -103,6 +110,7 @@ if ! grep -q "^CONFIG_CPU_FREQ_GOV_CC=y" "$DEFCONFIG_FILE"; then
     cat >> "$DEFCONFIG_FILE" << 'EOF'
 # CC_GOVERNOR / Cerebral Clutch Governor (SAGA)
 CONFIG_CPU_FREQ_GOV_CC=y
+CONFIG_CPU_FREQ_DEFAULT_GOV_CC=y
 EOF
     log "CC_GOVERNOR: CONFIG_CPU_FREQ_GOV_CC + CONFIG_CPU_FREQ_DEFAULT_GOV_CC enabled ✅"
 fi
