@@ -5,7 +5,13 @@
 # subsystem. Must be applied BEFORE adios-clutch and cc-governor.
 set -euo pipefail
 
-PATCH_FILE="$(dirname "${BASH_SOURCE[0]}")/clutch-signals-android14-6.1.patch"
+# Resolve to an ABSOLUTE path now, before any cd below -- BASH_SOURCE
+# can be relative (e.g. invoked as "kernel/addons/clutch-signals/clutch-signals.sh"
+# from the SAGA-Build workspace root), and once we cd into the kernel
+# source root further down, a relative PATCH_FILE would point at the
+# wrong place (or nowhere).
+ADDON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PATCH_FILE="${ADDON_DIR}/clutch-signals-android14-6.1.patch"
 
 # SAGA: this addon used to assume it was invoked with the kernel source
 # tree as cwd. In CI that assumption was false -- the generic addon
@@ -42,14 +48,37 @@ find_kernel_root() {
 		candidate="$(dirname "${candidate}")"
 	done
 
-	# Common sibling layouts: kernel source checked out next to the
-	# SAGA-Build workspace root rather than inside it.
-	for candidate in "$(pwd)"/kernel_source "$(pwd)"/../kernel_source "$(pwd)"/common "$(pwd)"/../common; do
+	# Known SAGA-Build layout: the real kernel source (Android Common
+	# Kernel checkout) lives UNDER the workspace root, not beside it --
+	# confirmed from a real CI run: SAGA_BUILD_ROOT/workspace/kernel/common
+	# (the "Baseband-guard" addon clones into
+	# .../workspace/kernel/common/Baseband-guard, which pins this down).
+	# Also try a couple of nearby variants in case the layout drifts.
+	for candidate in \
+		"$(pwd)/workspace/kernel/common" \
+		"$(pwd)/workspace/common" \
+		"$(pwd)/workspace/kernel" \
+		"$(pwd)/kernel/common" \
+		"$(pwd)/common" \
+		"$(pwd)/../common" \
+		"$(pwd)/kernel_source" \
+		"$(pwd)/../kernel_source"; do
 		if [ -f "${candidate}/block/Kconfig.iosched" ] && [ -f "${candidate}/kernel/sched/Makefile" ]; then
 			(cd "${candidate}" && pwd)
 			return 0
 		fi
 	done
+
+	# Last resort: bounded search a few levels down from cwd for the
+	# anchor file. Depth-limited so this stays fast in a large workspace.
+	candidate="$(find "$(pwd)" -maxdepth 5 -path '*/block/Kconfig.iosched' 2>/dev/null | head -1)"
+	if [ -n "${candidate}" ]; then
+		candidate="$(dirname "$(dirname "${candidate}")")"
+		if [ -f "${candidate}/kernel/sched/Makefile" ]; then
+			echo "${candidate}"
+			return 0
+		fi
+	fi
 
 	return 1
 }
