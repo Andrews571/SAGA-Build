@@ -1,0 +1,262 @@
+SAGA-Build addon: clutch-signals
+=================================
+
+O que é: o bridge compartilhado e neutro entre o ADIOS I/O scheduler
+(escritor de io_pressure/topapp_active) e a Cerebral Clutch (CC) CPU
+governor (leitor), mais, a partir desta revisão, o sinal de pressão de
+memória (escrito pelo próprio subsistema de memória -- kswapd, direct
+reclaim -- não pelo ADIOS).
+
+Ordem de aplicação: aplicar ANTES de adios-clutch e de cc-governor. Se
+qualquer um dos dois for aplicado sem este addon, o #include
+<linux/clutch.h> falha -- comportamento esperado, pois clutch-signals é
+dependência explícita de ambos.
+
+O que ele fornece:
+  - include/linux/clutch.h (declarações + stubs no-op quando
+    CONFIG_CLUTCH_SIGNALS=n)
+  - kernel/sched/clutch.c (storage: 3 atomic_t -- io_pressure,
+    topapp_active, mem_pressure)
+  - CONFIG_CLUTCH_SIGNALS em block/Kconfig.iosched
+  - obj-$(CONFIG_CLUTCH_SIGNALS) += clutch.o em kernel/sched/Makefile
+
+O que ele NÃO faz: não escreve nem lê nada por conta própria. Todos os
+call sites (report/get) vivem nos consumidores (ADIOS, CC, subsistema
+de memória).
+
+-------------------------------------------------------------------------
+Changelog desta revisão (Frente 1 / Frente 2, rodada pós-estabilização
+de 7 dias em produção do ADIOS Clutch):
+
+Frente 1 -- memory_pressure (IMPLEMENTADO):
+  Adicionado clutch_report_memory_pressure(u32 pct_0_100) /
+  clutch_get_memory_pressure(u32) ao header (declaração real sob
+  CONFIG_CLUTCH_SIGNALS, stub no-op no #else) e ao clutch.c (novo
+  atomic_t clutch_mem_pressure, duas funções EXPORT_SYMBOL_GPL,
+  clamp 0..100 igual aos outros dois sinais). O escritor é o
+  subsistema de memória (kswapd / direct reclaim), não o ADIOS -- o
+  ADIOS continua apenas incluindo o header, zero mudança nele.
+
+Frente 2 -- avaliação de 3 sinais candidatos do ADIOS (CONCLUÍDO: não
+adicionar nenhum, decisão tomada conforme instrução explícita "se
+forem redundantes, não adicionar; preferir menos superfície com mais
+propósito"):
+  - topapp_active_now: redundante com o atributo sysfs topapp_active
+    já existente (mesmo helper adios_topapp_is_active()). Não
+    adicionado.
+  - batch_limit_effective: redundante com depth_controller (READ/WRITE)
+    + batch_limit_discard (DISCARD), que já expõem o mesmo valor
+    efetivo por optype. Não adicionado.
+  - in_flight: foi cortado em rodada anterior por falta de consumidor
+    confirmado. Nenhuma confirmação do lado CC nesta rodada de que vai
+    consumir esse sinal -- mantido cortado, conforme instrução
+    explícita de só reintroduzir com confirmação do CC.
+
+  Nenhuma mudança em block/adios.c nesta rodada -- o patch
+  adios-clutch (ou adios/adios-clutch addon) permanece inalterado por
+  esta revisão.
+
+Verificação: patch -p1 --fuzz=0 aplica limpo contra clone fresco de
+github.com/Andrews571/SAGA-Kernel-6.1 @ android14-6.1-live. Os 4
+arquivos tocados (include/linux/clutch.h, kernel/sched/clutch.c,
+kernel/sched/Makefile, block/Kconfig.iosched) aplicam com zero
+rejects, exit code 0.
+-------------------------------------------------------------------------
+
+-------------------------------------------------------------------------
+Fix desta revisão (pós-CI real, build.sh do SAGA-Build):
+  A âncora do CONFIG_CLUTCH_SIGNALS em block/Kconfig.iosched estava
+  errada -- tinha sido inserida no fim do arquivo (antes de endmenu) em
+  vez de logo após "goal." / antes de "config IOSCHED_BFQ", que é onde
+  o ADIOS_Clutch-Android-14-6.1.patch espera encontrá-la (seu hunk de
+  Kconfig.iosched usa esse ponto como âncora, @@ -35,6 +35,40 @@,
+  "Hunk #1 FAILED at 35" no CI confirmou o descasamento). Corrigido:
+  CONFIG_CLUTCH_SIGNALS agora fica logo após o help de
+  MQ_IOSCHED_KYBER, antes de IOSCHED_BFQ -- mesma posição usada
+  historicamente pelos blocos MQ_IOSCHED_* do ADIOS. Reverificado:
+  clutch-signals sozinho (patch -p1 --fuzz=0, exit 0) e em sequência
+  com o ADIOS_Clutch-Android-14-6.1.patch real enviado (exit 0 nos
+  dois, zero rejects).
+-------------------------------------------------------------------------
+diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
+index 6155161..120fd3e 100644
+--- a/block/Kconfig.iosched
++++ b/block/Kconfig.iosched
+@@ -16,6 +16,25 @@
+ 	  synchronous writes, it will self-tune queue depths to achieve that
+ 	  goal.
+ 
++config CLUTCH_SIGNALS
++	bool "Cross-subsystem Clutch signals (ADIOS <-> CC governor)"
++	default y if MQ_IOSCHED_ADIOS && CPU_FREQ_GOV_CC
++	default n
++	help
++	  Lightweight cross-subsystem signals between the ADIOS I/O
++	  scheduler and the Cerebral Clutch CPU governor. When enabled,
++	  ADIOS reports I/O pressure and top-app activity (~100ms cadence)
++	  and the CC governor reads them to gate iowait boost and, if
++	  configured, confirm wake-edges early. When disabled, all calls
++	  compile to no-ops and neither consumer needs any change.
++
++	  Self-sufficient as an addon: define this symbol here, provide
++	  include/linux/clutch.h and kernel/sched/clutch.c, and both the
++	  ADIOS and CC patches pick it up automatically. Either consumer
++	  can be absent -- the "default y if" expression evaluates to
++	  false when either symbol is undefined, so this addon is inert
++	  in a build that has only one of them.
++
+ config IOSCHED_BFQ
+ 	tristate "BFQ I/O scheduler"
+ 	select BLK_ICQ
+diff --git a/include/linux/clutch.h b/include/linux/clutch.h
+new file mode 100644
+index 0000000..dff6b58
+--- /dev/null
++++ b/include/linux/clutch.h
+@@ -0,0 +1,61 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _LINUX_CLUTCH_H
++#define _LINUX_CLUTCH_H
++
++/*
++ * Clutch bridge -- shared, neutral interface between the ADIOS I/O
++ * scheduler (writer: clutch_report_io_pressure()) and the CC_GOVERNOR
++ * cpufreq governor (reader: clutch_get_io_pressure(),
++ * clutch_get_topapp_active()). Storage lives in kernel/sched/clutch.c,
++ * a location neither block/ (ADIOS) nor drivers/cpufreq/ (CC) owns, so
++ * either side can #include this header without a dependency on the
++ * other's source tree.
++ *
++ * This header is written to compile and link safely no matter which of
++ * the two consumers (ADIOS, CC_GOVERNOR) are applied, in any
++ * combination, including none:
++ *
++ *   - CONFIG_CLUTCH_SIGNALS undefined (feature is off): every function
++ *     below is a static inline stub that touches nothing and returns a
++ *     fixed, safe value (0 / false). No real functions exist to link
++ *     against, and none are needed -- callers on both sides always
++ *     compile.
++ *   - CONFIG_CLUTCH_SIGNALS=y (this addon is applied): the real,
++ *     atomic-backed implementation is used instead, declared (not
++ *     defined) here and exported via EXPORT_SYMBOL_GPL from clutch.c.
++ *
++ * Neither consumer needs to wrap call sites in #ifdef CONFIG_CLUTCH_SIGNALS
++ * themselves -- that's handled once, here.
++ *
++ * Memory pressure (clutch_report_memory_pressure() /
++ * clutch_get_memory_pressure()) follows the same rule but has a
++ * different writer: the memory subsystem itself (kswapd, direct
++ * reclaim, ...), not ADIOS. ADIOS never calls the report function --
++ * it only ever #includes this header. Kept in the same header/file
++ * pair as the I/O pressure signals since the ownership role (neutral
++ * storage neither consumer owns) is identical.
++ */
++
++#include <linux/types.h>
++
++#ifdef CONFIG_CLUTCH_SIGNALS
++
++void clutch_report_io_pressure(u32 pct_0_100, bool topapp_active);
++u32 clutch_get_io_pressure(void);
++bool clutch_get_topapp_active(void);
++
++void clutch_report_memory_pressure(u32 pct_0_100);
++u32 clutch_get_memory_pressure(void);
++
++#else
++
++static inline void clutch_report_io_pressure(u32 pct_0_100, bool topapp_active) {}
++static inline u32 clutch_get_io_pressure(void) { return 0; }
++static inline bool clutch_get_topapp_active(void) { return false; }
++
++static inline void clutch_report_memory_pressure(u32 pct_0_100) {}
++static inline u32 clutch_get_memory_pressure(void) { return 0; }
++
++#endif /* CONFIG_CLUTCH_SIGNALS */
++
++#endif /* _LINUX_CLUTCH_H */
+diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
+index ff1738c..4a47e3d 100644
+--- a/kernel/sched/Makefile
++++ b/kernel/sched/Makefile
+@@ -33,3 +33,8 @@ obj-y += fair.o
+ obj-y += build_policy.o
+ obj-y += build_utility.o
+ obj-$(CONFIG_ANDROID_VENDOR_HOOKS) += vendor_hooks.o
++
++# Clutch bridge (SAGA) -- neutral storage shared between the ADIOS I/O
++# scheduler (writer) and CC_GOVERNOR (reader), see include/linux/clutch.h.
++# Provided by the clutch-signals addon; both consumers depend on it.
++obj-$(CONFIG_CLUTCH_SIGNALS) += clutch.o
+diff --git a/kernel/sched/clutch.c b/kernel/sched/clutch.c
+new file mode 100644
+index 0000000..c3f4e55
+--- /dev/null
++++ b/kernel/sched/clutch.c
+@@ -0,0 +1,66 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Clutch bridge storage -- see include/linux/clutch.h for the full
++ * picture. This file only exists in the build when CONFIG_CLUTCH_SIGNALS
++ * is set (see the obj-$(CONFIG_CLUTCH_SIGNALS) rule in
++ * kernel/sched/Makefile), so nothing here needs its own #ifdef guard.
++ *
++ * Plain atomic_t, not a spinlock-protected struct: all three fields
++ * are independent, single-word values with no ordering requirement
++ * between them (a reader seeing an io_pressure update slightly before
++ * or after a topapp_active update from the same ADIOS report is fine
++ * -- neither consumer treats them as a single atomic snapshot).
++ * atomic_read() is non-blocking and safe from any context, including
++ * under a raw spinlock (CC_GOVERNOR's shared-policy path takes one
++ * around exactly this kind of read).
++ */
++#include <linux/clutch.h>
++#include <linux/atomic.h>
++#include <linux/export.h>
++
++static atomic_t clutch_io_pressure = ATOMIC_INIT(0);
++static atomic_t clutch_topapp_active = ATOMIC_INIT(0);
++static atomic_t clutch_mem_pressure = ATOMIC_INIT(0);
++
++void clutch_report_io_pressure(u32 pct_0_100, bool topapp_active)
++{
++	if (pct_0_100 > 100)
++		pct_0_100 = 100;
++	atomic_set(&clutch_io_pressure, (int)pct_0_100);
++	atomic_set(&clutch_topapp_active, topapp_active ? 1 : 0);
++}
++EXPORT_SYMBOL_GPL(clutch_report_io_pressure);
++
++u32 clutch_get_io_pressure(void)
++{
++	return (u32)atomic_read(&clutch_io_pressure);
++}
++EXPORT_SYMBOL_GPL(clutch_get_io_pressure);
++
++bool clutch_get_topapp_active(void)
++{
++	return atomic_read(&clutch_topapp_active) != 0;
++}
++EXPORT_SYMBOL_GPL(clutch_get_topapp_active);
++
++/*
++ * Memory pressure (ZRAM reclaim etc.) is reported by the memory
++ * subsystem itself (kswapd, direct reclaim, ...), not by ADIOS --
++ * ADIOS only ever #includes this header, it never calls
++ * clutch_report_memory_pressure(). Kept in this file rather than a
++ * separate one since it's the same "who owns shared cross-subsystem
++ * storage neither side should depend on" role as the two fields above.
++ */
++void clutch_report_memory_pressure(u32 pct_0_100)
++{
++	if (pct_0_100 > 100)
++		pct_0_100 = 100;
++	atomic_set(&clutch_mem_pressure, (int)pct_0_100);
++}
++EXPORT_SYMBOL_GPL(clutch_report_memory_pressure);
++
++u32 clutch_get_memory_pressure(void)
++{
++	return (u32)atomic_read(&clutch_mem_pressure);
++}
++EXPORT_SYMBOL_GPL(clutch_get_memory_pressure);
