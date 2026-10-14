@@ -100,19 +100,22 @@ else
     error "CC_GOVERNOR: does not apply cleanly — verified clean (--fuzz=0, order-independent re: bore/reflex/pccg) against android14-6.1-live on $(date +%Y-%m-%d), needs re-verification!"
 fi
 
-# CONFIG_CPU_FREQ_GOV_CC=y só compila o governor -- sem
-# CONFIG_CPU_FREQ_DEFAULT_GOV_CC=y o boot sobe com schedutil e o
-# cc_governor fica disponível só pra troca manual via
-# scaling_governor. O objetivo do projeto é CC ser o governor de
-# boot, então os dois entram juntos.
+# Default boot governor: o CC vira governor padrão 20s APÓS o boot, via
+# delayed work no kernel (enforcer.py), igual ao padrão do BBRv3/ADIOS.
+# NÃO adicionar CONFIG_CPU_FREQ_DEFAULT_GOV_CC=y: causa bootloop antes da
+# logo da ROM (MT6878, GKI) -- o default é consumido na criação das
+# policies, no boot inicial. O schedutil continua como default de
+# compilação; o enforcer troca cada policy pro cc_governor depois.
+python3 "$(dirname "${BASH_SOURCE[0]}")/enforcer.py" "${KERNEL_SRC}/drivers/cpufreq/cpufreq.c" \
+    || error "CC_GOVERNOR: delayed-default enforcer injection into cpufreq.c failed!"
+
 DEFCONFIG_FILE="${KERNEL_SRC}/arch/arm64/configs/gki_defconfig"
 if ! grep -q "^CONFIG_CPU_FREQ_GOV_CC=y" "$DEFCONFIG_FILE"; then
     cat >> "$DEFCONFIG_FILE" << 'EOF'
 # CC_GOVERNOR / Cerebral Clutch Governor (SAGA)
 CONFIG_CPU_FREQ_GOV_CC=y
-CONFIG_CPU_FREQ_DEFAULT_GOV_CC=y
 EOF
-    log "CC_GOVERNOR: CONFIG_CPU_FREQ_GOV_CC + CONFIG_CPU_FREQ_DEFAULT_GOV_CC enabled ✅"
+    log "CC_GOVERNOR: CONFIG_CPU_FREQ_GOV_CC enabled ✅"
 fi
 
-log "CC_GOVERNOR integrated ✅ (default boot governor; self-sufficient, BORE/bore-warp/clutch-signals-enhanced when present)"
+log "CC_GOVERNOR integrated ✅ (delayed default: cc_governor assumes ~20s after boot; self-sufficient, BORE/bore-warp/clutch-signals-enhanced when present)"

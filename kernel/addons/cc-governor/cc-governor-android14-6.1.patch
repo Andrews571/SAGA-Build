@@ -1,25 +1,8 @@
 diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
-index c93954613..1bb20c421 100644
+index c939546..cfa0bdb 100644
 --- a/drivers/cpufreq/Kconfig
 +++ b/drivers/cpufreq/Kconfig
-@@ -113,6 +113,16 @@ config CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
- 	  have a look at the help section of that governor. The fallback
- 	  governor will be 'performance'.
- 
-+config CPU_FREQ_DEFAULT_GOV_CC
-+	bool "cc_governor (SAGA)"
-+	depends on SMP
-+	select CPU_FREQ_GOV_CC
-+	select CPU_FREQ_GOV_PERFORMANCE
-+	help
-+	  Use the 'cc_governor' CPUFreq governor by default. If unsure,
-+	  have a look at the help section of that governor. The fallback
-+	  governor will be 'performance'.
-+
- endchoice
- 
- config CPU_FREQ_GOV_PERFORMANCE
-@@ -211,6 +221,40 @@ config CPU_FREQ_GOV_SCHEDUTIL
+@@ -211,6 +211,47 @@ config CPU_FREQ_GOV_SCHEDUTIL
  
  	  If in doubt, say N.
  
@@ -43,6 +26,13 @@ index c93954613..1bb20c421 100644
 +	  enable alongside schedutil, reflex and pccg, does not replace any
 +	  of them.
 +
++	  Deliberately NOT selectable as the compile-time default governor:
++	  the default is consumed while the cpufreq driver creates its
++	  policies during early boot, and CPU_FREQ_DEFAULT_GOV_CC=y was
++	  observed to bootloop MT6878 before the ROM logo. The SAGA build
++	  instead switches every policy to cc_governor from a delayed work
++	  ~20s after boot (see kernel/addons/cc-governor/enforcer.py).
++
 +	  If CONFIG_CLUTCH_SIGNALS is also enabled (see the clutch-signals
 +	  addon, kernel/addons/clutch-signals/, which provides the
 +	  include/linux/clutch.h header, kernel/sched/clutch.c storage, and
@@ -60,12 +50,27 @@ index c93954613..1bb20c421 100644
  comment "CPU frequency scaling drivers"
  
  config CPUFREQ_DT
+diff --git a/kernel/sched/build_utility.c b/kernel/sched/build_utility.c
+index 99bdd96..ac094ea 100644
+--- a/kernel/sched/build_utility.c
++++ b/kernel/sched/build_utility.c
+@@ -69,6 +69,10 @@
+ # include "cpufreq_schedutil.c"
+ #endif
+ 
++#ifdef CONFIG_CPU_FREQ_GOV_CC
++# include "cc_governor.c"
++#endif
++
+ #ifdef CONFIG_SCHED_DEBUG
+ # include "debug.c"
+ #endif
 diff --git a/kernel/sched/cc_governor.c b/kernel/sched/cc_governor.c
 new file mode 100644
-index 000000000..82e7fc154
+index 0000000..6a5ac40
 --- /dev/null
 +++ b/kernel/sched/cc_governor.c
-@@ -0,0 +1,1864 @@
+@@ -0,0 +1,1857 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA CC_GOVERNOR (Cerebral Clutch Governor) — CPUFreq governor
@@ -1922,23 +1927,4 @@ index 000000000..82e7fc154
 +	.limits			= cc_limits,
 +};
 +
-+#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_CC
-+struct cpufreq_governor *cpufreq_default_governor(void)
-+{
-+	return &cc_gov;
-+}
-+#endif
-+
 +cpufreq_governor_init(cc_gov);
-diff --git a/kernel/sched/build_utility.c b/kernel/sched/build_utility.c
-index 99bdd96f4..ac094ea90 100644
---- a/kernel/sched/build_utility.c
-+++ b/kernel/sched/build_utility.c
-@@ -72,3 +72,7 @@
-+#ifdef CONFIG_CPU_FREQ_GOV_CC
-+# include "cc_governor.c"
-+#endif
-+
- #ifdef CONFIG_SCHED_DEBUG
- # include "debug.c"
- #endif
