@@ -67,10 +67,10 @@ index 99bdd96..ac094ea 100644
  #endif
 diff --git a/kernel/sched/cc_governor.c b/kernel/sched/cc_governor.c
 new file mode 100644
-index 0000000..6a5ac40
+index 0000000..5d06f9d
 --- /dev/null
 +++ b/kernel/sched/cc_governor.c
-@@ -0,0 +1,1857 @@
+@@ -0,0 +1,1903 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA CC_GOVERNOR (Cerebral Clutch Governor) — CPUFreq governor
@@ -188,16 +188,32 @@ index 0000000..6a5ac40
 + *     SCHED_CAPACITY_SCALE (i.e. "unset") when uclamp isn't in active
 + *     use, so this is inert until Android's own task_profiles actually
 + *     set a clamp.
-+ *   - EAS: investigated, not implemented as requested. There is no
++ *   - EAS: investigated, not implemented as requested -- there is no
 + *     governor-side "declare EAS compatibility" mechanism to hook into
-+ *     on this kernel -- build_perf_domains() (kernel/sched/topology.c)
++ *     on this kernel. build_perf_domains() (kernel/sched/topology.c)
 + *     gates purely on sysctl_sched_energy_aware, topology symmetry/SMT/
 + *     frequency-invariance, and a populated Energy Model, never on
 + *     which cpufreq governor is active. Adding a flag that nothing
-+ *     reads would be dead code dressed up as a feature. What IS real
-+ *     and implemented: stat_eas_present, reporting whether an Energy
-+ *     Model exists for this policy's CPU (via em_cpu_get()), as a
-+ *     diagnostic for *why* EAS may be inactive on a given device.
++ *     reads would be dead code dressed up as a feature.
++ *   - EAS refinement (post-confirmation round, 14/10/2026): the
++ *     original premise of stat_eas_present (EAS decorative on MT6878
++ *     because the Energy Model was not populated) was wrong -- the real
++ *     EM lives in /sys/kernel/debug/energy_model/, not in
++ *     /sys/devices/system/cpu/energy_model/. The EM is populated, the
++ *     topology has SD_ASYM_CPUCAPACITY_FULL, invariance via AMU
++ *     (CONFIG_ARM64_AMU_EXTN=y) works, and no MTK subsystem overrides
++ *     the scheduler. EAS is active. stat_eas_present was replaced by a
++ *     family of 4 live (non-cached) readouts reporting the real state:
++ *     stat_eas_em_present (EM exists for the policy's CPU),
++ *     stat_eas_aware (sched_energy_aware sysctl), stat_eas_active
++ *     (sched_energy_present static key -- the definitive answer) and
++ *     stat_eas_freq_inv (frequency invariance). On MT6878 with this
++ *     kernel the expected readout is 1/1/1/1. The conclusion above
++ *     (nothing to declare to EAS) is unchanged. Note: no
++ *     sched_energy_aware_enabled() exists in android14-6.1 and the
++ *     sysctl variable is static in topology.c (included AFTER this
++ *     file in build_utility.c), so this patch adds that accessor to
++ *     topology.c.
 + *   - Reclaim/zram awareness (cc_reclaim_active() / cc_update_hispeed()):
 + *     a PGSCAN_DIRECT delta since the last window (direct reclaim is
 + *     synchronous, in the allocating task's own context -- a reasonable
@@ -1487,35 +1503,62 @@ index 0000000..6a5ac40
 +CC_STAT_ATTR(stat_reclaim_suppressed);
 +
 +/*
-+ * stat_eas_present: NOT a per-CPU running counter like the others above
-+ * (summing a boolean across every CPU in the policy would just give a
-+ * confusing CPU count instead of 0/1) -- computed fresh on every read via
-+ * em_cpu_get(), which is a cheap pointer lookup, not cached. Frente 2's
-+ * own finding (see the file header) is that no cpufreq-governor-side
-+ * "declare EAS support" mechanism exists to hook into in this kernel --
-+ * build_perf_domains() in kernel/sched/topology.c gates purely on
-+ * sysctl_sched_energy_aware, topology symmetry/SMT/frequency-invariance,
-+ * and a populated Energy Model, never on which governor is active. This
-+ * attribute reports the one piece of that gate CC can actually observe
-+ * (whether an EM exists for this policy's CPU), for diagnosing *why*
-+ * EAS may be inactive -- not because declaring anything would turn it
-+ * on.
++ * EAS state readouts. NOT per-CPU running counters like the ones above
++ * (summing a boolean across the policy's CPUs would give a CPU count
++ * instead of 0/1): each is evaluated fresh on every read, nothing is
++ * cached. Interpretation (em_present/aware/active/freq_inv):
++ *   1/1/1/1  EAS active (expected on POCO X7)
++ *   1/1/0/1  EM + sysctl OK but the static key did not turn on --
++ *            look at build_perf_domains()
++ *   1/1/0/0  broken invariance -> EAS disabled by the gate
++ *   1/0/0/-  sysctl off (user/ROM)
++ *   0/-/0/-  no Energy Model -> EAS cannot activate
 + */
-+static ssize_t cc_stat_stat_eas_present_show(struct gov_attr_set *attr_set, char *buf)
++#if defined(CONFIG_ENERGY_MODEL) && defined(CONFIG_CPU_FREQ_GOV_SCHEDUTIL)
++/* defined in topology.c (static sysctl variable lives there) */
++extern bool sched_energy_aware_enabled(void);
++#else
++static inline bool sched_energy_aware_enabled(void) { return false; }
++#endif
++
++static struct cpufreq_policy *cc_first_policy(struct gov_attr_set *attr_set)
 +{
 +	struct cc_policy *cc_policy;
-+	unsigned int cpu = 0;
 +
-+	list_for_each_entry(cc_policy, &attr_set->policy_list, tunables_hook) {
-+		cpu = cpumask_first(cc_policy->policy->related_cpus);
-+		break;
-+	}
++	list_for_each_entry(cc_policy, &attr_set->policy_list, tunables_hook)
++		return cc_policy->policy;
++	return NULL;
++}
++
++static ssize_t cc_stat_stat_eas_em_present_show(struct gov_attr_set *attr_set, char *buf)
++{
++	struct cpufreq_policy *policy = cc_first_policy(attr_set);
++	unsigned int cpu;
++
++	if (!policy)
++		return sprintf(buf, "0\n");
++	cpu = cpumask_first(policy->related_cpus);
 +	return sprintf(buf, "%d\n", em_cpu_get(cpu) ? 1 : 0);
 +}
-+static struct governor_attr cc_stat_stat_eas_present_attr = {
-+	.attr	= { .name = "stat_eas_present", .mode = 0444 },
-+	.show	= cc_stat_stat_eas_present_show,
++static struct governor_attr cc_stat_stat_eas_em_present_attr = {
++	.attr	= { .name = "stat_eas_em_present", .mode = 0444 },
++	.show	= cc_stat_stat_eas_em_present_show,
 +};
++
++#define CC_EAS_ATTR(_name, _expr)					\
++static ssize_t cc_stat_##_name##_show(struct gov_attr_set *attr_set, char *buf) \
++{									\
++	return sprintf(buf, "%d\n", (_expr) ? 1 : 0);			\
++}									\
++static struct governor_attr cc_stat_##_name##_attr = {			\
++	.attr	= { .name = #_name, .mode = 0444 },			\
++	.show	= cc_stat_##_name##_show,				\
++}
++
++CC_EAS_ATTR(stat_eas_aware, sched_energy_aware_enabled());
++CC_EAS_ATTR(stat_eas_active, sched_energy_enabled());
++CC_EAS_ATTR(stat_eas_freq_inv, arch_scale_freq_invariant());
++#undef CC_EAS_ATTR
 +
 +#undef CC_STAT_ATTR
 +
@@ -1529,7 +1572,10 @@ index 0000000..6a5ac40
 +	&cc_stat_stat_uclamp_gated_attr.attr,
 +	&cc_stat_stat_uclamp_capped_attr.attr,
 +	&cc_stat_stat_reclaim_suppressed_attr.attr,
-+	&cc_stat_stat_eas_present_attr.attr,
++	&cc_stat_stat_eas_em_present_attr.attr,
++	&cc_stat_stat_eas_aware_attr.attr,
++	&cc_stat_stat_eas_active_attr.attr,
++	&cc_stat_stat_eas_freq_inv_attr.attr,
 +	&cc_rate_limit_us.attr,
 +	&cc_hispeed_window_us_attr.attr,
 +	&cc_hispeed_load_pct_attr.attr,
@@ -1928,3 +1974,20 @@ index 0000000..6a5ac40
 +};
 +
 +cpufreq_governor_init(cc_gov);
+diff --git a/kernel/sched/topology.c b/kernel/sched/topology.c
+index d6c87cd..2e9824a 100644
+--- a/kernel/sched/topology.c
++++ b/kernel/sched/topology.c
+@@ -212,6 +212,12 @@ sd_parent_degenerate(struct sched_domain *sd, struct sched_domain *parent)
+ #if defined(CONFIG_ENERGY_MODEL) && defined(CONFIG_CPU_FREQ_GOV_SCHEDUTIL)
+ DEFINE_STATIC_KEY_FALSE(sched_energy_present);
+ static unsigned int sysctl_sched_energy_aware = 1;
++
++/* SAGA cc_governor: read-only accessor for stat_eas_aware */
++bool sched_energy_aware_enabled(void)
++{
++	return READ_ONCE(sysctl_sched_energy_aware);
++}
+ DEFINE_MUTEX(sched_energy_mutex);
+ bool sched_energy_update;
+ 
