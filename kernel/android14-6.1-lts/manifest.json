@@ -64,7 +64,7 @@
     ]
   },
   "ksunext_susfs_fork": {
-    "good": "38934d43956511d5a36c7722c0f96b9e9ff0e3ff",
+    "good": "d68020659f0421cec6372f7f034a062422e084db",
     "bad": [
       "b82928c4d15fd685c021c52dcfca0a08452a6a15"
     ]
