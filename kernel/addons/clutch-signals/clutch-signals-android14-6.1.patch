@@ -3,7 +3,8 @@ SAGA-Build addon: clutch-signals
 
 O que é: o bridge compartilhado e neutro entre o ADIOS I/O scheduler
 (escritor de io_pressure/topapp_active) e a Cerebral Clutch (CC) CPU
-governor (leitor).
+governor (leitor), mais o canal memory_pressure (dormente, ver
+changelog abaixo).
 
 Ordem de aplicação: aplicar ANTES de adios-clutch e de cc-governor. Se
 qualquer um dos dois for aplicado sem este addon, o #include
@@ -13,8 +14,8 @@ dependência explícita de ambos.
 O que ele fornece:
   - include/linux/clutch.h (declarações + stubs no-op quando
     CONFIG_CLUTCH_SIGNALS=n)
-  - kernel/sched/clutch.c (storage: 2 atomic_t -- io_pressure,
-    topapp_active)
+  - kernel/sched/clutch.c (storage: 3 atomic_t -- io_pressure,
+    topapp_active, mem_pressure)
   - CONFIG_CLUTCH_SIGNALS em block/Kconfig.iosched (logo após o help de
     MQ_IOSCHED_KYBER, antes de IOSCHED_BFQ -- âncora que
     ADIOS_Clutch-Android-14-6.1.patch espera para o seu próprio bloco
@@ -22,45 +23,51 @@ O que ele fornece:
   - obj-$(CONFIG_CLUTCH_SIGNALS) += clutch.o em kernel/sched/Makefile
 
 O que ele NÃO faz: não escreve nem lê nada por conta própria. Todos os
-call sites (report/get) vivem nos consumidores (ADIOS, CC).
+call sites (report/get) vivem nos consumidores (ADIOS, CC, subsistema
+de memória).
 
 -------------------------------------------------------------------------
-Changelog desta revisão (remoção de memory_pressure -- dead code):
+Changelog desta revisão (A8 -- reversão da remoção de memory_pressure):
 
-Contexto: uma rodada anterior adicionou clutch_report_memory_pressure()
-/ clutch_get_memory_pressure() ao bridge, pensando que o CC consumiria
-pressão de memória por aqui. Na prática o CC lê PGSCAN_DIRECT
-diretamente via all_vm_events() em cc_reclaim_active() -- nunca passou
-pelo bridge. Resultado: as duas funções (e o atomic_t clutch_mem_pressure
-que as sustentava) eram dead code desde o dia em que foram adicionadas
--- zero writers (ADIOS nunca chamava, o subsistema de memória também
-não), zero readers (CC lê vmstat direto).
+Uma rodada anterior removeu clutch_report_memory_pressure() /
+clutch_get_memory_pressure() por serem dead code (zero writers, zero
+readers -- o CC lê PGSCAN_DIRECT direto via all_vm_events(), nunca
+passou pelo bridge). Decisão revisada nesta rodada: MANTER, revertendo
+essa remoção. Motivo:
 
-Decisão do projeto: removido. O CC é autossuficiente lendo vmstat
-diretamente para reclaim; o bridge não deve carregar sinal sem
-consumidor confirmado. Racional: menos superfície com mais propósito --
-mesmo critério já aplicado na rodada anterior para não adicionar
-topapp_active_now/batch_limit_effective/in_flight ao lado ADIOS.
+  - O canal não custa nada em runtime (dois atomic_t globais a mais,
+    sem leitor nem escritor ativo).
+  - PGSCAN_DIRECT cobre só reclaim direto; o trabalho do kswapd e do
+    kcompressd -- que fazem a maior parte da compressão do ZRAM -- não
+    aparece ali.
+  - A frente ZRAM está ativa (integração recente de PGSCAN_DIRECT do
+    lado CC), e esse canal é o lugar natural para receber o sinal mais
+    completo quando/se um writer for implementado.
 
-Se um hook real no subsistema de memória fizer sentido no futuro,
-reintroduzir com o writer implementado NO MESMO patch que adiciona o
-sinal ao bridge -- não especulativamente, como da vez passada.
+As duas funções voltaram exatamente como estavam antes da remoção:
+clutch_report_memory_pressure(u32 pct_0_100) / clutch_get_memory_pressure()
+em include/linux/clutch.h (declaração real sob CONFIG_CLUTCH_SIGNALS,
+stub no-op no #else) e kernel/sched/clutch.c (atomic_t
+clutch_mem_pressure, duas funções EXPORT_SYMBOL_GPL, clamp 0..100).
+ADIOS continua sem nenhuma mudança -- ele só inclui o header.
 
-Removido de include/linux/clutch.h: as 2 declarações reais (sob
-CONFIG_CLUTCH_SIGNALS) e os 2 stubs no-op (sob #else).
-Removido de kernel/sched/clutch.c: static atomic_t clutch_mem_pressure
-e as 2 implementações EXPORT_SYMBOL_GPL.
-block/Kconfig.iosched e kernel/sched/Makefile: inalterados por esta
-revisão (o sinal nunca teve presença ali).
+Se/quando um writer real for implementado (hook no subsistema de
+memória), implementar no MESMO patch que o liga ao bridge -- não
+especulativamente, como aconteceu aqui.
+
+(A7 -- bridge "último a reportar vence": já documentado no comentário
+de update_timer_callback() dentro de ADIOS_Clutch-Android-14-6.1.patch,
+nenhuma mudança necessária nesta rodada.)
 
 Verificação: patch -p1 --fuzz=0 aplica limpo contra clone fresco de
 github.com/Andrews571/SAGA-Kernel-6.1 @ android14-6.1-live-staging. Os
 4 arquivos tocados (include/linux/clutch.h, kernel/sched/clutch.c,
 kernel/sched/Makefile, block/Kconfig.iosched) aplicam com zero
-rejects, exit code 0.
+rejects, exit code 0. Em sequência com ADIOS_Clutch-Android-14-6.1.patch
+também: exit 0, zero rejects.
 -------------------------------------------------------------------------
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
-index 6155161..120fd3e 100644
+index 615516146..120fd3e73 100644
 --- a/block/Kconfig.iosched
 +++ b/block/Kconfig.iosched
 @@ -16,6 +16,25 @@ config MQ_IOSCHED_KYBER
@@ -91,10 +98,10 @@ index 6155161..120fd3e 100644
  	select BLK_ICQ
 diff --git a/include/linux/clutch.h b/include/linux/clutch.h
 new file mode 100644
-index 0000000..420fad8
+index 000000000..7b7ef5f95
 --- /dev/null
 +++ b/include/linux/clutch.h
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,69 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +#ifndef _LINUX_CLUTCH_H
 +#define _LINUX_CLUTCH_H
@@ -124,16 +131,21 @@ index 0000000..420fad8
 + * Neither consumer needs to wrap call sites in #ifdef CONFIG_CLUTCH_SIGNALS
 + * themselves -- that's handled once, here.
 + *
-+ * A memory_pressure signal (clutch_report_memory_pressure() /
-+ * clutch_get_memory_pressure()) was added and then removed in this same
-+ * round: the CC side reads PGSCAN_DIRECT directly via all_vm_events()
-+ * in cc_reclaim_active(), so the bridge functions had zero writers and
-+ * zero readers -- dead code from the moment they landed. CC is
-+ * self-sufficient reading vmstat directly for reclaim pressure; no
-+ * bridge hook is needed for that signal. If a real reason to hook the
-+ * memory subsystem itself ever comes up, reintroduce it with the
-+ * writer implemented in the SAME patch, not speculatively ahead of a
-+ * confirmed consumer.
++ * Memory pressure (clutch_report_memory_pressure() /
++ * clutch_get_memory_pressure()) is reported by the memory subsystem
++ * itself (kswapd, kcompressd, direct reclaim, ...), not by ADIOS --
++ * ADIOS never calls the report function, it only ever #includes this
++ * header. Kept even though no writer is implemented yet (decision:
++ * KEEP, not dead-code-remove): the CC side today only sees direct
++ * reclaim via PGSCAN_DIRECT through all_vm_events(), a separate path
++ * that bypasses this bridge entirely -- but kswapd/kcompressd do most
++ * of the actual ZRAM compression work and never show up in
++ * PGSCAN_DIRECT. The cost of keeping an unused atomic_t is zero at
++ * runtime, and if the ZRAM-pressure work continues (it's active, see
++ * the recent PGSCAN_DIRECT integration on the CC side), this is the
++ * natural channel for the more complete signal once a writer is
++ * implemented -- together, in the same patch as the writer, not ahead
++ * of it.
 + */
 +
 +#include <linux/types.h>
@@ -144,17 +156,23 @@ index 0000000..420fad8
 +u32 clutch_get_io_pressure(void);
 +bool clutch_get_topapp_active(void);
 +
++void clutch_report_memory_pressure(u32 pct_0_100);
++u32 clutch_get_memory_pressure(void);
++
 +#else
 +
 +static inline void clutch_report_io_pressure(u32 pct_0_100, bool topapp_active) {}
 +static inline u32 clutch_get_io_pressure(void) { return 0; }
 +static inline bool clutch_get_topapp_active(void) { return false; }
 +
++static inline void clutch_report_memory_pressure(u32 pct_0_100) {}
++static inline u32 clutch_get_memory_pressure(void) { return 0; }
++
 +#endif /* CONFIG_CLUTCH_SIGNALS */
 +
 +#endif /* _LINUX_CLUTCH_H */
 diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
-index ff1738c..4a47e3d 100644
+index ff1738cec..4a47e3de4 100644
 --- a/kernel/sched/Makefile
 +++ b/kernel/sched/Makefile
 @@ -33,3 +33,8 @@ obj-y += fair.o
@@ -168,10 +186,10 @@ index ff1738c..4a47e3d 100644
 +obj-$(CONFIG_CLUTCH_SIGNALS) += clutch.o
 diff --git a/kernel/sched/clutch.c b/kernel/sched/clutch.c
 new file mode 100644
-index 0000000..650b78b
+index 000000000..9ff6ecf05
 --- /dev/null
 +++ b/kernel/sched/clutch.c
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,66 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Clutch bridge storage -- see include/linux/clutch.h for the full
@@ -179,14 +197,14 @@ index 0000000..650b78b
 + * is set (see the obj-$(CONFIG_CLUTCH_SIGNALS) rule in
 + * kernel/sched/Makefile), so nothing here needs its own #ifdef guard.
 + *
-+ * Plain atomic_t, not a spinlock-protected struct: both fields are
-+ * independent, single-word values with no ordering requirement between
-+ * them (a reader seeing an io_pressure update slightly before or after
-+ * a topapp_active update from the same ADIOS report is fine -- neither
-+ * consumer treats them as a single atomic snapshot). atomic_read() is
-+ * non-blocking and safe from any context, including under a raw
-+ * spinlock (CC_GOVERNOR's shared-policy path takes one around exactly
-+ * this kind of read).
++ * Plain atomic_t, not a spinlock-protected struct: all three fields
++ * are independent, single-word values with no ordering requirement
++ * between them (a reader seeing an io_pressure update slightly before
++ * or after a topapp_active update from the same ADIOS report is fine
++ * -- neither consumer treats them as a single atomic snapshot).
++ * atomic_read() is non-blocking and safe from any context, including
++ * under a raw spinlock (CC_GOVERNOR's shared-policy path takes one
++ * around exactly this kind of read).
 + */
 +#include <linux/clutch.h>
 +#include <linux/atomic.h>
@@ -194,6 +212,7 @@ index 0000000..650b78b
 +
 +static atomic_t clutch_io_pressure = ATOMIC_INIT(0);
 +static atomic_t clutch_topapp_active = ATOMIC_INIT(0);
++static atomic_t clutch_mem_pressure = ATOMIC_INIT(0);
 +
 +void clutch_report_io_pressure(u32 pct_0_100, bool topapp_active)
 +{
@@ -215,3 +234,25 @@ index 0000000..650b78b
 +	return atomic_read(&clutch_topapp_active) != 0;
 +}
 +EXPORT_SYMBOL_GPL(clutch_get_topapp_active);
++
++/*
++ * Memory pressure (ZRAM reclaim etc.) is reported by the memory
++ * subsystem itself (kswapd, kcompressd, direct reclaim, ...), not by
++ * ADIOS -- ADIOS only ever #includes this header, it never calls
++ * clutch_report_memory_pressure(). No writer is implemented yet
++ * (decision: KEEP as dormant channel, not dead-code-remove) -- see
++ * the comment in include/linux/clutch.h for why.
++ */
++void clutch_report_memory_pressure(u32 pct_0_100)
++{
++	if (pct_0_100 > 100)
++		pct_0_100 = 100;
++	atomic_set(&clutch_mem_pressure, (int)pct_0_100);
++}
++EXPORT_SYMBOL_GPL(clutch_report_memory_pressure);
++
++u32 clutch_get_memory_pressure(void)
++{
++	return (u32)atomic_read(&clutch_mem_pressure);
++}
++EXPORT_SYMBOL_GPL(clutch_get_memory_pressure);
