@@ -67,10 +67,10 @@ index 99bdd96..ac094ea 100644
  #endif
 diff --git a/kernel/sched/cc_governor.c b/kernel/sched/cc_governor.c
 new file mode 100644
-index 0000000..5d06f9d
+index 0000000..3c3094d
 --- /dev/null
 +++ b/kernel/sched/cc_governor.c
-@@ -0,0 +1,1903 @@
+@@ -0,0 +1,1995 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SAGA CC_GOVERNOR (Cerebral Clutch Governor) — CPUFreq governor
@@ -99,7 +99,7 @@ index 0000000..5d06f9d
 + *     (busy_threshold_pct, default 15%) -- it snaps back toward idle
 + *     instead of decaying gradually as if a sustained burst had merely
 + *     dipped for a moment.
-+ *   - KTHREAD-FILTERED WAKE-EDGES (cc_wake_edge_check()): a wake edge
++ *   - KTHREAD-FILTERED WAKE-EDGES (cc_wake_edge_*()): a wake edge
 + *     observed while rq->curr is a kthread doesn't trigger the floor by
 + *     default -- best-effort, see the filter_kthreads field comment for
 + *     the real precision limit (cpufreq's update_util interface doesn't
@@ -214,16 +214,34 @@ index 0000000..5d06f9d
 + *     sysctl variable is static in topology.c (included AFTER this
 + *     file in build_utility.c), so this patch adds that accessor to
 + *     topology.c.
++ *   - Review round (16/10/2026):
++ *     A1: cc_reclaim_active() no longer calls all_vm_events() -- it takes
++ *         cpus_read_lock() (can sleep) and ran under raw_spin_lock +
++ *         rq lock in update_util. Now a lock-free read of the CPU's own
++ *         vm_event_states slot ("direct reclaim on this CPU").
++ *     A3: stat_* counters moved out of struct cc_cpu into per-CPU
++ *         struct cc_stats: cc_start() (governor switch, hotplug, every
++ *         cpufreq suspend/resume) memsets cc_cpu and used to zero them.
++ *         New stat_governor_starts counts cc_start() runs.
++ *     A4: wake-edge split into cc_wake_edge_track() (always, updates
++ *         prev_nr_running) and cc_wake_edge_boost() (only when not
++ *         uclamp-gated). Side effect: a kthread-filtered edge no longer
++ *         leaves prev_nr_running stale (it used to be re-evaluated, and
++ *         re-counted in stat_triggers_total, on following updates).
++ *     A6: bore-warp hints older than 2*hispeed_window_us are discarded
++ *         (stat_bore_warp_stale). Needs the bore_warp_fired_ns field
++ *         from the bore-warp addon.
 + *   - Reclaim/zram awareness (cc_reclaim_active() / cc_update_hispeed()):
 + *     a PGSCAN_DIRECT delta since the last window (direct reclaim is
 + *     synchronous, in the allocating task's own context -- a reasonable
 + *     proxy for "some of this window's measured busy% was page
 + *     scanning/zram compression, not interactive work") halves the
 + *     confirmed target rather than suppressing it outright
-+ *     (stat_reclaim_suppressed). Reads 0 forever when
-+ *     CONFIG_VM_EVENT_COUNTERS is off, since all_vm_events() is a true
-+ *     no-op in that config and the governor explicitly zero-inits
-+ *     before calling it rather than trusting the stub to.
++ *     (stat_reclaim_suppressed). The delta is read lock-free from the
++ *     CPU's OWN vm_event_states slot (all_vm_events() takes
++ *     cpus_read_lock(), which can sleep -- illegal in this atomic
++ *     path), so it means "direct reclaim on this CPU". Never detects
++ *     reclaim when CONFIG_VM_EVENT_COUNTERS is off.
 + *
 + * All tunables are per-policy sysfs knobs (same gov_attr_set mechanism
 + * schedutil/reflex/pccg use), so a single kernel build stays usable
@@ -274,7 +292,7 @@ index 0000000..5d06f9d
 +	unsigned int		hispeed_hold_us;
 +
 +	/* Self-sufficient primary trigger: fire the floor the instant this
-+	 * CPU's rq->nr_running goes 0->1 (see cc_wake_edge_check()). No
++	 * CPU's rq->nr_running goes 0->1 (see cc_wake_edge_*()). No
 +	 * dependency on anything beyond the core scheduler. 1 = on
 +	 * (default), 0 = disable this path (pure idle-time + BORE, if
 +	 * present). */
@@ -408,48 +426,21 @@ index 0000000..5d06f9d
 +	u64			hispeed_hold_until;	/* ns; decay gated until this */
 +
 +	/* Self-sufficient wake-edge detector state (see
-+	 * cc_wake_edge_check()). No CONFIG dependency at all -- plain
++	 * cc_wake_edge_*()). No CONFIG dependency at all -- plain
 +	 * rq->nr_running is always present. */
 +	unsigned int		prev_nr_running;
 +
-+	/* Telemetry -- read-only via sysfs (see stat_*_show()), meant for
-+	 * calibrating streak_window_us/streak_min_count/instant_trigger_pct
-+	 * against this device's actual wakeup pattern instead of guessing
-+	 * from a synthetic trace again. Plain u64 counters, not atomic:
-+	 * they're only ever incremented from this CPU's own update_util
-+	 * context (see the @local gating in cc_get_util()), so nothing
-+	 * else can race a write to them -- a concurrent sysfs read summing
-+	 * across CPUs can still see a slightly stale value on some of them,
-+	 * which is fine for a diagnostic counter. */
-+	u64			stat_triggers_total;
-+	u64			stat_triggers_confirmed;
-+	u64			stat_instant_applied;
-+	u64			stat_streak_applied;
-+	/* Confirmations via ADIOS's topapp_active signal specifically (the
-+	 * clutch bridge, optional) -- separate from stat_streak_applied so
-+	 * the two confirmation paths stay distinguishable when calibrating.
-+	 * Always 0 without the bridge. */
-+	u64			stat_topapp_confirmed;
-+	/* Number of bore-warp grants consumed by this CPU's
-+	 * cc_bore_warp_check() -- how many times bore_warp_preempt() in
-+	 * fair.c actually granted a warp and we picked it up. Separate
-+	 * from stat_topapp_confirmed (ADIOS bridge) and stat_streak_applied
-+	 * (CC's own streak detector). Meant for calibrating
-+	 * sched_bore_warp_us: if this climbs at hundreds per second during
-+	 * normal use, the cooldown is too short or the score check too
-+	 * loose. Always 0 when CONFIG_SCHED_BORE is off or the bore-warp
-+	 * addon isn't applied. */
-+	u64			stat_bore_warp_confirmed;
-+	/* Frente 1 (uclamp): see cc_uclamp_min_covers()/cc_get_util(). */
-+	u64			stat_uclamp_gated;
-+	u64			stat_uclamp_capped;
-+	/* Frente 3 (reclaim): see cc_reclaim_active(). */
-+	u64			stat_reclaim_suppressed;
-+	/* Last-seen PGSCAN_DIRECT total, seeded in cc_start() -- not a
-+	 * telemetry counter itself, just cc_reclaim_active()'s baseline. */
++	/* Telemetry counters live in struct cc_stats / cc_stats_data below,
++	 * NOT here: cc_start() memsets this whole struct on every governor
++	 * (re)start -- governor switch, CPU hotplug, and every
++	 * cpufreq_suspend()/cpufreq_resume() -- which used to zero the
++	 * counters along with it. */
++	/* Last-seen PGSCAN_DIRECT total of THIS cpu, seeded in cc_start() --
++	 * not a telemetry counter itself, just cc_reclaim_active()'s
++	 * baseline (correctly reset on every restart). */
 +	unsigned long		reclaim_prev_pgscan;
 +
-+	/* Streak-detection ring buffer for cc_wake_edge_check() -- see
++	/* Streak-detection ring buffer for cc_wake_edge_*() -- see
 +	 * the streak_window_us/streak_min_count comment in struct
 +	 * cc_tunables. Zero-initialized (by the memset in cc_start()),
 +	 * which is safe: a 0 timestamp is always "ancient" relative to any
@@ -465,6 +456,58 @@ index 0000000..5d06f9d
 +};
 +
 +static DEFINE_PER_CPU(struct cc_cpu, cc_cpu_data);
++
++/*
++ * Telemetry -- read-only via sysfs (see stat_*_show()), meant for
++ * calibrating streak_window_us/streak_min_count/instant_trigger_pct
++ * against this device's actual wakeup pattern instead of guessing from a
++ * synthetic trace again. Plain u64 counters, not atomic: each CPU's own
++ * update_util context is the only writer in the normal (@local) case, so
++ * nothing races a write to them -- a concurrent sysfs read summing across
++ * CPUs can still see a slightly stale value on some of them, which is
++ * fine for a diagnostic counter.
++ *
++ * Separate per-CPU object, deliberately NOT inside struct cc_cpu:
++ * cc_start() runs on governor switch, CPU hotplug of a policy CPU and on
++ * every cpufreq_suspend()/cpufreq_resume() (i.e. every device
++ * suspend/resume), and memsets struct cc_cpu each time. Counters kept
++ * there were silently reset all the time. These are never zeroed after
++ * boot; stat_governor_starts counts how often cc_start() ran.
++ */
++struct cc_stats {
++	u64	stat_triggers_total;
++	u64	stat_triggers_confirmed;
++	u64	stat_instant_applied;
++	u64	stat_streak_applied;
++	/* Confirmations via ADIOS's topapp_active signal (the clutch
++	 * bridge, optional) -- separate from stat_streak_applied so the
++	 * two confirmation paths stay distinguishable when calibrating.
++	 * Always 0 without the bridge. */
++	u64	stat_topapp_confirmed;
++	/* Bore-warp grants consumed by cc_bore_warp_check() (fresh ones
++	 * only). Meant for calibrating sched_bore_warp_us: if this climbs
++	 * at hundreds per second during normal use, the cooldown is too
++	 * short or the score check too loose. Always 0 when
++	 * CONFIG_SCHED_BORE is off or the bore-warp addon isn't applied. */
++	u64	stat_bore_warp_confirmed;
++	/* Bore-warp grants consumed but discarded as too old (see
++	 * cc_bore_warp_check()). Always 0 without the bore-warp addon. */
++	u64	stat_bore_warp_stale;
++	/* Frente 1 (uclamp): see cc_uclamp_min_covers()/cc_get_util(). */
++	u64	stat_uclamp_gated;
++	u64	stat_uclamp_capped;
++	/* Frente 3 (reclaim): see cc_reclaim_active(). */
++	u64	stat_reclaim_suppressed;
++	/* Times cc_start() ran for the policy (counted once per start, on
++	 * the first CPU of policy->cpus). */
++	u64	stat_governor_starts;
++};
++static DEFINE_PER_CPU(struct cc_stats, cc_stats_data);
++
++/* per_cpu(), not this_cpu_*: the same increment sites also run for a
++ * remote CPU's cc_cpu on the shared-policy path. Nothing here sleeps. */
++#define CC_STAT_INC(_cc_cpu, _field) \
++	(per_cpu(cc_stats_data, (_cc_cpu)->cpu)._field++)
 +
 +/************************ Governor internals ***********************/
 +
@@ -648,7 +691,7 @@ index 0000000..5d06f9d
 + */
 +/*
 + * cc_reclaim_active() - did direct (synchronous, in-task-context) page
-+ * reclaim happen since the last sample?
++ * reclaim happen on THIS CPU since the last sample?
 + *
 + * PGSCAN_DIRECT specifically (not the kswapd/background counters) only
 + * increments when a task's own allocation stalled on reclaim -- exactly
@@ -656,28 +699,43 @@ index 0000000..5d06f9d
 + * scanning/compressing pages (e.g. into zram via lz4kd) rather than
 + * running anything resembling interactive work. Sampled at most once per
 + * hispeed_window_us, piggybacking on the same window gate
-+ * cc_update_hispeed() already has -- all_vm_events() sums per-CPU event
-+ * counters system-wide, cheap enough at this cadence (same cost class as
-+ * get_cpu_idle_time(), already called every window) but not something to
-+ * do on every update_util call.
++ * cc_update_hispeed() already has.
 + *
-+ * events[] is zero-initialized explicitly: the CONFIG_VM_EVENT_COUNTERS=n
-+ * stub for all_vm_events() is a true no-op (doesn't touch the array at
-+ * all), so without the explicit zeroing this would read uninitialized
-+ * stack garbage instead of a clean "no reclaim ever" 0 in that config.
++ * Runs inside the update_util callback (rq lock held, and
++ * cc_policy->update_lock on the shared path): it MUST NOT sleep. The
++ * previous implementation used all_vm_events(), which does
++ * cpus_read_lock() (a percpu rwsem -- might_sleep(), BUG: scheduling
++ * while atomic under CONFIG_DEBUG_ATOMIC_SLEEP, and a stall against
++ * hotplug writers). This reads that CPU's own vm_event_states slot
++ * lock-free instead: one aligned word, a stale/racy value is harmless
++ * for a "did anything happen" test. Semantics are also tighter than the
++ * old system-wide sum: reclaim on CPU X no longer lowers the boost of
++ * every other CPU.
++ *
++ * Without CONFIG_VM_EVENT_COUNTERS there is no per-CPU counter at all:
++ * never detects reclaim (returns false).
++ *
++ * "cur > prev" and not "cur != prev": when a CPU goes offline its
++ * counters are folded into another CPU and zeroed
++ * (vm_events_fold_cpu()), so the value can legitimately go DOWN; that
++ * must resync the baseline, not read as a huge unsigned delta.
 + */
++#ifdef CONFIG_VM_EVENT_COUNTERS
 +static bool cc_reclaim_active(struct cc_cpu *cc_cpu)
 +{
-+	unsigned long events[NR_VM_EVENT_ITEMS] = { 0 };
-+	unsigned long cur, delta;
++	unsigned long cur, prev = cc_cpu->reclaim_prev_pgscan;
 +
-+	all_vm_events(events);
-+	cur = events[PGSCAN_DIRECT];
-+	delta = cur - cc_cpu->reclaim_prev_pgscan;
++	cur = READ_ONCE(per_cpu(vm_event_states, cc_cpu->cpu).event[PGSCAN_DIRECT]);
 +	cc_cpu->reclaim_prev_pgscan = cur;
 +
-+	return delta > 0;
++	return cur > prev;
 +}
++#else
++static inline bool cc_reclaim_active(struct cc_cpu *cc_cpu)
++{
++	return false;
++}
++#endif
 +
 +static void cc_update_hispeed(struct cc_cpu *cc_cpu, u64 time_ns)
 +{
@@ -734,7 +792,7 @@ index 0000000..5d06f9d
 +		 * behalf. */
 +		if (cc_reclaim_active(cc_cpu)) {
 +			target >>= 1;
-+			cc_cpu->stat_reclaim_suppressed++;
++			CC_STAT_INC(cc_cpu, stat_reclaim_suppressed);
 +		}
 +		cc_hispeed_raise(cc_cpu, time_ns, target);
 +	} else if (!held) {
@@ -825,6 +883,7 @@ index 0000000..5d06f9d
 +{
 +	struct cfs_rq *cfs_rq = &cpu_rq(cc_cpu->cpu)->cfs;
 +	unsigned long cap;
++	u64 age_limit, fired_ns;
 +
 +	/* Atomic test-and-clear, not a plain read-then-write: under a
 +	 * shared policy this runs for remote CPUs without their rq lock
@@ -832,7 +891,21 @@ index 0000000..5d06f9d
 +	if (!test_and_clear_bit(0, &cfs_rq->bore_warp_fired))
 +		return;
 +
-+	cc_cpu->stat_bore_warp_confirmed++;
++	/* The bit can sit set for a long time when nobody consumed it
++	 * (gate active, remote CPU, another governor on this policy):
++	 * a warp from long ago must not turn into a "confirmed" boost
++	 * now. Both timestamps use sched_clock() (same base on both
++	 * sides; rq_clock_task() would drift against the rq_clock()
++	 * based update_util time by the accumulated irq time). */
++	fired_ns = READ_ONCE(cfs_rq->bore_warp_fired_ns);
++	age_limit = 2ULL * cc_cpu->cc_policy->tunables->hispeed_window_us *
++		    NSEC_PER_USEC;
++	if ((s64)(sched_clock() - fired_ns) > (s64)age_limit) {
++		CC_STAT_INC(cc_cpu, stat_bore_warp_stale);
++		return;
++	}
++
++	CC_STAT_INC(cc_cpu, stat_bore_warp_confirmed);
 +	cap = arch_scale_cpu_capacity(cc_cpu->cpu);
 +	cc_hispeed_raise(cc_cpu, time_ns, cc_target_util(cc_cpu, cap));
 +}
@@ -874,7 +947,7 @@ index 0000000..5d06f9d
 +}
 +
 +/*
-+ * cc_wake_edge_check() - self-sufficient primary trigger: fire the floor
++ * cc_wake_edge_*() - self-sufficient primary trigger: fire the floor
 + * the instant this CPU's rq->nr_running goes from 0 to nonzero.
 + *
 + * This needs nothing beyond what every Linux scheduler build already
@@ -891,21 +964,39 @@ index 0000000..5d06f9d
 + *
 + * CPU-local only -- see cc_get_util()'s @local parameter.
 + */
-+static void cc_wake_edge_check(struct cc_cpu *cc_cpu, u64 time_ns)
++static bool cc_wake_edge_track(struct cc_cpu *cc_cpu)
 +{
-+	struct cc_tunables *tunables = cc_cpu->cc_policy->tunables;
 +	/* READ_ONCE: nr_running is written by the scheduler on every
 +	 * enqueue/dequeue without any lock held here. One stable snapshot,
-+	 * used for both the edge test and the saved value below -- a
-+	 * reloaded second read could make those two disagree and either
-+	 * miss an edge or fabricate one. */
++	 * used for both the edge test and the saved value -- a reloaded
++	 * second read could make those two disagree and either miss an
++	 * edge or fabricate one. */
 +	unsigned int nr_running = READ_ONCE(cpu_rq(cc_cpu->cpu)->nr_running);
++	bool edge = !cc_cpu->prev_nr_running && nr_running;
 +
-+	if (tunables->wake_edge_boost && !cc_cpu->prev_nr_running && nr_running) {
++	/* Updated unconditionally on EVERY local update -- while
++	 * wake_edge_boost is 0, while the uclamp gate is active, and
++	 * whether or not the boost below then acts on the edge. This is
++	 * edge *tracking*, kept separate from the boost *decision* so
++	 * that neither the knob nor the gate can leave a stale snapshot
++	 * behind: otherwise the first sample after the knob is re-enabled
++	 * or the gate releases would be compared against whatever
++	 * nr_running happened to be before, fabricating or swallowing an
++	 * edge. */
++	cc_cpu->prev_nr_running = nr_running;
++
++	return edge;
++}
++
++static void cc_wake_edge_boost(struct cc_cpu *cc_cpu, u64 time_ns, bool edge)
++{
++	struct cc_tunables *tunables = cc_cpu->cc_policy->tunables;
++
++	if (tunables->wake_edge_boost && edge) {
 +		unsigned long cap = arch_scale_cpu_capacity(cc_cpu->cpu);
 +		bool confirmed;
 +
-+		cc_cpu->stat_triggers_total++;
++		CC_STAT_INC(cc_cpu, stat_triggers_total);
 +
 +		/* Best-effort kthread filter -- see the field comment on
 +		 * filter_kthreads in cc_init() for why this is "whichever
@@ -920,7 +1011,7 @@ index 0000000..5d06f9d
 +
 +		confirmed = cc_streak_confirmed(cc_cpu, time_ns);
 +		if (confirmed) {
-+			cc_cpu->stat_streak_applied++;
++			CC_STAT_INC(cc_cpu, stat_streak_applied);
 +		} else if (clutch_get_topapp_active()) {
 +			/* CLUTCH BRIDGE (optional): if ADIOS has already
 +			 * flagged the top-app cgroup as active (its own
@@ -935,27 +1026,18 @@ index 0000000..5d06f9d
 +			 * stay distinguishable when calibrating. Safe no-op
 +			 * (always false) without the bridge. */
 +			confirmed = true;
-+			cc_cpu->stat_topapp_confirmed++;
++			CC_STAT_INC(cc_cpu, stat_topapp_confirmed);
 +		}
 +
 +		if (confirmed)
-+			cc_cpu->stat_triggers_confirmed++;
++			CC_STAT_INC(cc_cpu, stat_triggers_confirmed);
 +		else
-+			cc_cpu->stat_instant_applied++;
++			CC_STAT_INC(cc_cpu, stat_instant_applied);
 +
 +		cc_hispeed_raise(cc_cpu, time_ns,
 +				    confirmed ? cc_target_util(cc_cpu, cap)
 +					      : cc_target_util_instant(cc_cpu, cap));
 +	}
-+	/* Updated unconditionally, including while wake_edge_boost is 0:
-+	 * this is edge *tracking*, not the boost itself. Skipping it when
-+	 * the knob is off would leave a stale snapshot behind, so the first
-+	 * sample after someone re-enables the knob at runtime would be
-+	 * compared against whatever nr_running happened to be when it was
-+	 * switched off -- fabricating or swallowing one edge on the way
-+	 * back in. Keeping it current costs one store and makes the knob
-+	 * take effect cleanly from the next real transition. */
-+	cc_cpu->prev_nr_running = nr_running;
 +}
 +
 +/*
@@ -973,7 +1055,7 @@ index 0000000..5d06f9d
 + * stay unconditional: aggregating them across the policy is the entire
 + * point of the shared path. The three trigger checks are NOT: each of
 + * them inspects or mutates state that only belongs to one specific CPU --
-+ * cc_wake_edge_check() reads that CPU's nr_running and updates its
++ * cc_wake_edge_*() reads that CPU's nr_running and updates its
 + * per-CPU streak ring buffer, and cc_bore_check() dereferences that
 + * CPU's rq->curr. Running those for a remote CPU means sampling a
 + * scheduler snapshot nobody is holding still, and (for the streak buffer)
@@ -1008,7 +1090,7 @@ index 0000000..5d06f9d
 +	if (!umin || umin < cc_target_util(cc_cpu, cap))
 +		return false;
 +
-+	cc_cpu->stat_uclamp_gated++;
++	CC_STAT_INC(cc_cpu, stat_uclamp_gated);
 +	return true;
 +}
 +
@@ -1023,10 +1105,15 @@ index 0000000..5d06f9d
 +					   FREQUENCY_UTIL, NULL);
 +
 +	cc_update_hispeed(cc_cpu, time);
-+	if (local && !cc_uclamp_min_covers(cc_cpu, rq, cc_cpu->max)) {
-+		cc_wake_edge_check(cc_cpu, time);
-+		cc_bore_check(cc_cpu, time);
-+		cc_bore_warp_check(cc_cpu, time);
++	if (local) {
++		/* Tracking always runs; only the boost decisions are gated. */
++		bool edge = cc_wake_edge_track(cc_cpu);
++
++		if (!cc_uclamp_min_covers(cc_cpu, rq, cc_cpu->max)) {
++			cc_wake_edge_boost(cc_cpu, time, edge);
++			cc_bore_check(cc_cpu, time);
++			cc_bore_warp_check(cc_cpu, time);
++		}
 +	}
 +
 +	/* uclamp_max clamp: a background app with a low uclamp_max is an
@@ -1043,7 +1130,7 @@ index 0000000..5d06f9d
 +	umax = uclamp_rq_get(rq, UCLAMP_MAX);
 +	if (umax < SCHED_CAPACITY_SCALE && floor > umax) {
 +		floor = umax;
-+		cc_cpu->stat_uclamp_capped++;
++		CC_STAT_INC(cc_cpu, stat_uclamp_capped);
 +	}
 +	if (floor > cc_cpu->util)
 +		cc_cpu->util = floor;
@@ -1471,8 +1558,8 @@ index 0000000..5d06f9d
 +
 +/*
 + * Telemetry: read-only, summed across every CPU in the policy. See the
-+ * struct cc_cpu comment on stat_triggers_total for what each one counts
-+ * and why they're safe to read without locking.
++ * struct cc_stats comment for what each one counts and why they're safe
++ * to read without locking.
 + */
 +#define CC_STAT_ATTR(_field)						\
 +static ssize_t cc_stat_##_field##_show(struct gov_attr_set *attr_set, char *buf) \
@@ -1483,7 +1570,7 @@ index 0000000..5d06f9d
 +	list_for_each_entry(cc_policy, &attr_set->policy_list, tunables_hook) { \
 +		unsigned int cpu;					\
 +		for_each_cpu(cpu, cc_policy->policy->related_cpus)	\
-+			sum += per_cpu(cc_cpu_data, cpu)._field;	\
++			sum += per_cpu(cc_stats_data, cpu)._field;	\
 +	}								\
 +	return sprintf(buf, "%llu\n", sum);				\
 +}									\
@@ -1498,9 +1585,11 @@ index 0000000..5d06f9d
 +CC_STAT_ATTR(stat_streak_applied);
 +CC_STAT_ATTR(stat_topapp_confirmed);
 +CC_STAT_ATTR(stat_bore_warp_confirmed);
++CC_STAT_ATTR(stat_bore_warp_stale);
 +CC_STAT_ATTR(stat_uclamp_gated);
 +CC_STAT_ATTR(stat_uclamp_capped);
 +CC_STAT_ATTR(stat_reclaim_suppressed);
++CC_STAT_ATTR(stat_governor_starts);
 +
 +/*
 + * EAS state readouts. NOT per-CPU running counters like the ones above
@@ -1569,9 +1658,11 @@ index 0000000..5d06f9d
 +	&cc_stat_stat_streak_applied_attr.attr,
 +	&cc_stat_stat_topapp_confirmed_attr.attr,
 +	&cc_stat_stat_bore_warp_confirmed_attr.attr,
++	&cc_stat_stat_bore_warp_stale_attr.attr,
 +	&cc_stat_stat_uclamp_gated_attr.attr,
 +	&cc_stat_stat_uclamp_capped_attr.attr,
 +	&cc_stat_stat_reclaim_suppressed_attr.attr,
++	&cc_stat_stat_governor_starts_attr.attr,
 +	&cc_stat_stat_eas_em_present_attr.attr,
 +	&cc_stat_stat_eas_aware_attr.attr,
 +	&cc_stat_stat_eas_active_attr.attr,
@@ -1891,6 +1982,8 @@ index 0000000..5d06f9d
 +
 +	cc_policy->need_freq_update = cpufreq_driver_test_flags(CPUFREQ_NEED_UPDATE_LIMITS);
 +
++	per_cpu(cc_stats_data, cpumask_first(policy->cpus)).stat_governor_starts++;
++
 +	for_each_cpu(cpu, policy->cpus) {
 +		struct cc_cpu *cc_cpu = &per_cpu(cc_cpu_data, cpu);
 +
@@ -1906,14 +1999,13 @@ index 0000000..5d06f9d
 +		/* Seed the reclaim baseline the same way -- otherwise the
 +		 * first cc_reclaim_active() sample would diff against 0 and
 +		 * read as "reclaim active" from however much PGSCAN_DIRECT
-+		 * accumulated system-wide since boot, not since governor
-+		 * start. */
-+		{
-+			unsigned long events[NR_VM_EVENT_ITEMS] = { 0 };
-+
-+			all_vm_events(events);
-+			cc_cpu->reclaim_prev_pgscan = events[PGSCAN_DIRECT];
-+		}
++		 * accumulated on this CPU since boot, not since governor
++		 * start. Same lock-free per-CPU path as cc_reclaim_active();
++		 * no all_vm_events() (cpus_read_lock()) here either. */
++#ifdef CONFIG_VM_EVENT_COUNTERS
++		cc_cpu->reclaim_prev_pgscan =
++			READ_ONCE(per_cpu(vm_event_states, cpu).event[PGSCAN_DIRECT]);
++#endif
 +	}
 +
 +	if (policy_is_shared(policy))
