@@ -1,8 +1,8 @@
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 1830a2e46..7c0319199 100644
+index b78ed09..f45d2fb 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -170,6 +170,49 @@ u8   __read_mostly sched_bore_topapp_discount  = 6;
+@@ -169,6 +169,49 @@ u8   __read_mostly sched_bore_topapp_discount  = 6;
  u8   __read_mostly sched_bore_topapp_smooth_boost = 2;
  unsigned int __read_mostly sched_burst_penalty_scale   = 1536;
  unsigned int __read_mostly sched_burst_cache_lifetime  = 75000000;
@@ -45,14 +45,14 @@ index 1830a2e46..7c0319199 100644
 + * mechanisms sit in different subsystems and may want different
 + * sensitivity in practice. */
 +u8   __read_mostly sched_bore_warp_max_score   = 2;
-+/* Cooldown between warp grants on the same cfs_rq, in microseconds.
-+ * Small on purpose: this is a last-resort hard override for when the
++/* Cooldown between warp grants on the same CPU (the rq's root cfs_rq,
++ * see check_preempt_wakeup()), in microseconds. Small on purpose: this is a last-resort hard override for when the
 + * soft vruntime-based check isn't enough, not the primary mechanism. */
 +unsigned int __read_mostly sched_bore_warp_us  = 2000;
  #endif
  
  int sched_thermal_decay_shift;
-@@ -7963,6 +8006,65 @@ static void set_skip_buddy(struct sched_entity *se)
+@@ -7949,6 +7992,82 @@ static void set_skip_buddy(struct sched_entity *se)
  		cfs_rq_of(se)->skip = se;
  }
  
@@ -72,8 +72,16 @@ index 1830a2e46..7c0319199 100644
 + * higher BORE score than 'pse') and 'pse' is fresh, and this cfs_rq
 + * hasn't granted a warp preemption recently, preempt unconditionally.
 + *
++ * @cfs_rq must be the rq's ROOT cfs_rq (&rq->cfs), not cfs_rq_of(se):
++ * after find_matching_se() that is the cfs_rq of the lowest COMMON level,
++ * a task-group cfs_rq under CONFIG_FAIR_GROUP_SCHED. The deadline and the
++ * fired hint are per-CPU state, read by cc_bore_warp_check() from
++ * &cpu_rq(cpu)->cfs; keeping them on a group cfs_rq would both hide the
++ * hint from the consumer and multiply the cooldown by the number of
++ * groups.
++ *
 + * The "recently" part is the safety bound: one grant per
-+ * sched_bore_warp_us per cfs_rq, not a per-task allowance. Without a
++ * sched_bore_warp_us per CPU (root cfs_rq), not a per-task allowance. Without a
 + * cooldown, a burst of fresh-looking wakeups (e.g. a binder thread pool
 + * waking up together) could each individually qualify and chain
 + * preemptions back-to-back, thrashing the CPU instead of helping it.
@@ -101,15 +109,24 @@ index 1830a2e46..7c0319199 100644
 +		return false;
 +
 +	cfs_rq->bore_warp_deadline = now + (u64)sched_bore_warp_us * NSEC_PER_USEC;
-+	/* Cross-subsystem hint for PCCG (cpufreq_pccg.c) -- read-and-cleared
-+	 * there, not gated by anything else here: if warp is disabled
++	/* Cross-subsystem hint for cc_governor (cc_bore_warp_check() in
++	 * kernel/sched/cc_governor.c) -- read-and-cleared there, not gated
++	 * by anything else here: if warp is disabled
 +	 * (sched_bore_warp_enabled=0) this function returns false above
 +	 * before ever reaching this line, so the flag simply never gets
-+	 * set and PCCG's consumer is a permanent no-op, with zero extra
++	 * set and the consumer is a permanent no-op, with zero extra
 +	 * checks needed on the cpufreq side. set_bit() (not a plain
-+	 * assignment): PCCG may read/clear this for a remote CPU under a
-+	 * shared cpufreq policy without holding *this* CPU's rq lock, see
-+	 * the field comment on bore_warp_fired in sched.h. */
++	 * assignment): the consumer may read/clear this for a remote CPU
++	 * under a shared cpufreq policy without holding *this* CPU's rq
++	 * lock, see the field comment on bore_warp_fired in sched.h.
++	 *
++	 * The timestamp is written BEFORE the bit becomes visible, so a
++	 * consumer that wins test_and_clear_bit() (fully ordered) reads a
++	 * timestamp at least as new as the grant it consumes. It lets the
++	 * consumer drop a hint nobody picked up for a long time. sched_clock()
++	 * on both sides, not rq_clock_task(): they must share a time base. */
++	WRITE_ONCE(cfs_rq->bore_warp_fired_ns, sched_clock());
++	smp_mb__before_atomic();
 +	set_bit(0, &cfs_rq->bore_warp_fired);
 +	return true;
 +}
@@ -118,12 +135,22 @@ index 1830a2e46..7c0319199 100644
  /*
   * Preempt the current task with a newly woken task if needed:
   */
-@@ -8045,6 +8147,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+@@ -8031,6 +8150,24 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
  	if (ignore)
  		return;
  
 +#ifdef CONFIG_SCHED_BORE
-+	if (bore_warp_preempt(cfs_rq_of(se), se, pse, rq_clock_task(rq))) {
++	/*
++	 * Warp must never override task weight: a waking task lighter than
++	 * curr (e.g. nice+10 background vs nice 0) takes the normal soft
++	 * wakeup_preempt_entity() path. Compared on the tasks themselves,
++	 * not on se/pse: after find_matching_se() those may be group
++	 * entities, whose weight is dynamic (calc_group_shares()).
++	 *
++	 * &rq->cfs (root), not cfs_rq_of(se): see bore_warp_preempt().
++	 */
++	if (p->se.load.weight >= curr->se.load.weight &&
++	    bore_warp_preempt(&rq->cfs, se, pse, rq_clock_task(rq))) {
 +		if (!next_buddy_marked)
 +			set_next_buddy(pse);
 +		goto preempt;
@@ -134,30 +161,31 @@ index 1830a2e46..7c0319199 100644
  		/*
  		 * Bias pick_next to pick the sched entity that is
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 848680566..ac8be7213 100644
+index 8ccf52d..cc16836 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -577,6 +577,40 @@ struct cfs_rq {
+@@ -577,6 +577,46 @@ struct cfs_rq {
  
  	struct rb_root_cached	tasks_timeline;
  
 +#ifdef CONFIG_SCHED_BORE
 +	/* Cooldown for bore_warp_preempt() in fair.c: at most one hard
-+	 * "warp" preemption grant per sched_bore_warp_us on this cfs_rq,
++	 * "warp" preemption grant per sched_bore_warp_us on this CPU,
 +	 * regardless of how many fresh-looking tasks wake up in that
-+	 * window. See the comment on bore_warp_preempt() for why this is a
++	 * window. Only meaningful on the rq's ROOT cfs_rq (&rq->cfs):
++	 * that is the one bore_warp_preempt() is always called with. See the comment on bore_warp_preempt() for why this is a
 +	 * cooldown and not a per-task allowance. */
 +	u64			bore_warp_deadline;
 +	/* Set by bore_warp_preempt() the instant it grants a warp; consumed
-+	 * (test-and-cleared) by PCCG's pccg_bore_warp_check() in
-+	 * cpufreq_pccg.c as a cross-subsystem signal -- see the comment
-+	 * there for why a warp grant gets treated differently from PCCG's
-+	 * own, weaker burst_penalty-only check.
++	 * (test-and-cleared) by cc_governor's cc_bore_warp_check() in
++	 * kernel/sched/cc_governor.c as a cross-subsystem signal -- see the
++	 * comment there for why a warp grant gets treated differently from
++	 * cc_bore_check()'s own, weaker burst_penalty-only check.
 +	 *
 +	 * unsigned long + test_and_clear_bit(), not a plain bool: in a
 +	 * shared cpufreq policy (the common case for an Android cluster),
-+	 * PCCG reads/clears this for CPUs other than the one currently
-+	 * holding this rq's own lock (pccg_next_freq_shared() loops over
++	 * the consumer reads/clears this for CPUs other than the one currently
++	 * holding this rq's own lock (cc_next_freq_shared() loops over
 +	 * every CPU in the policy, most of them remote from whichever CPU
 +	 * is actually running that loop) -- a plain bool read-then-write
 +	 * there races against bore_warp_preempt() setting it concurrently
@@ -165,7 +193,12 @@ index 848680566..ac8be7213 100644
 +	 * the read-and-clear atomic regardless of which CPU's lock (if
 +	 * any) the caller happens to be holding. */
 +	unsigned long		bore_warp_fired;
-+/* Companion define for cpufreq_pccg.c (or any other consumer) to detect
++	/* sched_clock() timestamp of the grant that set bore_warp_fired,
++	 * written before the bit is set (see bore_warp_preempt()). Lets the
++	 * consumer discard a hint that sat unconsumed for too long (gate
++	 * active, remote CPU, another governor on the policy). */
++	u64			bore_warp_fired_ns;
++/* Companion define for cc_governor.c (or any other consumer) to detect
 + * that this field actually exists, independent of CONFIG_SCHED_BORE
 + * alone: BORE's base patch does not provide bore_warp_fired by itself --
 + * only this addon (bore-warp) does. A consumer built against a tree that
@@ -179,7 +212,7 @@ index 848680566..ac8be7213 100644
  	 * 'curr' points to currently running entity on this cfs_rq.
  	 * It is set to NULL otherwise (i.e when none are currently running).
 diff --git a/kernel/sysctl.c b/kernel/sysctl.c
-index f6b4d124a..67a5534e4 100644
+index 9d0b677..475d13e 100644
 --- a/kernel/sysctl.c
 +++ b/kernel/sysctl.c
 @@ -118,6 +118,15 @@ static int __maybe_unused sixty_four = 64;
