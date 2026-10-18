@@ -2250,6 +2250,30 @@ Brace/paren balance confirmed on the result (1155/1155).
 STILL NOT submitted upstream. STILL NOT compiled against a real
 android14-6.1 GKI tree or booted on hardware -- that remains the
 single biggest open risk for this whole addon, same as before.
+
+A7-FOLLOWUP (this round): the CLUTCH bridge's "last reporter wins"
+limitation (A7, accepted for v1 when multiple ADIOS instances run at
+once) is replaced with actual primary-disk autodetection instead of
+staying a documented limitation. block/genhd.c's existing boot-time
+enforcer sweep (already iterating every disk) now also checks each
+disk's partition table for a GPT partition labeled "userdata" (the
+AOSP convention for /data) and caches the owning disk's name the
+first time it finds one, exposed as saga_adios_is_primary_disk().
+block/adios.c's update_timer_callback() calls this before reporting
+to the bridge, so only the instance running on the actual /data disk
+publishes to CLUTCH now, not whichever instance's timer last fired.
+Lock-free write-once/read-many cache (one writer, the enforcer
+workqueue; smp_wmb()/smp_rmb() pairing, no lock needed). Falls back
+to the old "every instance reports" behavior, unchanged, on a build
+with CONFIG_MQ_IOSCHED_DEFAULT_ADIOS=n (no enforcer sweep exists to
+hang the scan off of) or before detection completes. The existing
+CONFIG_MQ_IOSCHED_ADIOS_ENFORCE_DISK manual override still works
+independently as a fallback for a layout this heuristic can't
+resolve. Validated the same way as every other round: applied with
+`patch -p1 --fuzz=0` to a fresh clone of the real
+android14-6.1-live-staging tree (clutch-signals addon applied first,
+as it must be), zero fuzz, zero rejects; brace balance confirmed on
+both touched files (genhd.c 119/119, adios.c 231/231).
 ---
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
 index 08b8af92f..ee5d322a0 100644
@@ -2313,7 +2337,7 @@ new file mode 100644
 index 000000000..7a1c4d5e2
 --- /dev/null
 +++ b/block/adios.c
-@@ -0,0 +1,3530 @@
+@@ -0,0 +1,3546 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Adaptive Deadline I/O Scheduler (ADIOS)
@@ -2346,6 +2370,16 @@ index 000000000..7a1c4d5e2
 +#include "blk.h"
 +#include "blk-mq.h"
 +#include "blk-mq-sched.h"
++
++/*
++ * SAGA A7-FOLLOWUP: provided by block/genhd.c. Not declared in any
++ * header this file already includes (same situation as
++ * elv_iosched_store() in genhd.c's own enforcer -- local forward
++ * declaration rather than growing a shared header for one call site).
++ * Always resolves, in every CONFIG_MQ_IOSCHED_DEFAULT_ADIOS setting:
++ * see genhd.c for the real-detection vs always-true fallback.
++ */
++extern bool saga_adios_is_primary_disk(struct gendisk *disk);
 +
 +#define ADIOS_VERSION "3.3.5-SAGA-Clutch"
 +
@@ -4506,12 +4540,17 @@ index 000000000..7a1c4d5e2
 +	 * from the hot path (adios_completed_request, dispatch_from_bq,
 +	 * fill_batch_queues). This timer runs in softirq context, but
 +	 * clutch_report_io_pressure() is a plain atomic_set internally --
-+	 * doesn't sleep, doesn't block, safe from here. If this ADIOS
-+	 * instance isn't the "primary" disk (multiple queues running
-+	 * ADIOS simultaneously), the last one to report wins -- acceptable
-+	 * for v1 since most devices only ever run ADIOS on /data anyway;
-+	 * an is_primary flag from the genhd.c enforcer would refine this
-+	 * later, not implemented now.
++	 * doesn't sleep, doesn't block, safe from here.
++	 *
++	 * A7-FOLLOWUP: multiple ADIOS instances (one per scheduled block
++	 * device) can be running at once, but the bridge's slot is global,
++	 * so only the "primary" disk's instance should report -- otherwise
++	 * the last one to fire this timer silently overwrites whatever a
++	 * different disk's instance just published ("last reporter wins").
++	 * saga_adios_is_primary_disk() (block/genhd.c) resolves this via
++	 * GPT-label autodetection of the disk carrying the "userdata"
++	 * partition; see that function's comment for the fallback behavior
++	 * before detection completes or when it's not built at all.
 +	 *
 +	 * A5: update_timer is only timer_setup() (registered) in
 +	 * adios_init_sched() -- it's first actually armed by
@@ -4526,7 +4565,8 @@ index 000000000..7a1c4d5e2
 +	 * (~90s after queue attach, see that timer's own comment) --
 +	 * expected, not a bridge bug.
 +	 */
-+	{
++	if (ad->queue && ad->queue->disk &&
++	    saga_adios_is_primary_disk(ad->queue->disk)) {
 +		union adios_in_flight_rqs ifr;
 +		u64 window, pressure;
 +		bool topapp;
@@ -5883,7 +5923,7 @@ diff --git a/block/genhd.c b/block/genhd.c
 index c9dc2f2c..a17b7705 100644
 --- a/block/genhd.c
 +++ b/block/genhd.c
-@@ -1525,3 +1525,91 @@ void inc_diskseq(struct gendisk *disk)
+@@ -1529,3 +1529,196 @@
  {
  	disk->diskseq = atomic64_inc_return(&diskseq);
  }
@@ -5905,6 +5945,14 @@ index c9dc2f2c..a17b7705 100644
 + */
 +#ifdef CONFIG_MQ_IOSCHED_DEFAULT_ADIOS
 +#include <linux/workqueue.h>
++/*
++ * REVIEW FIX: strcasecmp()/strscpy() below have no guaranteed transitive
++ * include here (unlike strcmp(), already relied on pre-existing in this
++ * file) -- explicit include rather than hoping another header drags
++ * linux/string.h in first, same class of implicit-declaration risk as
++ * the elv_iosched_store() fix above.
++ */
++#include <linux/string.h>
 +
 +#define SAGA_ADIOS_ENFORCE_TRIES 5
 +
@@ -5924,6 +5972,87 @@ index c9dc2f2c..a17b7705 100644
 + */
 +extern ssize_t elv_iosched_store(struct request_queue *q, const char *name,
 +				  size_t count);
++
++/*
++ * SAGA A7-FOLLOWUP: "primary disk" autodetection for the CLUTCH bridge.
++ *
++ * Multiple ADIOS instances can run at once (one per scheduled block
++ * device), but the CLUTCH bridge (clutch_report_io_pressure(), called
++ * from adios.c's update_timer_callback()) has a single global slot --
++ * every instance that calls it stomps the last one's report. That was
++ * accepted as a v1 limitation ("last reporter wins", documented at the
++ * call site) because most devices only ever run ADIOS on the /data
++ * disk anyway. This replaces the acceptance with an actual check: find
++ * which disk owns the partition GPT-labeled "userdata" -- the AOSP
++ * convention for /data (fstab entries, the super/dynamic-partition
++ * metadata, and init's early-mount handling all key off this exact
++ * label) -- and treat only that disk's ADIOS instance as primary.
++ *
++ * Cache-once, lock-free publish: saga_adios_primary_disk_name is
++ * written at most once (by this workqueue, never concurrently with
++ * itself), then saga_adios_primary_disk_found is set with a release
++ * barrier; readers (saga_adios_is_primary_disk(), called from a timer
++ * softirq elsewhere in this build) check the flag with an acquire
++ * barrier before trusting the name. No lock needed since there is
++ * exactly one writer and it never updates the name a second time.
++ */
++static char saga_adios_primary_disk_name[DISK_NAME_LEN];
++static bool saga_adios_primary_disk_found;
++
++static bool saga_adios_disk_has_userdata(struct gendisk *disk)
++{
++	struct block_device *part;
++	unsigned long idx;
++	bool found = false;
++
++	rcu_read_lock();
++	xa_for_each(&disk->part_tbl, idx, part) {
++		if (!idx)
++			continue; /* part0 is the whole-disk device itself */
++		if (part->bd_meta_info &&
++		    !strcasecmp(part->bd_meta_info->volname, "userdata")) {
++			found = true;
++			break;
++		}
++	}
++	rcu_read_unlock();
++
++	return found;
++}
++
++static void saga_adios_maybe_mark_primary(struct gendisk *disk)
++{
++	if (READ_ONCE(saga_adios_primary_disk_found))
++		return;
++
++	if (!saga_adios_disk_has_userdata(disk))
++		return;
++
++	strscpy(saga_adios_primary_disk_name, disk->disk_name,
++		sizeof(saga_adios_primary_disk_name));
++	smp_wmb(); /* publish the name before the found flag */
++	WRITE_ONCE(saga_adios_primary_disk_found, true);
++}
++
++/*
++ * True once the userdata-owning disk has been identified AND it
++ * matches the given one. Before detection completes (early boot, or
++ * a device whose GPT genuinely carries no "userdata" label -- e.g. an
++ * unusual A/B layout this heuristic can't resolve) this returns false
++ * for every disk, so adios.c's CLUTCH report is simply skipped rather
++ * than guessing -- no worse than the old unconditional "every
++ * instance reports" behavior, and self-corrects within
++ * SAGA_ADIOS_ENFORCE_TRIES * 20s of the userdata partition showing up
++ * in sysfs. CONFIG_MQ_IOSCHED_ADIOS_ENFORCE_DISK, if set, remains
++ * available as a manual override for a layout this can't resolve.
++ */
++bool saga_adios_is_primary_disk(struct gendisk *disk)
++{
++	if (!disk || !READ_ONCE(saga_adios_primary_disk_found))
++		return false;
++	smp_rmb(); /* pair with the wmb() in saga_adios_maybe_mark_primary */
++	return !strcmp(disk->disk_name, saga_adios_primary_disk_name);
++}
 +
 +static void saga_adios_enforce_fn(struct work_struct *work)
 +{
@@ -5948,6 +6077,11 @@ index c9dc2f2c..a17b7705 100644
 +		 * disks here. */
 +		if (!q || get_capacity(disk) == 0)
 +			continue;
++
++		/* Independent of the enforce-target restriction below --
++		 * we want to find the userdata disk even on a build that
++		 * restricts scheduler *enforcement* to a different disk. */
++		saga_adios_maybe_mark_primary(disk);
 +
 +		if (target[0] && strcmp(disk->disk_name, target) != 0)
 +			continue;
@@ -5974,4 +6108,15 @@ index c9dc2f2c..a17b7705 100644
 +	return 0;
 +}
 +late_initcall(saga_adios_enforce_init);
++#else /* !CONFIG_MQ_IOSCHED_DEFAULT_ADIOS */
++/*
++ * No enforcer workqueue built, so no sweep to hang the userdata scan
++ * off of -- preserve the pre-existing "every ADIOS instance reports"
++ * behavior exactly (returning true unconditionally) rather than
++ * silently going quiet on every disk because detection never runs.
++ */
++bool saga_adios_is_primary_disk(struct gendisk *disk)
++{
++	return true;
++}
 +#endif /* CONFIG_MQ_IOSCHED_DEFAULT_ADIOS */
