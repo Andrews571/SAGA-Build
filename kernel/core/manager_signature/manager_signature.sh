@@ -7,10 +7,14 @@
 #
 # Como funciona: o Kbuild do BakaSU/ReSukiSU tem um slot "Custom"
 # que le duas variaveis de ambiente na hora do build:
-#   KSU_EXPECTED_SIZE  (tamanho do certificado, ex: 0x0582)
+#   KSU_EXPECTED_SIZE  (tamanho do certificado, ex: 0x0382)
 #   KSU_EXPECTED_HASH  (SHA-256 do certificado)
-# Este script define as duas. Os valores vem do update.json do
-# ultimo release do SAGA-App; se nao der para baixar, usa o fallback.
+# Este script define as duas, lendo o update.json do ultimo
+# release do SAGA-App.
+#
+# LIMITE IMPORTANTE: o kernel so le certificados de ate 1024 bytes
+# (CERT_MAX_LENGTH em apk_sign.c). Chave RSA 4096 gera certificado de
+# ~1410 bytes e NUNCA e reconhecida. Use RSA 2048 (~800-900 bytes).
 #
 # Este arquivo e carregado com "source" pelo build.sh (run_core),
 # depois que o root solution ja foi aplicado ao kernel.
@@ -21,10 +25,7 @@ if [ "${KERNEL_VARIANT:-}" = "VANILLA" ]; then
 fi
 
 SAGA_APP_REPO="${SAGA_APP_REPO:-Andrews571/SAGA-App}"
-
-# Fallback = certificado do app-v0.1.0
-SAGA_APP_FALLBACK_SIZE="0x0582"
-SAGA_APP_FALLBACK_HASH="67c93fb925566196354154f8285aa03f85f208d00f5899147b1c6c578c43ee84"
+SAGA_CERT_MAX_BYTES=1024
 
 _saga_size=""
 _saga_hash=""
@@ -37,13 +38,19 @@ if [ -n "$_saga_json" ]; then
     _saga_hash="$(printf '%s' "$_saga_json" | jq -r '.cert_sha256 // empty' 2>/dev/null || true)"
 fi
 
-if [[ "$_saga_size" =~ ^0x[0-9a-fA-F]{3,4}$ ]] && [[ "$_saga_hash" =~ ^[0-9a-f]{64}$ ]]; then
-    log "Manager signature: valores lidos do update.json do SAGA-App"
-else
-    warn "Manager signature: nao consegui ler o update.json - usando fallback (app-v0.1.0)"
-    _saga_size="$SAGA_APP_FALLBACK_SIZE"
-    _saga_hash="$SAGA_APP_FALLBACK_HASH"
+if ! [[ "$_saga_size" =~ ^0x[0-9a-fA-F]{3,4}$ ]] || ! [[ "$_saga_hash" =~ ^[0-9a-f]{64}$ ]]; then
+    warn "Manager signature: nao consegui ler o update.json do SAGA-App - kernel compilado SEM o certificado do app"
+    unset _saga_json _saga_size _saga_hash
+    return 0
 fi
+
+if [ $((_saga_size)) -gt "$SAGA_CERT_MAX_BYTES" ]; then
+    warn "Manager signature: certificado do app tem $((_saga_size)) bytes (> ${SAGA_CERT_MAX_BYTES}) - o kernel nao consegue le-lo. Gere o keystore com RSA 2048. Ignorando."
+    unset _saga_json _saga_size _saga_hash
+    return 0
+fi
+
+log "Manager signature: valores lidos do update.json do SAGA-App"
 
 export KSU_EXPECTED_SIZE="$_saga_size"
 export KSU_EXPECTED_HASH="$_saga_hash"
@@ -51,10 +58,9 @@ export KSU_EXPECTED_HASH="$_saga_hash"
 log "Manager signature: size=${KSU_EXPECTED_SIZE} hash=${KSU_EXPECTED_HASH}"
 
 # Confere se o Kbuild do root solution aplicado suporta o slot Custom.
-# Se nao suportar, o app NAO sera reconhecido (o build continua, mas avisa).
-if ! grep -RqsE --include=Kbuild "KSU_EXPECTED_SIZE" \
+if ! grep -RqsE --include=Kbuild --include=Makefile "KSU_EXPECTED_SIZE" \
         "${KERNEL_SRC}/drivers" "${KERNEL_SRC}/KernelSU" 2>/dev/null; then
-    warn "Manager signature: Kbuild do root solution nao menciona KSU_EXPECTED_SIZE - o SAGA-App pode nao ser reconhecido por este kernel"
+    warn "Manager signature: o root solution aplicado nao menciona KSU_EXPECTED_SIZE - o SAGA-App pode nao ser reconhecido por este kernel"
 fi
 
 unset _saga_json _saga_size _saga_hash
