@@ -163,6 +163,7 @@ run_core() {
         "${core_dir}/ufs_writebooster_catchup/ufs_writebooster_catchup.sh"
         "${core_dir}/workqueue_catchup/workqueue_catchup.sh"
         "${core_dir}/schedutil_catchup/schedutil_catchup.sh"
+        "${core_dir}/manager_signature/manager_signature.sh"
         "${core_dir}/tickrate_choice/tickrate_choice.sh"
     )
     for script in "${scripts[@]}"; do
