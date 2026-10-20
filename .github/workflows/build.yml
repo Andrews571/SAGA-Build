@@ -63,6 +63,13 @@ on:
           - "none"
           - "nomount"
           - "zeromount"
+      addon_profile:
+        description: "Addon Profile (Default: ADIOS | CC: ADIOS-Clutch + CC Governor + BORE-WARP + Clutch-Signals)"
+        type: choice
+        default: "Default_Addons"
+        options:
+          - "Default_Addons"
+          - "CC_Addons"
       tick_rate:
         description: "Tick Rate (CONFIG_HZ)"
         type: choice
@@ -75,35 +82,11 @@ on:
       rekernel:
         description: "Re:Kernel"
         type: boolean
-        default: true
-      droidspaces:
-        description: "Droidspaces"
-        type: boolean
-        default: true
-      adios:
-        description: "ADIOS (I/O scheduler, v3.3.4-SAGA — base + LM/sysfs tunables merged in)"
-        type: boolean
-        default: true
+        default: false
       kasumi:
         description: "Kasumi (Experimental)"
         type: boolean
         default: false
-      lz4zstd:
-        description: "LZ4 1.10.0 + ZSTD 1.5.7 (ZRAM compression bump)"
-        type: boolean
-        default: true
-      lz4kd:
-        description: "LZ4KD (ZRAM compression optimization)"
-        type: boolean
-        default: true
-      le9uo:
-        description: "le9uo EXPERIMENTAL(Prevent system freezes)"
-        type: boolean
-        default: true  
-      kcompressd:
-        description: "kcompressd - optimize zram algorithms"
-        type: boolean
-        default: true
       zram_ir:
         description: "Zram_ir - add multi_comp"
         type: boolean
@@ -217,6 +200,7 @@ jobs:
         id: set
         env:
           SUSFS_ENABLED: ${{ inputs.susfs == 'enable' }}
+          ADDON_PROFILE: ${{ inputs.addon_profile }}
         run: |
           variants=()
           ${{ inputs.vanilla }}  && variants+=("{\"kernel_variant\":\"VANILLA\",\"susfs\":false}")
@@ -235,9 +219,17 @@ jobs:
           # Single source of truth for the ADDONS list — reused by Start-Build
           # and notify-channel via this job's output, instead of each job
           # rebuilding the same string from inputs independently.
-          ADDONS="bbrv3,bbg,bore,bore-warp,clutch-signals,adios-clutch,cc-governor,ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${{ inputs.rekernel && 'rekernel,' || '' }}${{ inputs.droidspaces && 'droidspaces,' || '' }}${{ inputs.kasumi && 'kasumi,' || '' }}${{ inputs.lz4zstd && 'lz4zstd,' || '' }}${{ inputs.lz4kd && 'lz4kd,' || '' }}${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}${{ inputs.le9uo && 'le9uo,' || '' }}${{ inputs.kcompressd && 'kcompressd,' || '' }}${{ inputs.zram_ir && 'zram_ir,' || '' }}"
+          # Profile decides the I/O scheduler + CPU governor stack (each of
+          # these addons already sets its own default: ADIOS/ADIOS-Clutch via
+          # CONFIG_MQ_IOSCHED_DEFAULT_ADIOS + boot enforcer, cc-governor via
+          # its delayed cpufreq enforcer). Order matters: bore-warp after bore.
+          if [ "${ADDON_PROFILE}" = "CC_Addons" ]; then
+            PROFILE_ADDONS="bore-warp,clutch-signals,adios-clutch,cc-governor"
+          else
+            PROFILE_ADDONS="adios"
+          fi
+          ADDONS="bbrv3,bbg,bore,${PROFILE_ADDONS},ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${{ inputs.rekernel && 'rekernel,' || '' }}droidspaces,${{ inputs.kasumi && 'kasumi,' || '' }}lz4zstd,lz4kd,${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}le9uo,kcompressd,${{ inputs.zram_ir && 'zram-ir,' || '' }}"
           echo "addons=${ADDONS}" >> $GITHUB_OUTPUT
-          #mglru,pccg,reflex,adios,
           # "/" -> "-" so this is safe to use as a filesystem path component
           # (cache asset filenames) wherever ref_name is needed downstream.
           SAFE_REF="$(echo '${{ github.ref_name }}' | tr '/' '-')"
