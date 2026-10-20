@@ -3,7 +3,8 @@
 # ======================================================
 # 📢 RELEASE — TELEGRAM CHANNEL POST
 # ======================================================
-# Aggregates all variant links and sends a single photo post to the channel.
+# Aggregates all variant links: rich message → channel only; photo+caption
+# (Download + About Kernel link) → discussion group.
 # Called from the notify-channel job after all builds have finished.
 
 BANNER_DIR="${SAGA_PATCH_DIR}/release/telegram"
@@ -196,20 +197,53 @@ python3 "${SAGA_PATCH_DIR}/release/telegram/rich_caption.py" "$RICH_MESSAGE_FILE
 # vai como campo texto (JSON), "banner" como arquivo, referenciado dentro
 # do JSON via "attach://banner" (mesma convenção de sendMediaGroup).
 # ------------------------------------------------------
-log "📸 Sending channel post..."
+log "📸 Sending channel post (rich message → channel only)..."
 
-if telegram_api_call "sendRichMessage" "/tmp/tg_channel_rich_response.json" "Channel rich message" \
+if ! telegram_api_call "sendRichMessage" "/tmp/tg_channel_rich_response.json" "Channel rich message" \
     -F "chat_id=${TELEGRAM_CHANNEL_ID}" \
     -F "rich_message=<${RICH_MESSAGE_FILE}" \
-    -F "banner=@${BANNER_PATH}" \
-&&
-   telegram_api_call "sendRichMessage" "/tmp/tg_discussion_rich_response.json" "Discussion rich message" \
-    -F "chat_id=${TELEGRAM_DISCUSSION_ID}" \
-    -F "rich_message=<${RICH_MESSAGE_FILE}" \
     -F "banner=@${BANNER_PATH}"; then
-
-    log "✅ Channel and discussion rich messages sent"
-
+    error "Channel rich message failed — group post skipped (it links to the channel post)"
 fi
 
-rm -f "$RICH_MESSAGE_FILE" /tmp/tg_channel_rich_response.json /tmp/tg_discussion_rich_response.json
+CHANNEL_MESSAGE_ID=$(echo "$TG_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['message_id'])" 2>/dev/null || echo "")
+ABOUT_URL=""
+if [ -n "$CHANNEL_MESSAGE_ID" ]; then
+    ABOUT_URL="https://t.me/c/${TELEGRAM_CHANNEL_ID#-100}/${CHANNEL_MESSAGE_ID}"
+    log "Channel post sent ✅ (message_id=${CHANNEL_MESSAGE_ID})"
+else
+    warn "Could not read channel message_id — group caption will omit the About Kernel link"
+fi
+
+# ------------------------------------------------------
+# Group post (discussion group): banner photo + caption with Download
+# links (one per variant) above "About Kernel" → channel rich post.
+# No add-ons text here; that all lives in the channel post.
+# ------------------------------------------------------
+GROUP_CAPTION_FILE="/tmp/channel_post_group_caption.txt"
+
+LINUX_VER="${LINUX_VER:-N/A}" \
+KERNEL_VERSION="${KERNEL_VERSION:-}" \
+CHANGELOG="${CHANGELOG:-}" \
+GITHUB_SHA="${GITHUB_SHA:-}" \
+GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
+GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
+GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
+VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
+VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
+ABOUT_URL="$ABOUT_URL" \
+python3 "${SAGA_PATCH_DIR}/release/telegram/caption.py" --channel-only "$GROUP_CAPTION_FILE" \
+    || error "Group caption builder failed"
+
+log "📨 Sending group post (photo + caption)..."
+if telegram_api_call "sendPhoto" "/tmp/tg_discussion_photo_response.json" "Group photo post" \
+    -F "chat_id=${TELEGRAM_DISCUSSION_ID}" \
+    -F "parse_mode=MarkdownV2" \
+    -F "photo=@${BANNER_PATH}" \
+    -F "caption=<${GROUP_CAPTION_FILE}"; then
+    log "✅ Channel rich message and group photo post sent"
+else
+    error "Group photo post failed (channel post was already sent)"
+fi
+
+rm -f "$RICH_MESSAGE_FILE" "$GROUP_CAPTION_FILE" /tmp/tg_channel_rich_response.json /tmp/tg_discussion_photo_response.json

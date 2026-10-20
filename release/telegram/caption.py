@@ -280,35 +280,6 @@ def build_channel_caption(env, variant_links, variant_versions=None):
         f"*GKI Kernel \\| Android {mdv2_escape(android_ver)} \\| Linux {mdv2_escape(major_minor)}*"
     ]
 
-    # Add-ons — only the ones actually enabled for this run. The five
-    # FEATURE_ADDON_TOKENS get pulled out into their own Telegraph
-    # "Features" link (right below, between Add-ons and Download) instead
-    # of showing up here.
-    addon_tokens = [t for t in env.get("ADDONS", "").split(",") if t]
-    other_addon_tokens = [t for t in addon_tokens if t not in FEATURE_ADDON_TOKENS]
-
-    if other_addon_tokens:
-        addon_lines = ["*Add\\-ons*"]
-        for token in other_addon_tokens:
-            name = ADDON_DISPLAY_NAMES.get(token, token)
-            addon_lines.append(f"\\- {mdv2_escape(name)}")
-        sections.append("\n".join(addon_lines))
-
-    # Features link — sits between Add-ons and Download. CONFIG_HZ
-    # (TICK_RATE) is always set — every build has a tick rate regardless
-    # of which addons were picked — so the Features page is always worth
-    # linking, not just when one of FEATURE_ADDON_TOKENS happens to be
-    # enabled. Kept both checks rather than relying on bbrv3/bore/ntsync
-    # currently always being in ADDONS (see build.yml) staying that way
-    # forever. FEATURES_URL empty means either TELEGRAPH_TOKEN isn't set
-    # or the API call failed — telegraph_page.py degrades gracefully
-    # either way, so this just quietly omits the line rather than linking
-    # nowhere.
-    has_feature_content = bool(env.get("TICK_RATE", "").strip()) or any(t in FEATURE_ADDON_TOKENS for t in addon_tokens)
-    features_url = env.get("FEATURES_URL", "").strip()
-    if has_feature_content and features_url:
-        sections.append(f"[*Features*]({mdv2_escape_url(features_url)})")
-
     # Download links — short base name only (see VARIANT_BASE_DISPLAY),
     # no +SUSFS suffix and no per-variant version number.
     download_lines = ["> 📥 *Download*"]
@@ -322,6 +293,13 @@ def build_channel_caption(env, variant_links, variant_versions=None):
         )
 
     sections.append("\n".join(download_lines))
+
+    # About Kernel — link to the rich post in the channel (features, build
+    # info, flags). Sits right below Download. Empty ABOUT_URL (channel
+    # message_id unavailable) just omits the line.
+    about_url = env.get("ABOUT_URL", "").strip()
+    if about_url:
+        sections.append(f"[*About Kernel*]({mdv2_escape_url(about_url)})")
 
     # Changelog — manual input, optional, capped so it can't crowd out the
     # rest of the caption if someone pastes something huge. Rendered as a
@@ -369,11 +347,28 @@ def build_channel_caption(env, variant_links, variant_versions=None):
 
 
 
+def _load_json_env(env, name):
+    try:
+        return json.loads(env.get(name, "")) if env.get(name, "") else {}
+    except Exception:
+        return {}
+
+
 def main():
+    env = os.environ
+
+    # --channel-only <out>: photo caption for the discussion group, built
+    # from VARIANT_LINKS_JSON + ABOUT_URL (used by channel_post.sh).
+    if sys.argv[1] == "--channel-only":
+        caption_channel = build_channel_caption(
+            env, _load_json_env(env, "VARIANT_LINKS_JSON"), _load_json_env(env, "VARIANT_VERSIONS_JSON"))
+        with open(sys.argv[2], "w") as f:
+            f.write(caption_channel)
+        print("[info] telegram_caption: group photo caption written ✅", flush=True)
+        return
+
     out_group   = sys.argv[1]
     out_channel = sys.argv[2]
-
-    env = os.environ
 
     block_saga, block_root, block_addons, block_features, footer = build_blocks(env)
 

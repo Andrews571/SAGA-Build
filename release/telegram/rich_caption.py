@@ -17,10 +17,11 @@ Estrutura do post (um unico sendRichMessage, banner incluido):
   SAGA | Build | X.Y.Z
   [tag] GKI Kernel | Android N | Linux X.Y.x
   --------------------------------------------
+  Download (1 link por variante, acima de What's Inside?)
   v 📦 What's Inside?      (aberta por padrao)
       Build Information | Feature Flags | SAGA Features
   > 🔗 Features             (fechada por padrao)
-      Root Solutions (Download) | Changelog | Commits|Workflows | Bug? | hashtags
+      Changelog | Commits|Workflows | Bug? | hashtags
   (isto e exatamente o que a secao "Features" do post MarkdownV2 antigo
   mostrava — so que agora dentro de uma aba recolhivel do rich message,
   em vez de sempre visivel)
@@ -190,8 +191,7 @@ def build_rich_message(env, variant_links, variant_versions=None, addons_root="k
         display = legacy.VARIANT_DISPLAY.get(variant_key, variant_key)
         version = variant_versions.get(variant_key, "")
         root_rows.append(kv_row(link_button(display, link), version or "—"))
-    if root_rows:
-        features_tab.append(table("Download", root_rows))
+    download_table = table("Download", root_rows) if root_rows else None
 
     changelog_raw = env.get("CHANGELOG", "").strip()
     if changelog_raw:
@@ -222,6 +222,10 @@ def build_rich_message(env, variant_links, variant_versions=None, addons_root="k
         heading(f"SAGA | Build | {linux_ver}", size=1),
         paragraph(badge(f"GKI Kernel | Android {android_ver} | Linux {major_minor}", "primary")),
         divider(),
+    ]
+    if download_table:
+        blocks.append(download_table)  # kernel file links, above What's Inside?
+    blocks += [
         details("📦 What's Inside?", whats_inside, is_open=True),
         details("🔗 Features", features_tab, is_open=False),
     ]
