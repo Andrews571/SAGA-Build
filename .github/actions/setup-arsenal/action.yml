@@ -21,6 +21,15 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: "Derive Runner Image"  # keep in sync with setup-build-env
+      id: runner-img
+      shell: bash
+      # ImageOS (ubuntu22/ubuntu24/...) is a runner env var, not reachable from
+      # workflow expressions. Native binaries cached below (ccache-ECS is built
+      # from source, clang gets glibc-patched) only run on the image family they
+      # were built on — a mismatch fails with "GLIBC_x.y not found".
+      run: echo "image=${ImageOS:-unknown}" >> $GITHUB_OUTPUT
+
     - name: "Derive Clang Variant"  # keep in sync with setup-build-env
       id: clang-key
       if: startsWith(inputs.build-system, 'Make')
@@ -36,8 +45,11 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
       run: |
+        gh cache delete "arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}-${{ steps.runner-img.outputs.image }}" -R "${{ github.repository }}" 2>/dev/null || true
+        # legacy keys (before the runner image was part of the key)
         gh cache delete "arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}" -R "${{ github.repository }}" 2>/dev/null || true
         if [ "${{ startsWith(inputs.build-system, 'Make') }}" = "true" ]; then
+          gh cache delete "clang-${{ steps.clang-key.outputs.clang_variant }}-${{ steps.runner-img.outputs.image }}" -R "${{ github.repository }}" 2>/dev/null || true
           gh cache delete "clang-${{ steps.clang-key.outputs.clang_variant }}" -R "${{ github.repository }}" 2>/dev/null || true
         fi
 
@@ -46,7 +58,7 @@ runs:
       uses: actions/cache@v6
       with:
         path: ~/clang-cache
-        key: clang-${{ steps.clang-key.outputs.clang_variant }}
+        key: clang-${{ steps.clang-key.outputs.clang_variant }}-${{ steps.runner-img.outputs.image }}
 
     - name: "Cache Arsenal"  # restores if present; auto-saves at end of job if it was missing
       uses: actions/cache@v6
@@ -60,7 +72,7 @@ runs:
         # and live are different git histories entirely (same version
         # number can mean different trees), a cached ~/kernel-cache from
         # one must never get served for the other.
-        key: arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}
+        key: arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}-${{ steps.runner-img.outputs.image }}
 
     - name: "Run Arsenal"
       shell: bash

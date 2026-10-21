@@ -13,6 +13,7 @@ on:
           - "Make - Neutron"
           - "Make - WeebX"
           - "Make - Zyc"
+          - "Make - Greenforce"
       kernel_version:
         description: "Kernel Version"
         type: choice
@@ -154,7 +155,7 @@ jobs:
     # Scoped ONLY to this job, not the workflow (see the no-workflow-lock
     # comment above) — Start-Build still runs fully parallel always.
     # update_arsenal="yes" deletes+rebuilds a *shared* cache key
-    # (arsenal-MAKE-<version>-<source>, clang-<variant>) — if a second
+    # (arsenal-MAKE-<version>-<source>-<image>, clang-<variant>-<image>) — if a second
     # dispatch's restore lands in the delete->rebuild->save window of a
     # concurrent refresh, it gets a spurious miss, rebuilds redundantly,
     # and both jobs race to save the same key (last save silently wins,

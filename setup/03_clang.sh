@@ -60,6 +60,7 @@ case "$CLANG_VARIANT" in
     neutron) CLANG_BRAND="Neutron Clang" ;;
     weebx)   CLANG_BRAND="WeebX Clang" ;;
     zyc)     CLANG_BRAND="ZyC Clang" ;;
+    greenforce) CLANG_BRAND="Greenforce Clang" ;;
     *)       CLANG_BRAND="${CLANG_VARIANT} Clang" ;;
 esac
 

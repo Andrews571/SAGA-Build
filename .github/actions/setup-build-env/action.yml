@@ -30,6 +30,15 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: "Derive Runner Image"  # keep in sync with setup-arsenal
+      id: runner-img
+      shell: bash
+      # ImageOS (ubuntu22/ubuntu24/...) is a runner env var, not reachable from
+      # workflow expressions. Native binaries cached below (ccache-ECS is built
+      # from source, clang gets glibc-patched) only run on the image family they
+      # were built on — a mismatch fails with "GLIBC_x.y not found".
+      run: echo "image=${ImageOS:-unknown}" >> $GITHUB_OUTPUT
+
     - name: "Derive Clang Variant"  # keep in sync with setup-arsenal
       id: clang-key
       if: startsWith(inputs.build-system, 'Make')
@@ -45,7 +54,7 @@ runs:
       uses: actions/cache/restore@v6
       with:
         path: ~/clang-cache
-        key: clang-${{ steps.clang-key.outputs.clang_variant }}
+        key: clang-${{ steps.clang-key.outputs.clang_variant }}-${{ steps.runner-img.outputs.image }}
 
     - name: "Restore Arsenal Cache"
       uses: actions/cache/restore@v6
@@ -57,7 +66,7 @@ runs:
           ~/.apt-cache
         # Must match setup-arsenal's "Cache Arsenal" key exactly (see the
         # comment there) or this silently misses every time.
-        key: arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}
+        key: arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}-${{ steps.runner-img.outputs.image }}
 
     - name: "Restore ccache"
       if: startsWith(inputs.build-system, 'Make')
