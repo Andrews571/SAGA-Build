@@ -48,6 +48,7 @@
   "sukisu_builtin": {
     "good": "7f1c299af463d008e66e714077eb6a8079ff722b",
     "bad": [
+      "0165c0556929f1b509a9b632a46ef09b67a7940e",
       "05f5cdf082d32bbc651c205ba4bdd1dc66cca7f5",
       "0af2cf9cef7dc2239fa7ebb3f7898830a1087e26",
       "2d1de629d4204d25cc0c8927b959d9135d9781f4",
