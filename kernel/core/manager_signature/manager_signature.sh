@@ -9,8 +9,8 @@
 # que le duas variaveis de ambiente na hora do build:
 #   KSU_EXPECTED_SIZE  (tamanho do certificado, ex: 0x0382)
 #   KSU_EXPECTED_HASH  (SHA-256 do certificado)
-# Este script define as duas, lendo o update.json do ultimo
-# release do SAGA-App.
+# Este script define as duas, lendo o update.json do ponteiro
+# "ptr-app" do repo publico de releases (com fallback para o repo do app).
 #
 # LIMITE IMPORTANTE: o kernel so le certificados de ate 1024 bytes
 # (CERT_MAX_LENGTH em apk_sign.c). Chave RSA 4096 gera certificado de
@@ -24,6 +24,9 @@ if [ "${KERNEL_VARIANT:-}" = "VANILLA" ]; then
     return 0
 fi
 
+# Repo publico de releases (ponteiro "ptr-app" sempre aponta para o update.json mais novo)
+SAGA_RELEASES_REPO="${SAGA_RELEASES_REPO:-Andrews571/SAGA-Releases}"
+# Compatibilidade: release antigo no repo do app (so funciona enquanto ele for publico)
 SAGA_APP_REPO="${SAGA_APP_REPO:-Andrews571/SAGA-App}"
 SAGA_CERT_MAX_BYTES=1024
 
@@ -31,7 +34,11 @@ _saga_size=""
 _saga_hash=""
 
 _saga_json="$(curl -fsSL --retry 3 --connect-timeout 10 \
-    "https://github.com/${SAGA_APP_REPO}/releases/latest/download/update.json" 2>/dev/null || true)"
+    "https://github.com/${SAGA_RELEASES_REPO}/releases/download/ptr-app/update.json" 2>/dev/null || true)"
+if [ -z "$_saga_json" ]; then
+    _saga_json="$(curl -fsSL --retry 3 --connect-timeout 10 \
+        "https://github.com/${SAGA_APP_REPO}/releases/latest/download/update.json" 2>/dev/null || true)"
+fi
 
 if [ -n "$_saga_json" ]; then
     _saga_size="$(printf '%s' "$_saga_json" | jq -r '.cert_size // empty' 2>/dev/null || true)"
