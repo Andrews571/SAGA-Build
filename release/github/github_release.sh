@@ -12,9 +12,7 @@
 # O app le o saga-release.json do ponteiro (URL fixa):
 #   https://github.com/<RELEASES_REPO>/releases/download/ptr-<canal>/saga-release.json
 #
-# RUN_MODE=Release -> release de verdade
-# RUN_MODE=Build   -> release de TESTE (pre-release, ponteiro ptr-<canal>-test)
-# Outros modos nao publicam.
+# SOMENTE RUN_MODE=Release publica. Build, Warm Run e Dry Run NAO publicam.
 #
 # Variaveis de entrada (todas vem do build.yml):
 #   GH_TOKEN         token com Contents:write no repo de releases (secret SAGA_RELEASES_TOKEN)
@@ -22,10 +20,10 @@
 #   ZIP_DIR          pasta com os SAGA-*.zip (padrao /tmp/kernels)
 #   ADDON_PROFILE    Default_Addons | CC_Addons
 #   ADDONS           lista separada por virgula
-#   RUN_MODE         Release | Build
+#   RUN_MODE         Release (qualquer outro valor: nao publica)
 #   KERNEL_VERSION   ex: 6.1
 #   CHANGELOG        texto livre (opcional)
-#   GITHUB_RUN_NUMBER, GITHUB_RUN_ID, GITHUB_SHA, GITHUB_REPOSITORY, GITHUB_SERVER_URL
+#   GITHUB_RUN_ID, GITHUB_SHA, GITHUB_REPOSITORY, GITHUB_SERVER_URL
 
 set -euo pipefail
 
@@ -35,6 +33,19 @@ warn() { echo "::warning::[saga-release] $*"; }
 RELEASES_REPO="${RELEASES_REPO:-Andrews571/SAGA-Releases}"
 ZIP_DIR="${ZIP_DIR:-/tmp/kernels}"
 OUT_DIR="${OUT_DIR:-/tmp/saga-release-out}"
+
+# ------------------------------------------------------
+# Somente builds "Release" vao para o SAGA-Releases
+# ------------------------------------------------------
+if [ "${RUN_MODE:-}" != "Release" ]; then
+    log "RUN_MODE='${RUN_MODE:-}': somente 'Release' publica no SAGA-Releases - ignorado"
+    exit 0
+fi
+
+if [ -z "${GH_TOKEN:-}" ]; then
+    warn "SAGA_RELEASES_TOKEN nao configurado - release no GitHub ignorado"
+    exit 0
+fi
 
 # ------------------------------------------------------
 # Garantia: o arquivo publicado TEM que ser o zip do AnyKernel3 da variante.
@@ -71,11 +82,6 @@ normalize_zip() {
     return 1
 }
 
-if [ -z "${GH_TOKEN:-}" ]; then
-    warn "SAGA_RELEASES_TOKEN nao configurado - release no GitHub ignorado"
-    exit 0
-fi
-
 shopt -s nullglob
 ZIPS=("$ZIP_DIR"/SAGA-*.zip)
 if [ "${#ZIPS[@]}" -eq 0 ]; then
@@ -86,12 +92,6 @@ fi
 case "${ADDON_PROFILE:-Default_Addons}" in
     CC_Addons) CHANNEL="experimental" ;;
     *)         CHANNEL="stable" ;;
-esac
-
-case "${RUN_MODE:-Release}" in
-    Release) KIND="release" ;;
-    Build)   KIND="test" ;;
-    *) warn "RUN_MODE='${RUN_MODE:-}' nao publica release no GitHub - ignorado"; exit 0 ;;
 esac
 
 rm -rf "$OUT_DIR"
@@ -116,8 +116,6 @@ for zip in "${ZIPS[@]}"; do
     z_ver="${BASH_REMATCH[1]}"
     variant="${BASH_REMATCH[2]}"
     z_run="${BASH_REMATCH[3]}"
-    VERSION="${VERSION:-$z_ver}"
-    RUN_NO="${RUN_NO:-$z_run}"
 
     root="${variant%%+*}"
     susfs=false
@@ -125,6 +123,7 @@ for zip in "${ZIPS[@]}"; do
 
     # "+" no nome do asset pode ser trocado pelo GitHub; usamos um nome seguro
     asset_name="SAGA-${z_ver}-${variant//+/-}-R${z_run}.zip"
+
     if ! src_zip="$(normalize_zip "$zip")"; then
         warn "${base} nao e um zip do AnyKernel3 (sem anykernel.sh/Image) - ignorado"
         continue
@@ -132,6 +131,9 @@ for zip in "${ZIPS[@]}"; do
     [ "$src_zip" != "$zip" ] && log "${base}: artefato embrulhado, usando o AnyKernel3 de dentro"
     cp "$src_zip" "$OUT_DIR/$asset_name"
     ASSET_FILES+=("$OUT_DIR/$asset_name")
+
+    VERSION="${VERSION:-$z_ver}"
+    RUN_NO="${RUN_NO:-$z_run}"
 
     sha="$(sha256sum "$OUT_DIR/$asset_name" | cut -d' ' -f1)"
     size="$(stat -c%s "$OUT_DIR/$asset_name")"
@@ -156,19 +158,15 @@ fi
 
 TAG="kernel-${CHANNEL}-${VERSION}-R${RUN_NO}"
 POINTER="ptr-${CHANNEL}"
-PRERELEASE_FLAG=()
-if [ "$KIND" = "test" ]; then
-    TAG="${TAG}-test"
-    POINTER="${POINTER}-test"
-    PRERELEASE_FLAG=(--prerelease)
-fi
-
 BASE_URL="https://github.com/${RELEASES_REPO}/releases/download/${TAG}"
-log "canal=${CHANNEL} tipo=${KIND} tag=${TAG} ponteiro=${POINTER} variantes=${#ASSET_FILES[@]}"
+log "canal=${CHANNEL} tag=${TAG} ponteiro=${POINTER} variantes=${#ASSET_FILES[@]}"
 
 # ------------------------------------------------------
 # 2. saga-release.json
 # ------------------------------------------------------
+# kernel.run = numero do build. O mesmo numero aparece no "uname -v" do kernel
+# instalado ("#<run> SMP PREEMPT ...", via KBUILD_BUILD_VERSION), e o app usa
+# isso para saber qual build esta instalado.
 KMI="android14-${KERNEL_VERSION:-6.1}"
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-0}"
@@ -176,7 +174,6 @@ RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions
 jq -s \
     --arg channel "$CHANNEL" \
     --arg profile "${ADDON_PROFILE:-Default_Addons}" \
-    --arg kind "$KIND" \
     --arg version "$VERSION" \
     --arg kmi "$KMI" \
     --argjson run "${RUN_NO:-0}" \
@@ -191,7 +188,6 @@ jq -s \
         schema: 1,
         channel: $channel,
         profile: $profile,
-        kind: $kind,
         kernel: { name: "SAGA", version: $version, kmi: $kmi, run: $run,
                   built_at: $built_at, commit: $commit, run_url: $run_url },
         addons: ($addons | split(",") | map(select(length > 0))),
@@ -208,7 +204,6 @@ cat "$OUT_DIR/saga-release.json"
 # ------------------------------------------------------
 {
     echo "SAGA ${VERSION} - canal **${CHANNEL}** (${ADDON_PROFILE:-Default_Addons})"
-    [ "$KIND" = "test" ] && echo "(build de TESTE - nao e um release oficial)"
     echo
     echo "Arquivos (AnyKernel3):"
     jq -r '.variants[] | "- `\(.file)`  sha256 `\(.sha256)`"' "$OUT_DIR/saga-release.json"
@@ -233,10 +228,9 @@ if gh release view "$TAG" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
 else
     gh release create "$TAG" "${ASSET_FILES[@]}" "$OUT_DIR/saga-release.json" \
         --repo "$RELEASES_REPO" \
-        --title "SAGA ${VERSION} (${CHANNEL}) R${RUN_NO}$([ "$KIND" = "test" ] && echo ' [teste]')" \
+        --title "SAGA ${VERSION} (${CHANNEL}) R${RUN_NO}" \
         --notes-file "$OUT_DIR/notes.md" \
-        --latest=false \
-        "${PRERELEASE_FLAG[@]}"
+        --latest=false
 fi
 
 # Ponteiro do canal: URL fixa, sempre com o saga-release.json mais novo
