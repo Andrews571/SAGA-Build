@@ -27,13 +27,28 @@ PATCH_CONTENT=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 
 
 [ -n "$PATCH_CONTENT" ] || error "BBRv3: downloaded patch is empty!"
 
+# Stable >= 6.1.188 adds `static int tcp_min_rcvbuf = 4096;` inside the context
+# of the sysctl_net_ipv4.c hunk, breaking the patch. Temporarily remove it and
+# restore after applying (no-op when absent or when BBRv3 is already applied).
+SYSCTL_C="${KERNEL_SRC}/net/ipv4/sysctl_net_ipv4.c"
+RCVBUF_MOVED=0
+if [ -f "$SYSCTL_C" ] && grep -q '^static int tcp_min_rcvbuf = 4096;$' "$SYSCTL_C" \
+   && ! grep -q 'tcp_plb_max_rounds' "$SYSCTL_C"; then
+    sed -i '/^static int tcp_min_rcvbuf = 4096;$/,+1d' "$SYSCTL_C"
+    RCVBUF_MOVED=1
+fi
+
 if echo "$PATCH_CONTENT" | patch -p1 --dry-run --reverse --no-backup-if-mismatch > /dev/null 2>&1; then
     log "BBRv3: patch already applied, skipping."
 elif echo "$PATCH_CONTENT" | patch -p1 --dry-run --forward --no-backup-if-mismatch > /dev/null 2>&1; then
     echo "$PATCH_CONTENT" | patch -p1 --forward --no-backup-if-mismatch \
         || error "BBRv3: patch apply failed!"
     log "BBRv3: patch applied ✅"
+    if [ "$RCVBUF_MOVED" = 1 ]; then
+        sed -i 's|^/\* obsolete \*/$|static int tcp_min_rcvbuf = 4096;\n\n/* obsolete */|' "$SYSCTL_C"
+    fi
 else
+    [ "$RCVBUF_MOVED" = 1 ] && git -C "${KERNEL_SRC}" checkout -- net/ipv4/sysctl_net_ipv4.c 2>/dev/null
     error "BBRv3: patch does not apply cleanly — conflict or unsupported kernel source!"
 fi
 
