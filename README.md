@@ -15,7 +15,7 @@
 **SAGA** is a build orchestration repository for the **SAGA** Android GKI kernel.
 This repo does **not** contain kernel source — it contains all the scripts and GitHub Actions workflows that:
 
-1. Download the kernel source from `chainonyourdoor/LuminaireKernel-*`
+1. Download the kernel source from `Saga-kernel`
 2. Apply patches, integrations, and addons
 3. Build the kernel via **MAKE**
 4. Package and release via AnyKernel3 + Telegram
