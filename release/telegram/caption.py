@@ -59,6 +59,7 @@ ADDON_DISPLAY_NAMES = {
     "lz4zstd":     "LZ4+ZSTD",
     "lz4kd":       "LZ4KD",
     "le9uo":       "LE9UO",
+    "mglru":       "MGLRU",
     "kcompressd":  "Kcompressd",
     "zram-ir":     "Zram_ir",
 }
@@ -73,7 +74,7 @@ MOUNTLESS_ADDON_TOKENS = ("nomount", "zeromount")
 # NOT here — they're always-on (see build.yml) and shown instead in the
 # dedicated "Features" block (see FEATURE_ADDON_TOKENS / build_feature_lines
 # below), not duplicated as Enable/Disable toggles.
-TOGGLE_ADDON_ORDER = ["rekernel", "droidspaces", "lz4zstd", "lz4kd", "le9uo", "kasumi", "kcompressd", "zram-ir"]
+TOGGLE_ADDON_ORDER = ["rekernel", "droidspaces", "lz4zstd", "lz4kd", "mglru", "le9uo", "kasumi", "kcompressd", "zram-ir"]
 
 # These five get pulled out of the normal "*Add-ons*" bullet list and into
 # their own "Features" block instead (see build_feature_lines(),
