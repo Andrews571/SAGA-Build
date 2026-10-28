@@ -92,6 +92,18 @@ on:
         description: "Zram_ir - add multi_comp"
         type: boolean
         default: false    
+      le9uo:
+        description: "LE9UO - working set protection (default ON; desligue p/ isolar o MGLRU)"
+        type: boolean
+        default: true
+      kcompressd:
+        description: "Kcompressd - per-node swapout kthread (default ON; desligue p/ isolar o MGLRU)"
+        type: boolean
+        default: true
+      mglru:
+        description: "MGLRU force-enable - CORE-only test patch (default OFF; o kernel já nasce com LRU_GEN_ENABLED=y)"
+        type: boolean
+        default: false
       lto_mode:
         description: "LTO"
         type: choice
@@ -229,7 +241,7 @@ jobs:
           else
             PROFILE_ADDONS="adios"
           fi
-          ADDONS="bbrv3,bbg,bore,${PROFILE_ADDONS},ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${{ inputs.rekernel && 'rekernel,' || '' }}droidspaces,${{ inputs.kasumi && 'kasumi,' || '' }}lz4zstd,lz4kd,${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}le9uo,kcompressd,${{ inputs.zram_ir && 'zram-ir,' || '' }}"
+          ADDONS="bbrv3,bbg,bore,${PROFILE_ADDONS},ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${{ inputs.rekernel && 'rekernel,' || '' }}droidspaces,${{ inputs.kasumi && 'kasumi,' || '' }}lz4zstd,lz4kd,${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}${{ inputs.mglru && 'mglru,' || '' }}${{ inputs.le9uo && 'le9uo,' || '' }}${{ inputs.kcompressd && 'kcompressd,' || '' }}${{ inputs.zram_ir && 'zram-ir,' || '' }}"
           echo "addons=${ADDONS}" >> $GITHUB_OUTPUT
           # "/" -> "-" so this is safe to use as a filesystem path component
           # (cache asset filenames) wherever ref_name is needed downstream.
