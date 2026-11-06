@@ -47,7 +47,7 @@ fi
 
 if ! [[ "$_saga_size" =~ ^0x[0-9a-fA-F]{3,4}$ ]] || ! [[ "$_saga_hash" =~ ^[0-9a-f]{64}$ ]]; then
     warn "Manager signature: nao consegui ler o update.json do SAGA-App - kernel compilado SEM o certificado do app"
-    unset _saga_json _saga_size _saga_hash
+    unset _saga_json _saga_size _saga_hash _saga_kbuilds _saga_supported _f
     return 0
 fi
 
@@ -64,10 +64,48 @@ export KSU_EXPECTED_HASH="$_saga_hash"
 
 log "Manager signature: size=${KSU_EXPECTED_SIZE} hash=${KSU_EXPECTED_HASH}"
 
-# Confere se o Kbuild do root solution aplicado suporta o slot Custom.
-if ! grep -RqsE --include=Kbuild --include=Makefile "KSU_EXPECTED_SIZE" \
-        "${KERNEL_SRC}/drivers" "${KERNEL_SRC}/KernelSU" 2>/dev/null; then
-    warn "Manager signature: o root solution aplicado nao menciona KSU_EXPECTED_SIZE - o SAGA-App pode nao ser reconhecido por este kernel"
+# KernelSU-Next (variante KSUNEXT) NAO le KSU_EXPECTED_*: ele aceita uma lista
+# "tamanho:hash,tamanho:hash" (KSU_NEXT_MANAGER_LIST) que, por padrao, so tem os managers
+# dele. Acrescentamos o SAGA mantendo os padroes, para o manager oficial continuar valendo.
+_saga_kbuilds=(
+    "${KERNEL_SRC}/drivers/kernelsu/Kbuild"
+    "${KERNEL_SRC}/KernelSU-Next/kernel/Kbuild"
+    "${KERNEL_SRC}/KernelSU/kernel/Kbuild"
+)
+_next_kbuild=""
+for _f in "${_saga_kbuilds[@]}"; do
+    if [ -f "$_f" ] && grep -qE '^[[:space:]]*KSU_NEXT_MANAGER_LIST[[:space:]]*:?=' "$_f"; then
+        _next_kbuild="$_f"
+        break
+    fi
+done
+if [ -n "$_next_kbuild" ]; then
+    _next_default="$(sed -n 's/^[[:space:]]*KSU_NEXT_MANAGER_LIST[[:space:]]*:\{0,1\}=[[:space:]]*//p' \
+        "$_next_kbuild" | head -n1 | tr -d '[:space:]')"
+    if [ -z "$_next_default" ]; then
+        warn "Manager signature: nao consegui ler a lista padrao do KernelSU-Next - usando a lista conhecida"
+        _next_default="0x3e6:79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00c69821bf7,0x338:f26471a28031130362bce7eebffb9a0b8afc3095f163ce0c75a309f03b644a1f"
+    fi
+    _saga_entry="${KSU_EXPECTED_SIZE}:${KSU_EXPECTED_HASH}"
+    case ",${_next_default}," in
+        *",${_saga_entry},"*) export KSU_NEXT_MANAGER_LIST="$_next_default" ;;
+        *)                    export KSU_NEXT_MANAGER_LIST="${_next_default},${_saga_entry}" ;;
+    esac
+    log "Manager signature: KernelSU-Next - chave do SAGA acrescentada a lista de managers"
+    log "Manager signature: KSU_NEXT_MANAGER_LIST=${KSU_NEXT_MANAGER_LIST}"
+    unset _next_kbuild _next_default _saga_entry
 fi
 
-unset _saga_json _saga_size _saga_hash
+# Confere se o Kbuild do root solution aplicado suporta o slot Custom.
+_saga_supported=false
+for _f in "${_saga_kbuilds[@]}"; do
+    if [ -f "$_f" ] && grep -qE "KSU_EXPECTED_SIZE|KSU_NEXT_MANAGER_LIST" "$_f"; then
+        _saga_supported=true
+        break
+    fi
+done
+if [ "$_saga_supported" != "true" ]; then
+    warn "Manager signature: o root solution aplicado nao menciona KSU_EXPECTED_SIZE nem KSU_NEXT_MANAGER_LIST - o SAGA-App pode nao ser reconhecido por este kernel"
+fi
+
+unset _saga_json _saga_size _saga_hash _saga_kbuilds _saga_supported _f
