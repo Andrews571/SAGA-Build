@@ -5,6 +5,8 @@ on:
     - cron: "0 0 */5 * *"
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   # ======================================================
   # LIST — enumerate every arsenal-*/clang-* cache that actually exists
@@ -20,6 +22,8 @@ jobs:
   list-caches:
     name: "List Cache Keys"
     runs-on: ubuntu-latest
+    permissions:
+      actions: read   # gh api .../actions/caches
     outputs:
       keys: ${{ steps.list.outputs.keys }}
     steps:

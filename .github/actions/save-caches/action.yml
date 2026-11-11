@@ -14,6 +14,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
+        IN_CCACHE_FILENAME: ${{ inputs.ccache-filename }}
       run: |
         # No write-scoped token (expected on a fork without PERSONAL_TOKEN
         # configured) — release create/upload can't possibly succeed, so
@@ -26,7 +27,7 @@ runs:
           exit 0
         fi
 
-        ASSET_NAME="${{ inputs.ccache-filename }}"
+        ASSET_NAME="${IN_CCACHE_FILENAME}"
         cd "${{ github.workspace }}"
         
         # Check ccache exists

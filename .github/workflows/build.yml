@@ -156,6 +156,9 @@ env:
   # so those re-derive startsWith(inputs.build_system, 'Make') inline instead.
   IS_MAKE: ${{ startsWith(inputs.build_system, 'Make') }}
 
+permissions:
+  contents: read
+
 jobs:
 
   # ======================================================
@@ -214,12 +217,24 @@ jobs:
         env:
           SUSFS_ENABLED: ${{ inputs.susfs == 'enable' }}
           ADDON_PROFILE: ${{ inputs.addon_profile }}
+          IN_VANILLA: ${{ inputs.vanilla }}
+          IN_RESUKISU: ${{ inputs.resukisu }}
+          IN_SUKISU: ${{ inputs.sukisu }}
+          IN_KSUNEXT: ${{ inputs.ksunext }}
+          ADDON_REKERNEL: ${{ inputs.rekernel && 'rekernel,' || '' }}
+          ADDON_KASUMI: ${{ inputs.kasumi && 'kasumi,' || '' }}
+          ADDON_MOUNTLESS: ${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}
+          ADDON_MGLRU: ${{ inputs.mglru && 'mglru,' || '' }}
+          ADDON_LE9UO: ${{ inputs.le9uo && 'le9uo,' || '' }}
+          ADDON_KCOMPRESSD: ${{ inputs.kcompressd && 'kcompressd,' || '' }}
+          ADDON_ZRAM_IR: ${{ inputs.zram_ir && 'zram-ir,' || '' }}
+          GH_REF_NAME: ${{ github.ref_name }}
         run: |
           variants=()
-          ${{ inputs.vanilla }}  && variants+=("{\"kernel_variant\":\"VANILLA\",\"susfs\":false}")
-          ${{ inputs.resukisu }} && variants+=("{\"kernel_variant\":\"RESUKISU\",\"susfs\":${SUSFS_ENABLED}}")
-          ${{ inputs.sukisu }}   && variants+=("{\"kernel_variant\":\"SUKISU\",\"susfs\":${SUSFS_ENABLED}}")
-          ${{ inputs.ksunext }} && variants+=("{\"kernel_variant\":\"KSUNEXT\",\"susfs\":${SUSFS_ENABLED}}")
+          [ "${IN_VANILLA}" = "true" ]   && variants+=("{\"kernel_variant\":\"VANILLA\",\"susfs\":false}")
+          [ "${IN_RESUKISU}" = "true" ]  && variants+=("{\"kernel_variant\":\"RESUKISU\",\"susfs\":${SUSFS_ENABLED}}")
+          [ "${IN_SUKISU}" = "true" ]    && variants+=("{\"kernel_variant\":\"SUKISU\",\"susfs\":${SUSFS_ENABLED}}")
+          [ "${IN_KSUNEXT}" = "true" ]  && variants+=("{\"kernel_variant\":\"KSUNEXT\",\"susfs\":${SUSFS_ENABLED}}")
 
           if [ ${#variants[@]} -eq 0 ]; then
             echo "No root solutions selected!"
@@ -241,11 +256,11 @@ jobs:
           else
             PROFILE_ADDONS="adios"
           fi
-          ADDONS="bbrv3,bbg,bore,${PROFILE_ADDONS},ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${{ inputs.rekernel && 'rekernel,' || '' }}droidspaces,${{ inputs.kasumi && 'kasumi,' || '' }}lz4zstd,lz4kd,${{ inputs.mountless_engine != 'none' && format('{0},', inputs.mountless_engine) || '' }}${{ inputs.mglru && 'mglru,' || '' }}${{ inputs.le9uo && 'le9uo,' || '' }}${{ inputs.kcompressd && 'kcompressd,' || '' }}${{ inputs.zram_ir && 'zram-ir,' || '' }}"
+          ADDONS="bbrv3,bbg,bore,${PROFILE_ADDONS},ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${ADDON_REKERNEL}droidspaces,${ADDON_KASUMI}lz4zstd,lz4kd,${ADDON_MOUNTLESS}${ADDON_MGLRU}${ADDON_LE9UO}${ADDON_KCOMPRESSD}${ADDON_ZRAM_IR}"
           echo "addons=${ADDONS}" >> $GITHUB_OUTPUT
           # "/" -> "-" so this is safe to use as a filesystem path component
           # (cache asset filenames) wherever ref_name is needed downstream.
-          SAFE_REF="$(echo '${{ github.ref_name }}' | tr '/' '-')"
+          SAFE_REF="$(echo "${GH_REF_NAME}" | tr '/' '-')"
           echo "safe_ref=${SAFE_REF}" >> $GITHUB_OUTPUT
 
       - name: "Preflight — Validate Addons"
@@ -255,8 +270,10 @@ jobs:
         # addon later. Convention this enforces: the addon's folder name,
         # its script name, and the token used in ADDONS above must all be
         # identical — kernel/addons/<name>/<name>.sh.
+        env:
+          ST_SET_ADDONS: ${{ steps.set.outputs.addons }}
         run: |
-          IFS=',' read -ra addon_list <<< "${{ steps.set.outputs.addons }}"
+          IFS=',' read -ra addon_list <<< "${ST_SET_ADDONS}"
           missing=()
           for addon in "${addon_list[@]}"; do
             [ -z "$addon" ] && continue
@@ -267,7 +284,7 @@ jobs:
             echo "Expected kernel/addons/<name>/<name>.sh for each. This usually means the folder name and the ADDONS token (build.yml) drifted apart — check kernel/addons/ against the 'Build Variant Matrix' step above."
             exit 1
           fi
-          echo "✅ All addons OK: ${{ steps.set.outputs.addons }}"
+          echo "✅ All addons OK: ${ST_SET_ADDONS}"
 
       - name: "Setup Arsenal"  # restores clang+arsenal cache (auto-saved if missing), then runs arsenal.sh
         id: setup-arsenal
@@ -407,26 +424,29 @@ jobs:
         if: always() && matrix.kernel_variant != 'VANILLA' && inputs.run_mode != 'Dry Run'
         env:
           GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          ST_BUILD_OUTCOME: ${{ steps.build.outcome }}
+          MX_KERNEL_VARIANT: ${{ matrix.kernel_variant }}
+          MX_SUSFS: ${{ matrix.susfs }}
         run: |
-          OUTCOME="${{ steps.build.outcome }}"
+          OUTCOME="${ST_BUILD_OUTCOME}"
           [ "$OUTCOME" = "success" ] && OUTCOME="success" || OUTCOME="failure"
-          case "${{ matrix.kernel_variant }}" in
+          case "${MX_KERNEL_VARIANT}" in
             RESUKISU)
-              if [ "${{ matrix.susfs }}" = "true" ]; then
+              if [ "${MX_SUSFS}" = "true" ]; then
                 COMPONENTS="resukisu susfs_resukisu"
               else
                 COMPONENTS="resukisu"
               fi
               ;;
             SUKISU)
-              if [ "${{ matrix.susfs }}" = "true" ]; then
+              if [ "${MX_SUSFS}" = "true" ]; then
                 COMPONENTS="sukisu_builtin susfs_sukisu"
               else
                 COMPONENTS="sukisu"
               fi
               ;;
             KSUNEXT)
-              if [ "${{ matrix.susfs }}" = "true" ]; then
+              if [ "${MX_SUSFS}" = "true" ]; then
                 COMPONENTS="ksunext_susfs_fork susfs_ksunext"
               else
                 COMPONENTS="ksunext"

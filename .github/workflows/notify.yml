@@ -7,6 +7,9 @@ on:
     tags-ignore:
       - '**'   # ignore tag pushes (e.g. the "cache" release tag) — only real branch commits notify
 
+permissions:
+  contents: read
+
 jobs:
 
   # ======================================================

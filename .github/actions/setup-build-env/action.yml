@@ -43,8 +43,10 @@ runs:
       id: clang-key
       if: startsWith(inputs.build-system, 'Make')
       shell: bash
+      env:
+        IN_BUILD_SYSTEM: ${{ inputs.build-system }}
       run: |
-        variant="${{ inputs.build-system }}"
+        variant="${IN_BUILD_SYSTEM}"
         variant="${variant#Make - }"
         echo "clang_variant=${variant}" >> $GITHUB_OUTPUT
         echo "clang_variant_upper=${variant^^}" >> $GITHUB_OUTPUT

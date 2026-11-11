@@ -63,6 +63,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 jobs:
   upstream-sync:
     name: "Sync ${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
@@ -82,6 +85,13 @@ jobs:
           df -h
 
       - name: "Resolve target repo/branch"
+        env:
+          IN_ANDROID_VERSION: ${{ inputs.android_version }}
+          IN_KERNEL_VERSION: ${{ inputs.kernel_version }}
+          IN_TARGET: ${{ inputs.target }}
+          IN_TARGET_STABLE_TAG: ${{ inputs.target_stable_tag }}
+          IN_FORCE_ADOPT: ${{ inputs.force_adopt }}
+          IN_PROMOTE_STAGING: ${{ inputs.promote_staging }}
         run: |
           # -live, not -lts: build.sh and arsenal.sh both already compute
           # KERNEL_BRANCH="${ANDROID_VERSION}-${KERNEL_VERSION}-live" and
@@ -89,22 +99,22 @@ jobs:
           # not the Google-side "-lts" naming (that's LTS_BRANCH below,
           # what we fetch FROM Google; TARGET_BRANCH is what we push TO
           # our own repo, a different thing).
-          echo "TARGET_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-live" >> $GITHUB_ENV
+          echo "TARGET_BRANCH=${IN_ANDROID_VERSION}-${IN_KERNEL_VERSION}-live" >> $GITHUB_ENV
 
           # mirror = pure Google ACK, no catch-up merges ever — that's the
           # entire point of having it (a clean baseline to diff the live
           # repo and kernel/core/*_catchup against). A stable-tag catch-up
           # landing there would defeat that purpose, so it's a hard error,
           # not a warning.
-          if [ "${{ inputs.target }}" = "mirror" ] && [ -n "${{ inputs.target_stable_tag }}" ]; then
+          if [ "${IN_TARGET}" = "mirror" ] && [ -n "${IN_TARGET_STABLE_TAG}" ]; then
             echo "::error::target=mirror can never take a target_stable_tag — the mirror repo is a pure Google ACK mirror by design. Use target=live for a linux-stable catch-up."
             exit 1
           fi
 
-          if [ "${{ inputs.target }}" = "mirror" ]; then
-            echo "TARGET_REPO=SAGA-Kernel-${{ inputs.kernel_version }}-mirror" >> $GITHUB_ENV
+          if [ "${IN_TARGET}" = "mirror" ]; then
+            echo "TARGET_REPO=SAGA-Kernel-${IN_KERNEL_VERSION}-mirror" >> $GITHUB_ENV
           else
-            echo "TARGET_REPO=SAGA-Kernel-${{ inputs.kernel_version }}" >> $GITHUB_ENV
+            echo "TARGET_REPO=SAGA-Kernel-${IN_KERNEL_VERSION}" >> $GITHUB_ENV
           fi
 
           # A stable catch-up merge (target_stable_tag set, not adopting)
@@ -115,10 +125,10 @@ jobs:
           # fast-forward syncs (no stable tag) and adopt both still push
           # straight to the real branch — those aren't introducing new,
           # unvalidated content the way a raw stable-tag merge is.
-          if [ "${{ inputs.force_adopt }}" = "false" ] && [ -n "${{ inputs.target_stable_tag }}" ]; then
-            echo "PUSH_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-live-staging" >> $GITHUB_ENV
+          if [ "${IN_FORCE_ADOPT}" = "false" ] && [ -n "${IN_TARGET_STABLE_TAG}" ]; then
+            echo "PUSH_BRANCH=${IN_ANDROID_VERSION}-${IN_KERNEL_VERSION}-live-staging" >> $GITHUB_ENV
           else
-            echo "PUSH_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-live" >> $GITHUB_ENV
+            echo "PUSH_BRANCH=${IN_ANDROID_VERSION}-${IN_KERNEL_VERSION}-live" >> $GITHUB_ENV
           fi
 
           # promote_staging is a standalone action (fast-forward
@@ -126,17 +136,17 @@ jobs:
           # anything, and has no business running alongside an adopt or a
           # catch-up in the same dispatch, so those combos are a hard error
           # rather than silently picking one behavior over the other.
-          if [ "${{ inputs.promote_staging }}" = "true" ]; then
-            if [ "${{ inputs.target }}" = "mirror" ]; then
+          if [ "${IN_PROMOTE_STAGING}" = "true" ]; then
+            if [ "${IN_TARGET}" = "mirror" ]; then
               echo "::error::promote_staging only applies to target=live — the mirror repo has no staging branch."
               exit 1
             fi
-            if [ "${{ inputs.force_adopt }}" = "true" ] || [ -n "${{ inputs.target_stable_tag }}" ]; then
+            if [ "${IN_FORCE_ADOPT}" = "true" ] || [ -n "${IN_TARGET_STABLE_TAG}" ]; then
               echo "::error::promote_staging can't be combined with force_adopt or target_stable_tag. Run it on its own: target=live, promote_staging=true, everything else default."
               exit 1
             fi
           fi
-          echo "STAGING_BRANCH=${{ inputs.android_version }}-${{ inputs.kernel_version }}-live-staging" >> $GITHUB_ENV
+          echo "STAGING_BRANCH=${IN_ANDROID_VERSION}-${IN_KERNEL_VERSION}-live-staging" >> $GITHUB_ENV
 
       # force_adopt path: full (non-shallow) clone from live ACK, pushed as
       # many small sequential checkpoints instead of one giant push.
@@ -178,8 +188,12 @@ jobs:
       # objects than others).
       - name: "Adopt live ACK (full clone, adaptive chunked push)"
         if: ${{ inputs.force_adopt == true }}
+        env:
+          IN_ANDROID_VERSION: ${{ inputs.android_version }}
+          IN_KERNEL_VERSION: ${{ inputs.kernel_version }}
+          SEC_KERNEL_SYNC_TOKEN: ${{ secrets.KERNEL_SYNC_TOKEN }}
         run: |
-          ACK_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
+          ACK_BRANCH="${IN_ANDROID_VERSION}-${IN_KERNEL_VERSION}-lts"
 
           git clone --branch "${ACK_BRANCH}" --progress \
             "https://android.googlesource.com/kernel/common" ack-fresh
@@ -194,7 +208,7 @@ jobs:
           git config http.version HTTP/1.1
 
           git remote add target \
-            "https://Andrews571:${{ secrets.KERNEL_SYNC_TOKEN }}@github.com/Andrews571/${TARGET_REPO}.git"
+            "https://Andrews571:${SEC_KERNEL_SYNC_TOKEN}@github.com/Andrews571/${TARGET_REPO}.git"
 
           echo "Building commit list (oldest -> newest)..."
           git rev-list --reverse HEAD > /tmp/commits.txt
@@ -298,8 +312,10 @@ jobs:
       # sync against a target repo that already has real ACK history.
       - name: "Clone target repo (SAGA-Kernel)"
         if: ${{ inputs.force_adopt == false && inputs.promote_staging == false }}
+        env:
+          SEC_KERNEL_SYNC_TOKEN: ${{ secrets.KERNEL_SYNC_TOKEN }}
         run: |
-          REPO_URL="https://Andrews571:${{ secrets.KERNEL_SYNC_TOKEN }}@github.com/Andrews571/${TARGET_REPO}.git"
+          REPO_URL="https://Andrews571:${SEC_KERNEL_SYNC_TOKEN}@github.com/Andrews571/${TARGET_REPO}.git"
           # Full (non-shallow) clone — not depth-limited anymore. Two hard
           # requirements forced this:
           #
@@ -346,12 +362,15 @@ jobs:
 
       - name: "Fetch + merge live ACK (${{ inputs.android_version }}-${{ inputs.kernel_version }} + ${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts)"
         if: ${{ inputs.force_adopt == false && inputs.promote_staging == false }}
+        env:
+          IN_ANDROID_VERSION: ${{ inputs.android_version }}
+          IN_KERNEL_VERSION: ${{ inputs.kernel_version }}
         run: |
           cd kernel-work
           git remote add ack-live "https://android.googlesource.com/kernel/common"
 
-          FEATURE_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}"
-          LTS_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-lts"
+          FEATURE_BRANCH="${IN_ANDROID_VERSION}-${IN_KERNEL_VERSION}"
+          LTS_BRANCH="${IN_ANDROID_VERSION}-${IN_KERNEL_VERSION}-lts"
 
           # No --depth: our local clone already has full history from
           # origin with real, matching ACK commit hashes, so this
@@ -394,6 +413,8 @@ jobs:
 
       - name: "Catch-up merge to linux-stable tag"
         if: ${{ inputs.force_adopt == false && inputs.target_stable_tag != '' }}
+        env:
+          IN_TARGET_STABLE_TAG: ${{ inputs.target_stable_tag }}
         run: |
           cd kernel-work
           git remote add stable "https://github.com/gregkh/linux.git"
@@ -402,25 +423,25 @@ jobs:
           # only the stable-side fetch needs deepening to find a
           # merge-base.
           STABLE_DEPTH=100
-          git fetch stable "refs/tags/${{ inputs.target_stable_tag }}:refs/tags/${{ inputs.target_stable_tag }}" --depth="${STABLE_DEPTH}" --progress
+          git fetch stable "refs/tags/${IN_TARGET_STABLE_TAG}:refs/tags/${IN_TARGET_STABLE_TAG}" --depth="${STABLE_DEPTH}" --progress
 
           for i in 1 2 3; do
-            if git merge-base HEAD "${{ inputs.target_stable_tag }}" >/dev/null 2>&1; then
+            if git merge-base HEAD "${IN_TARGET_STABLE_TAG}" >/dev/null 2>&1; then
               echo "Merge-base with linux-stable found (stable depth ${STABLE_DEPTH}) ✅"
               break
             fi
             STABLE_DEPTH=$((STABLE_DEPTH * 2))
             echo "No merge-base yet, deepening stable to ${STABLE_DEPTH}..."
-            git fetch stable "refs/tags/${{ inputs.target_stable_tag }}:refs/tags/${{ inputs.target_stable_tag }}" --depth="${STABLE_DEPTH}" --progress
+            git fetch stable "refs/tags/${IN_TARGET_STABLE_TAG}:refs/tags/${IN_TARGET_STABLE_TAG}" --depth="${STABLE_DEPTH}" --progress
           done
 
           # Unshallow the stable fetch before merging: it's still a shallow
           # fetch from a different remote, and merging it in as-is would
           # reintroduce the exact shallow-graft/push-corruption problem the
           # Clone step's full clone was meant to avoid (see that comment).
-          git fetch stable "refs/tags/${{ inputs.target_stable_tag }}" --unshallow --progress
+          git fetch stable "refs/tags/${IN_TARGET_STABLE_TAG}" --unshallow --progress
 
-          if ! git merge-base HEAD "${{ inputs.target_stable_tag }}" >/dev/null 2>&1; then
+          if ! git merge-base HEAD "${IN_TARGET_STABLE_TAG}" >/dev/null 2>&1; then
             echo "::error::No shared history with linux-stable even at stable depth ${STABLE_DEPTH}. Can't do a clean 3-way merge — investigate manually."
             exit 1
           fi
@@ -432,8 +453,8 @@ jobs:
           # matching resolution there still fails the job on purpose —
           # kernel source merge conflicts need human judgment, not silent
           # CI auto-resolve; this only covers ground already covered.
-          if ! git merge --no-edit "${{ inputs.target_stable_tag }}"; then
-            RESOLUTIONS_DIR="${GITHUB_WORKSPACE}/kernel/catchup-resolutions/${{ inputs.target_stable_tag }}"
+          if ! git merge --no-edit "${IN_TARGET_STABLE_TAG}"; then
+            RESOLUTIONS_DIR="${GITHUB_WORKSPACE}/kernel/catchup-resolutions/${IN_TARGET_STABLE_TAG}"
             UNRESOLVED=""
             for f in $(git diff --name-only --diff-filter=U); do
               if [ -f "${RESOLUTIONS_DIR}/${f}" ]; then
@@ -446,19 +467,19 @@ jobs:
             done
 
             if [ -n "$UNRESOLVED" ]; then
-              echo "::error::Merge conflict catching up to ${{ inputs.target_stable_tag }} in file(s) with no known resolution:%0A$(echo -e "$UNRESOLVED")Resolve manually: git clone the repo, replicate these fetch steps, resolve conflicts locally, then push. Once confirmed working, consider adding the resolution to kernel/catchup-resolutions/${{ inputs.target_stable_tag }}/ in SAGA-Build for next time."
+              echo "::error::Merge conflict catching up to ${IN_TARGET_STABLE_TAG} in file(s) with no known resolution:%0A$(echo -e "$UNRESOLVED")Resolve manually: git clone the repo, replicate these fetch steps, resolve conflicts locally, then push. Once confirmed working, consider adding the resolution to kernel/catchup-resolutions/${IN_TARGET_STABLE_TAG}/ in SAGA-Build for next time."
               git merge --abort
               exit 1
             fi
 
             git commit --no-edit
-            echo "All conflicts resolved via kernel/catchup-resolutions/${{ inputs.target_stable_tag }}/ ✅"
+            echo "All conflicts resolved via kernel/catchup-resolutions/${IN_TARGET_STABLE_TAG}/ ✅"
           fi
 
           VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
           PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
           SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
-          echo "Caught up to ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} (target: ${{ inputs.target_stable_tag }})"
+          echo "Caught up to ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} (target: ${IN_TARGET_STABLE_TAG})"
 
       - name: "Push"
         if: ${{ inputs.force_adopt == false && inputs.promote_staging == false }}
@@ -473,8 +494,10 @@ jobs:
 
       - name: "Promote live-staging → live (fast-forward)"
         if: ${{ inputs.promote_staging == true }}
+        env:
+          SEC_KERNEL_SYNC_TOKEN: ${{ secrets.KERNEL_SYNC_TOKEN }}
         run: |
-          REPO_URL="https://Andrews571:${{ secrets.KERNEL_SYNC_TOKEN }}@github.com/Andrews571/${TARGET_REPO}.git"
+          REPO_URL="https://Andrews571:${SEC_KERNEL_SYNC_TOKEN}@github.com/Andrews571/${TARGET_REPO}.git"
 
           git clone --branch "${STAGING_BRANCH}" --progress "${REPO_URL}" kernel-work || {
             echo "::error::Couldn't clone ${STAGING_BRANCH} — does it exist on ${TARGET_REPO}?"

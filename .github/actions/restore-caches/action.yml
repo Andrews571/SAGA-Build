@@ -14,8 +14,9 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
+        IN_CCACHE_FILENAME: ${{ inputs.ccache-filename }}
       run: |
-        ASSET_NAME="${{ inputs.ccache-filename }}"
+        ASSET_NAME="${IN_CCACHE_FILENAME}"
         cd "${{ github.workspace }}"
 
         # Try own release cache

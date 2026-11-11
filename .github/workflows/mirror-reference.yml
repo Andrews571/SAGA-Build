@@ -54,15 +54,21 @@ on:
         type: string
         default: ""
 
+permissions:
+  contents: read
+
 jobs:
   mirror:
     name: "Mirror ${{ inputs.reference_repo }} → ${{ inputs.target_branch }}"
     runs-on: ubuntu-latest
     steps:
       - name: "Check confirmation"
+        env:
+          IN_CONFIRM: ${{ inputs.confirm }}
+          IN_TARGET_BRANCH: ${{ inputs.target_branch }}
         run: |
-          if [ "${{ inputs.confirm }}" != "CONFIRM" ]; then
-            echo "::error::Type CONFIRM in the 'confirm' input to proceed — this wipes ${{ inputs.target_branch }}'s git history, which kernel-source.yml depends on for its linux-stable merge-base."
+          if [ "${IN_CONFIRM}" != "CONFIRM" ]; then
+            echo "::error::Type CONFIRM in the 'confirm' input to proceed — this wipes ${IN_TARGET_BRANCH}'s git history, which kernel-source.yml depends on for its linux-stable merge-base."
             exit 1
           fi
 
@@ -75,9 +81,12 @@ jobs:
           df -h
 
       - name: "Clone reference tree"
+        env:
+          IN_REFERENCE_BRANCH: ${{ inputs.reference_branch }}
+          IN_REFERENCE_REPO: ${{ inputs.reference_repo }}
         run: |
-          git clone --depth 1 -b "${{ inputs.reference_branch }}" \
-            "https://github.com/${{ inputs.reference_repo }}.git" ref-tree
+          git clone --depth 1 -b "${IN_REFERENCE_BRANCH}" \
+            "https://github.com/${IN_REFERENCE_REPO}.git" ref-tree
 
       - name: "Sanity-check it's a real kernel tree before pushing anything"
         run: |
@@ -102,6 +111,11 @@ jobs:
           fi
 
       - name: "Push to SAGA-Kernel-6.1"
+        env:
+          IN_TARGET_BRANCH: ${{ inputs.target_branch }}
+          IN_REFERENCE_REPO: ${{ inputs.reference_repo }}
+          IN_REFERENCE_BRANCH: ${{ inputs.reference_branch }}
+          SEC_KERNEL_SYNC_TOKEN: ${{ secrets.KERNEL_SYNC_TOKEN }}
         run: |
           cd ref-tree
           git config user.name "Andrews571"
@@ -112,13 +126,13 @@ jobs:
           # SAGA-Kernel-6.1's own history clean instead of grafting on a
           # second, unrelated repo's full commit history.
           rm -rf .git
-          git init -q -b "${{ inputs.target_branch }}"
+          git init -q -b "${IN_TARGET_BRANCH}"
           git config user.name "Andrews571"
           git config user.email "Andrews571@users.noreply.github.com"
           git add -A
-          git commit -q -m "Mirror ${{ inputs.reference_repo }}@${{ inputs.reference_branch }} ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          git commit -q -m "Mirror ${IN_REFERENCE_REPO}@${IN_REFERENCE_BRANCH} ($(date -u '+%Y-%m-%d %H:%M UTC'))"
 
-          git remote add target "https://Andrews571:${{ secrets.KERNEL_SYNC_TOKEN }}@github.com/Andrews571/SAGA-Kernel-6.1.git"
-          git push --force target "HEAD:${{ inputs.target_branch }}"
+          git remote add target "https://Andrews571:${SEC_KERNEL_SYNC_TOKEN}@github.com/Andrews571/SAGA-Kernel-6.1.git"
+          git push --force target "HEAD:${IN_TARGET_BRANCH}"
 
-          echo "✅ ${{ inputs.target_branch }} now mirrors ${{ inputs.reference_repo }}@${{ inputs.reference_branch }}"
+          echo "✅ ${IN_TARGET_BRANCH} now mirrors ${IN_REFERENCE_REPO}@${IN_REFERENCE_BRANCH}"

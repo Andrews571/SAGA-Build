@@ -15,6 +15,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
+        IN_ASSET_NAME: ${{ inputs.asset-name }}
       run: |
         # Same reasoning as save-caches: no write-scoped token means
         # release create/upload can't succeed, so skip cleanly instead of
@@ -24,7 +25,7 @@ runs:
           exit 0
         fi
 
-        ASSET_NAME="${{ inputs.asset-name }}"
+        ASSET_NAME="${IN_ASSET_NAME}"
 
         if [ ! -d /dev/shm/ldcache ]; then
           echo "⚠️ /dev/shm/ldcache not found — skipping save"

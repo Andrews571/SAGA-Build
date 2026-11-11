@@ -15,8 +15,9 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
+        IN_ASSET_NAME: ${{ inputs.asset-name }}
       run: |
-        ASSET_NAME="${{ inputs.asset-name }}"
+        ASSET_NAME="${IN_ASSET_NAME}"
 
         if gh release view cache --repo "${{ github.repository }}" > /dev/null 2>&1; then
           echo "Checking for LTO cache asset: ${ASSET_NAME}"

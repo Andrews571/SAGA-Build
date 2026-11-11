@@ -34,8 +34,10 @@ runs:
       id: clang-key
       if: startsWith(inputs.build-system, 'Make')
       shell: bash
+      env:
+        IN_BUILD_SYSTEM: ${{ inputs.build-system }}
       run: |
-        variant="${{ inputs.build-system }}"
+        variant="${IN_BUILD_SYSTEM}"
         variant="${variant#Make - }"
         echo "clang_variant=${variant}" >> $GITHUB_OUTPUT
 
@@ -44,13 +46,18 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
+        IN_KERNEL_VERSION: ${{ inputs.kernel-version }}
+        IN_KERNEL_SOURCE: ${{ inputs.kernel-source }}
+        ST_RUNNER_IMG_IMAGE: ${{ steps.runner-img.outputs.image }}
+        IS_MAKE_BUILD: ${{ startsWith(inputs.build-system, 'Make') }}
+        ST_CLANG_KEY_CLANG_VARIANT: ${{ steps.clang-key.outputs.clang_variant }}
       run: |
-        gh cache delete "arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}-${{ steps.runner-img.outputs.image }}" -R "${{ github.repository }}" 2>/dev/null || true
+        gh cache delete "arsenal-MAKE-${IN_KERNEL_VERSION}-${IN_KERNEL_SOURCE}-${ST_RUNNER_IMG_IMAGE}" -R "${{ github.repository }}" 2>/dev/null || true
         # legacy keys (before the runner image was part of the key)
-        gh cache delete "arsenal-MAKE-${{ inputs.kernel-version }}-${{ inputs.kernel-source }}" -R "${{ github.repository }}" 2>/dev/null || true
-        if [ "${{ startsWith(inputs.build-system, 'Make') }}" = "true" ]; then
-          gh cache delete "clang-${{ steps.clang-key.outputs.clang_variant }}-${{ steps.runner-img.outputs.image }}" -R "${{ github.repository }}" 2>/dev/null || true
-          gh cache delete "clang-${{ steps.clang-key.outputs.clang_variant }}" -R "${{ github.repository }}" 2>/dev/null || true
+        gh cache delete "arsenal-MAKE-${IN_KERNEL_VERSION}-${IN_KERNEL_SOURCE}" -R "${{ github.repository }}" 2>/dev/null || true
+        if [ "${IS_MAKE_BUILD}" = "true" ]; then
+          gh cache delete "clang-${ST_CLANG_KEY_CLANG_VARIANT}-${ST_RUNNER_IMG_IMAGE}" -R "${{ github.repository }}" 2>/dev/null || true
+          gh cache delete "clang-${ST_CLANG_KEY_CLANG_VARIANT}" -R "${{ github.repository }}" 2>/dev/null || true
         fi
 
     - name: "Cache Clang"  # restores if present; auto-saves at end of job if it was missing
