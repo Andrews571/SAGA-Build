@@ -5,6 +5,18 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M3 — Versões de kernel e lint (T6, T7)
+**Arquivos:** `.github/workflows/build.yml`, `.github/workflows/lint.yml` (novo), `docs/CHANGELOG-MANUTENCAO.md`
+
+| Tarefa | O quê | Por quê | Como |
+|---|---|---|---|
+| T6 | Menu `kernel_version` só oferece `6.1`; novo passo **Validate Kernel Version** no `prepare-matrix` | O menu listava 5.10/5.15/6.6/6.12, que não existem no repo: o build gastava minutos e morria com "not yet supported" | Remove as opções inexistentes. O passo procura `kernel/android*-<versão>-lts` e falha em segundos com `::error` listando as versões suportadas. Kernel novo = criar a pasta **e** acrescentar a opção no menu |
+| T7 | Workflow **🔎 Lint** (push/PR em `.github/**`, `*.sh`, `*.py`, e manual) | Nada validava os workflows e scripts antes de rodarem em produção | **Bloqueiam:** `actionlint -shellcheck=` (estrutura/expressões), `bash -n`, `shellcheck -S error`, `py_compile`. **Não bloqueiam:** `shellcheck -S warning` e `actionlint` com shellcheck embutido (aparecem no log, `continue-on-error`). Ferramentas fixadas: actionlint-py 1.7.12.25, shellcheck-py 0.11.0.1 |
+
+**Verificação:** os 4 passos bloqueantes passam no repo atual (0 erros). Teste negativo: um `length()` inválido num workflow gera a anotação de erro e falha o passo; `bash -n` falha em script quebrado. Commits de pin (só `manifest.json`) não disparam o lint.
+
+---
+
 ## M2 — Notificação de push do Telegram (T3, T13, T14, T15)
 **Arquivos:** `.github/workflows/notify.yml`, `release/telegram/push_notify.sh` (novo), `docs/CHANGELOG-MANUTENCAO.md` (novo)
 

@@ -1,0 +1,74 @@
+name: "🔎 Lint"
+run-name: "🔎 Lint | ${{ github.ref_name }}"
+
+# Static checks for workflows and scripts. Only ERRORS fail the run
+# (broken workflow syntax/expressions, shell syntax, shellcheck level "error",
+# Python syntax). Style/warning findings are printed in a separate step that
+# never blocks, so existing findings don't keep the badge red.
+
+on:
+  push:
+    paths:
+      - '.github/**'
+      - '**.sh'
+      - '**.py'
+  pull_request:
+    paths:
+      - '.github/**'
+      - '**.sh'
+      - '**.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: "Lint"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+
+      - name: "Install linters"
+        run: |
+          python3 -m venv /tmp/lint
+          /tmp/lint/bin/pip install -q actionlint-py==1.7.12.25 shellcheck-py==0.11.0.1
+          echo "/tmp/lint/bin" >> "$GITHUB_PATH"
+
+      # ---------- blocking ----------
+      - name: "❌ Workflows (actionlint, errors only)"
+        run: |
+          # shellcheck disable=SC2016  # Go template, must not expand in bash
+          actionlint -shellcheck= -format '{{range $err := .}}::error file={{$err.Filepath}},line={{$err.Line}},col={{$err.Column}}::{{$err.Message}}%0A{{end}}'
+
+      - name: "❌ Shell syntax (bash -n)"
+        run: |
+          fail=0
+          while IFS= read -r -d '' f; do
+            bash -n "$f" || { echo "::error file=${f}::bash -n failed"; fail=1; }
+          done < <(find . -name '*.sh' -not -path './.git/*' -print0)
+          exit "$fail"
+
+      - name: "❌ Shell errors (shellcheck -S error)"
+        run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck -S error -f gcc
+
+      - name: "❌ Python syntax (py_compile)"
+        run: |
+          find . -name '*.py' -not -path './.git/*' -print0 | xargs -0 python3 -m py_compile
+          find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+
+      # ---------- informational (never fails the run) ----------
+      - name: "⚠️ Warnings (not blocking)"
+        continue-on-error: true
+        run: |
+          echo "### shellcheck (warning+)"
+          find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck -S warning -f gcc || true
+          echo "### actionlint + shellcheck inside run: blocks"
+          actionlint || true

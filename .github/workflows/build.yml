@@ -18,12 +18,11 @@ on:
         description: "Kernel Version"
         type: choice
         default: "6.1"
+        # Only versions that have a kernel/android*-<version>-lts folder in this
+        # repo belong here. Adding a new kernel = add the folder AND the option
+        # (the "Validate Kernel Version" step below fails fast if they drift).
         options:
-          - "5.10"
-          - "5.15"
           - "6.1"
-          - "6.6"
-          - "6.12"
       kernel_source:
         description: "Kernel Source"
         type: choice
@@ -211,6 +210,18 @@ jobs:
     steps:
       - name: "Checkout"
         uses: actions/checkout@v7
+
+      # Fails in seconds (instead of after minutes of setup) when the chosen
+      # kernel version has no patch folder — same condition build.sh checks late.
+      - name: "Validate Kernel Version"
+        run: |
+          supported=$(find kernel -maxdepth 1 -type d -name 'android*-*-lts' \
+            | sed -E 's#^kernel/android[0-9]+-([0-9.]+)-lts$#\1#' | sort -uV | paste -sd' ' -)
+          if ! find kernel -maxdepth 1 -type d -name "android*-${KERNEL_VERSION}-lts" | grep -q .; then
+            echo "::error title=Unsupported kernel version::Kernel ${KERNEL_VERSION} has no kernel/android*-${KERNEL_VERSION}-lts folder. Supported: ${supported:-none}"
+            exit 1
+          fi
+          echo "✅ Kernel ${KERNEL_VERSION} supported (available: ${supported})"
 
       - name: "Build Variant Matrix"
         id: set
