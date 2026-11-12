@@ -5,6 +5,20 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M4 — Pré-check do pin-scout e relatório do ccache (T8, T9)
+**Arquivos:** `.github/workflows/pin-scout.yml`, `kernel/checkpoint/scout_precheck.sh` (novo), `.github/workflows/build.yml`, `build/ccache_report.sh` (novo), `build/make.sh`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| Tarefa | O quê | Por quê | Como |
+|---|---|---|---|
+| T8 | O Pin Scout só dispara o Warm Run quando há algo novo para testar | A cada 6h ele subia 3 variantes (runner pago em minutos) mesmo sem commit novo no upstream | `scout_precheck.sh` compara o topo da branch de cada componente (`git ls-remote`, sem token) com o `manifest.json`, com as **mesmas regras do `scout.sh`** (candidato novo, pin marcado ruim, retry de deadlock). Resultado em `needs_build`; tabela no resumo da run. **Fail-open:** se o pré-check falhar, o build é disparado. Nova entrada manual `force` ignora o pré-check. Menu `kernel_version` do pin-scout só com `6.1` (mesma regra do T6) |
+| T9 | Relatório de hit rate do ccache por variante | O limite de 900 MB era um palpite; sem medir não dá para saber se o cache é pequeno | `make.sh` zera os contadores (`--zero-stats`) antes de compilar, para medir só **este** build. O passo "Ccache Stats" roda `ccache_report.sh`: taxa de acertos, misses, `cleanups` e tamanho, e dá um veredito: ✅ ≥ 90%; ⚠️ abaixo de 90% **e** cache cheio/descartando arquivos (subir `CCACHE_MAXSIZE`); ℹ️ abaixo de 90% com cache folgado (cache frio ou muito código novo). Tabela no resumo da run e `::warning` no caso ⚠️ |
+
+**Manutenção:** a lista `COMPONENTS` do `scout_precheck.sh` espelha o `scout.sh`; se um componente for adicionado ou trocado lá, atualize aqui também.
+
+**Verificação:** `scout_precheck.sh` testado com upstream simulado (tudo igual→não dispara; candidato novo→dispara; último commit ruim→não dispara; falha de lookup→não dispara; `force`→dispara; sem manifest→dispara) e contra o GitHub real (ReSukiSU e KSU-Next iguais ao pin; SukiSU `builtin` já marcado ruim). `ccache_report.sh` testado com 6 saídas simuladas (`--print-stats`, texto 4.4+, texto antigo, taxa alta, cache cheio, zero chamadas). Não havia `ccache` real no ambiente de teste: confira a primeira run real.
+
+---
+
 ## M3 — Versões de kernel e lint (T6, T7)
 **Arquivos:** `.github/workflows/build.yml`, `.github/workflows/lint.yml` (novo), `docs/CHANGELOG-MANUTENCAO.md`
 

@@ -27,12 +27,14 @@ on:
         description: "Kernel Version to check"
         type: choice
         default: "6.1"
+        # Same rule as build.yml: only kernels that have a
+        # kernel/android*-<version>-lts folder in this repo.
         options:
-          - "5.10"
-          - "5.15"
           - "6.1"
-          - "6.6"
-          - "6.12"
+      force:
+        description: "Dispatch the Warm Run even when the pre-check finds nothing new upstream"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -42,7 +44,21 @@ jobs:
     name: "Dispatch candidate check"
     runs-on: ubuntu-latest
     steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+
+      # Cheap check (git ls-remote, no build): is there any upstream commit that
+      # scout.sh would turn into a candidate? If not, skip the 3-variant Warm Run.
+      # Fail-open: if the check itself breaks, the Warm Run is dispatched anyway.
+      - name: "Pre-check upstream (anything new?)"
+        id: pre
+        env:
+          KERNEL_VERSION: ${{ inputs.kernel_version || '6.1' }}
+          FORCE: ${{ inputs.force || 'false' }}
+        run: bash "$GITHUB_WORKSPACE/kernel/checkpoint/scout_precheck.sh"
+
       - name: "Trigger build.yml (Warm Run, test_candidates=true)"
+        if: steps.pre.outputs.needs_build != 'false'
         env:
           GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
           KERNEL_VERSION: ${{ inputs.kernel_version || '6.1' }}

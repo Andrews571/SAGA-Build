@@ -429,7 +429,9 @@ jobs:
 
       - name: "Ccache Stats"
         if: always() && env.IS_MAKE == 'true'
-        run: ~/ccache-bin/ccache --show-stats
+        env:
+          MX_LABEL: ${{ matrix.kernel_variant }}${{ matrix.susfs && '+SUSFS' || '' }}
+        run: bash "$GITHUB_WORKSPACE/build/ccache_report.sh"
 
       - name: "Checkpoint (Promote/Blacklist)"  # updates manifest.json, files an issue on failed candidates
         if: always() && matrix.kernel_variant != 'VANILLA' && inputs.run_mode != 'Dry Run'

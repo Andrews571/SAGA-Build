@@ -77,6 +77,9 @@ if [ "${DRY_RUN:-false}" = "true" ]; then
     BUILD_SECONDS=0
 else
     log "Building kernel..."
+    # ccache keeps its counters inside the restored cache (they accumulate over
+    # every past build). Zero them so build/ccache_report.sh measures THIS build.
+    "${TOOL_CCACHE_BIN}" --zero-stats > /dev/null 2>&1 || true
     START_TIME=$(date +%s)
 
     make "${MAKE_ARGS[@]}" CC="$CC_ARG" -k || error "Build failed!"
