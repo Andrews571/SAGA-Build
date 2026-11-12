@@ -49,7 +49,7 @@
     "bad": []
   },
   "sukisu_builtin": {
-    "good": "de9bc7e6b46181f8b27ac7b96db946420838dd18",
+    "good": "f9aa2fec23c3f4a06a935f69dc04cb85b261e7f3",
     "bad": [
       "0165c0556929f1b509a9b632a46ef09b67a7940e",
       "05f5cdf082d32bbc651c205ba4bdd1dc66cca7f5",
@@ -71,7 +71,11 @@
       "ce75122bec7423e0f1fa06e3e9a174085c5231ab",
       "e2912817f4e1b194e582a06e0b5eacf6a3fb7083",
       "fbc67d004b3b68723e91dd86d50dead1120b4a9a"
-    ]
+    ],
+    "verified": {
+      "run": "43241019266",
+      "at": "2026-11-12"
+    }
   },
   "susfs_sukisu": {
     "good": "0d5b1ceb4ca4cddbe59d04233f4425a83030aa71",
