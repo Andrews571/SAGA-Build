@@ -7,8 +7,11 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/Andrews571/SAGA-Build/build.yml?branch=main&label=build&logo=github&style=for-the-badge)](https://github.com/Andrews571/SAGA-Build/actions)
 [![Telegram](https://img.shields.io/badge/Telegram-SAGA-blue?style=for-the-badge&logo=telegram)](https://t.me/c/4443561826/1)
 [![Lint](https://img.shields.io/github/actions/workflow/status/Andrews571/SAGA-Build/lint.yml?branch=main&label=lint&logo=githubactions&style=for-the-badge)](https://github.com/Andrews571/SAGA-Build/actions/workflows/lint.yml)
-[![Kernel](https://img.shields.io/badge/kernel-android14--6.1%20GKI-informational?style=for-the-badge&logo=android)](https://github.com/Andrews571/SAGA-Build/tree/main/kernel/android14-6.1-lts)
+[![Kernel](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fgithub.com%2FAndrews571%2FSAGA-Releases%2Freleases%2Fdownload%2Fptr-stable%2Fsaga-release.json&query=%24.kernel.version&label=kernel&color=informational&style=for-the-badge&logo=android)](https://github.com/Andrews571/SAGA-Releases/releases)
+[![Stable](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fgithub.com%2FAndrews571%2FSAGA-Releases%2Freleases%2Fdownload%2Fptr-stable%2Fsaga-release.json&query=%24.kernel.run&label=stable&color=success&style=for-the-badge&logo=android&prefix=R)](https://github.com/Andrews571/SAGA-Releases/releases)
+[![Experimental](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fgithub.com%2FAndrews571%2FSAGA-Releases%2Freleases%2Fdownload%2Fptr-experimental%2Fsaga-release.json&query=%24.kernel.run&label=experimental&color=orange&style=for-the-badge&logo=android&prefix=R)](https://github.com/Andrews571/SAGA-Releases/releases)
 [![Download](https://img.shields.io/badge/download-SAGA--Releases-success?style=for-the-badge&logo=github)](https://github.com/Andrews571/SAGA-Releases/releases)
+[![License](https://img.shields.io/badge/license-GLWTS-lightgrey?style=for-the-badge)](LICENSE)
 </div>
 
 ---
@@ -33,7 +36,7 @@ This repo does **not** contain kernel source — it contains all the scripts and
 
 ## 📚 Docs
 
-- [Arquitetura](docs/ARQUITETURA.md) · [Como adicionar um addon](docs/ADDONS.md) · [Pin Scout](docs/PIN-SCOUT.md) · [Changelog de manutenção](docs/CHANGELOG-MANUTENCAO.md)
+- [Arquitetura](docs/ARQUITETURA.md) · [Como adicionar um addon](docs/ADDONS.md) · [Pin Scout](docs/PIN-SCOUT.md) · [Pins verificados](docs/PINS.md) · [Changelog de manutenção](docs/CHANGELOG-MANUTENCAO.md)
 
 ---
 

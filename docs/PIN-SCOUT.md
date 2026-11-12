@@ -13,7 +13,8 @@ Para cada componente: **`good`** (último commit que compilou) e **`bad`** (list
 5. **`engine.sh`** (sempre, mesmo se falhar):
    - sucesso → o candidato vira `good`;
    - falha → o candidato entra em `bad` e o `good` não muda (**isso é o rollback**).
-   Grava o `manifest.json` com *fetch → rebase → push* repetido, porque as variantes rodam em paralelo.
+   Grava o `manifest.json` com *fetch → rebase → push* repetido, porque as variantes rodam em paralelo. No mesmo commit regenera [`PINS.md`](PINS.md) (pin atual, nº de commits ruins, data e run que verificou) e, na promoção, grava `verified: {run, at}` no manifest.
+   Se a build falhar porque um patch deixou de aplicar, abre/atualiza uma issue `patch-broken` com a etapa e os trechos rejeitados (`patch_issue.sh`); ela **não** fecha sozinha. Candidato ruim abre `upstream-broken`, que fecha quando um build volta a passar.
 6. O commit automático (`chore: bump …` / `chore: mark …`) chega ao Telegram sem som.
 
 ## Regras de decisão (iguais em `scout.sh` e `scout_precheck.sh`)

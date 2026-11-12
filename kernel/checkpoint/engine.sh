@@ -29,6 +29,11 @@ COMPONENTS=("$@")
 MANIFEST_REL="kernel/$(resolve_android_version)-${KERNEL_VERSION}-lts/manifest.json"
 MANIFEST="${SAGA_PATCH_DIR}/${MANIFEST_REL}"
 
+# T22: a failed build because a patch no longer applies gets its own issue
+# (what failed + rejected hunks), whether or not a candidate ref was used.
+source "${SAGA_PATCH_DIR}/kernel/checkpoint/patch_issue.sh"
+[ "$BUILD_OUTCOME" = "failure" ] && { report_patch_failure || true; }
+
 any_candidate_used="false"
 for key in "${COMPONENTS[@]}"; do
     prefix="${key^^}"
@@ -82,8 +87,15 @@ apply_and_push() {
 
         jq "$jq_patch" "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
 
+        # T19: keep docs/PINS.md in sync, inside the same commit (best effort).
+        if bash "${SAGA_PATCH_DIR}/kernel/checkpoint/pins_doc.sh" > "${SAGA_PATCH_DIR}/docs/PINS.md.tmp" 2>/dev/null; then
+            mv "${SAGA_PATCH_DIR}/docs/PINS.md.tmp" "${SAGA_PATCH_DIR}/docs/PINS.md"
+        else
+            rm -f "${SAGA_PATCH_DIR}/docs/PINS.md.tmp"
+        fi
+
         (
-            git add "$MANIFEST_REL"
+            git add "$MANIFEST_REL" docs/PINS.md 2>/dev/null || git add "$MANIFEST_REL"
             git commit -q -m "$commit_msg" 2>/dev/null || { echo "nothing to commit"; exit 0; }
             git push "$REMOTE" "HEAD:main"
         ) && return 0
@@ -139,7 +151,7 @@ for key in "${COMPONENTS[@]}"; do
 
     if [ "$BUILD_OUTCOME" = "success" ]; then
         log "checkpoint: promoting ${key} pin to ${ref:0:12} (kernel ${KERNEL_VERSION})"
-        apply_and_push ".${key}.good = \"${ref}\" | .${key}.bad -= [\"${ref}\"]" "chore: bump ${key} pin to ${ref:0:12} for kernel ${KERNEL_VERSION} (verified via run ${GITHUB_RUN_ID})"
+        apply_and_push ".${key}.good = \"${ref}\" | .${key}.bad -= [\"${ref}\"] | .${key}.verified = {run: \"${GITHUB_RUN_ID}\", at: \"$(date -u +%Y-%m-%d)\"}" "chore: bump ${key} pin to ${ref:0:12} for kernel ${KERNEL_VERSION} (verified via run ${GITHUB_RUN_ID})"
         close_issue_if_open "$key"
         continue
     fi

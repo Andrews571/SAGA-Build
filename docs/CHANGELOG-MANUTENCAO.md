@@ -5,6 +5,23 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M6 — Pins, issues de patch, paralelismo, disco, licença e badges (T19, T22, T23, T26, T30)
+**Arquivos:** `kernel/checkpoint/pins_doc.sh`, `kernel/checkpoint/patch_issue.sh` (novos), `kernel/checkpoint/engine.sh`, `functions.sh`, `build/make.sh`, `setup/runner_prep.sh`, `docs/PINS.md` (novo, gerado), `docs/PIN-SCOUT.md`, `LICENSE` (novo), `README.md`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| Tarefa | O quê | Por quê | Como |
+|---|---|---|---|
+| T19 | `docs/PINS.md` com a tabela de pins | Ninguém via o estado do mecanismo de pins | `pins_doc.sh` lê todos os `manifest.json` e gera: componente, pin com link para o commit, nº de commits ruins, data e run. O `engine.sh` regenera o arquivo **no mesmo commit** de cada bump/mark e, ao promover, grava `verified: {run, at}` no manifest (campo extra, ignorado por `scout.sh` e pelo pré-check). Pins antigos mostram "—" até a próxima promoção |
+| T22 | Issue automática quando um patch deixa de aplicar | Cada falha exigia caçar o trecho no log | `error()` (`functions.sh`) grava a última mensagem. `patch_issue.sh`, chamado pelo `engine.sh` após build com falha, reconhece falha de patch (mensagem "apply failed"/"patch file not found" ou arquivos `.rej`) e abre ou comenta a issue `🧩 Patch failed to apply: <etapa> (<kernel>)` com etapa, variante, link da run e os trechos rejeitados (limitados). Rótulo `patch-broken`. **Não fecha sozinha** (o mesmo patch pode passar numa variante e falhar em outra) |
+| T23 | `make -j` = `nproc + 2` | Manter a CPU ocupada enquanto jobs esperam o disco | `MAKE_JOBS` (valor absoluto) ou `MAKE_JOBS_EXTRA` (padrão 2; `0` volta ao antigo). ThinLTO continua `nproc/2` por padrão, agora ajustável com `THINLTO_JOBS`. O log mostra "Parallelism: make -jN…" |
+| T26 | Limpeza de disco enxuta com escalonamento | Apagar tudo custa I/O que disputa com a restauração de caches | `FREE_DISK_LEVEL=lean` (padrão) apaga só dotnet e android. Se, ao fim da limpeza, houver menos de `DISK_NEED_GB` (30) livres, o `wait-disk` escala sozinho para a limpeza completa (ghc, jvm, swift, powershell, docker, snapd, linuxbrew) e emite `::notice`. `FREE_DISK_LEVEL=full` restaura o comportamento anterior |
+| T30 | `LICENSE` GLWTS e badges dinâmicos | Licença do projeto de origem; mostrar o release atual sem editar o README | `LICENSE` copiado do repo original (GLWTS). Badges kernel/stable/experimental leem `saga-release.json` dos ponteiros `ptr-stable` e `ptr-experimental` do SAGA-Releases (`$.kernel.version` e `$.kernel.run`) via shields.io; badge de licença |
+
+**Verificação:** `engine.sh` testado de ponta a ponta contra um repositório git local (promoção cria o commit com `manifest.json` + `PINS.md` + `verified`); `patch_issue.sh` com `gh` simulado (falha de patch com e sem `.rej`, erro não relacionado, issue já aberta, sem token, `.rej` enorme truncado); `runner_prep.sh` com os três cenários de limpeza (espaço sobrando, escalonamento, `full`); aritmética de `-j`. Os dois JSON dos ponteiros foram baixados do GitHub e têm `kernel.version` e `kernel.run`. **Não verificado:** a renderização dos badges (shields.io inacessível no ambiente de teste) e nenhuma run real no GitHub.
+
+**Como ajustar (T26):** veja a linha `💾 … free` e o aviso de escalonamento no passo *Wait for Disk Cleanup*: se o aviso aparecer em **toda** run, use `FREE_DISK_LEVEL=full`; se nunca aparecer e sobrar muito espaço no passo *Disk Usage*, `lean` basta (e `DISK_NEED_GB` pode baixar).
+
+---
+
 ## M5 — Runner, `make -k`, docs e badges (T11, T27, T29, T30 parcial)
 **Arquivos:** `setup/runner_prep.sh` (novo), `.github/workflows/build.yml`, `build/make.sh`, `docs/ARQUITETURA.md`, `docs/ADDONS.md`, `docs/PIN-SCOUT.md` (novos), `docs/placebo.txt` (removido), `README.md`, `docs/CHANGELOG-MANUTENCAO.md`
 

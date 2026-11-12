@@ -4,6 +4,16 @@
 # 🏗️ BUILD — MAKE
 # ======================================================
 
+# T23: parallel jobs. nproc + MAKE_JOBS_EXTRA (default 2) keeps the CPUs busy
+# while some jobs wait on disk I/O. Override with MAKE_JOBS=<n> (absolute) or
+# MAKE_JOBS_EXTRA=0 to go back to plain nproc. Compare the "Build time" of
+# runs with a WARM ccache (see build/ccache_report.sh) before keeping a value.
+MAKE_JOBS="${MAKE_JOBS:-$(( $(nproc --all) + ${MAKE_JOBS_EXTRA:-2} ))}"
+# ThinLTO link jobs (ld.lld): default nproc/2 as before. The link step is the
+# memory-hungry one, so raise THINLTO_JOBS only after checking RAM/swap use.
+export THINLTO_JOBS="${THINLTO_JOBS:-$(( $(nproc --all) / 2 ))}"
+log "Parallelism: make -j${MAKE_JOBS} (nproc $(nproc --all)), ThinLTO jobs ${THINLTO_JOBS}"
+
 MAKE_ARGS=(
     -C "$KERNEL_SRC"
     O="$OUT_DIR"
@@ -18,7 +28,7 @@ MAKE_ARGS=(
     LOCALVERSION="${LOCALVERSION}"
     KBUILD_BUILD_USER="${KBUILD_BUILD_USER}"
     KBUILD_BUILD_HOST="${KBUILD_BUILD_HOST}"
-    -j"$(nproc --all)"
+    -j"${MAKE_JOBS}"
 )
 
 # Ensure LTO cache dir exists on RAM disk
@@ -31,7 +41,7 @@ if [ "${LTO_MODE}" = "THIN" ]; then
 #!/usr/bin/env bash
 exec ld.lld "$@" \
     --thinlto-cache-dir=/dev/shm/ldcache \
-    --thinlto-jobs=$(( $(nproc --all) / 2 ))
+    --thinlto-jobs="${THINLTO_JOBS:-$(( $(nproc --all) / 2 ))}"
 WRAPPER_EOF
     chmod +x "$LD_WRAPPER"
     MAKE_ARGS+=(LD="$LD_WRAPPER" HOSTLD="$LD_WRAPPER")

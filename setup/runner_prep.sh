@@ -14,6 +14,7 @@
 #
 # Env (all optional): SWAP_SIZE_GB=12  SWAP_PATH=/mnt/swapfile  SWAP_ATTEMPTS=3
 #   RETRY_SLEEP=3  DISK_NEED_GB=30  DISK_WAIT_SECS=240  FREE_DISK_PIDFILE=/tmp/free_disk.pid
+#   FREE_DISK_LEVEL=lean|full  (lean = dotnet+android, escalates to full if space is short)
 #   SUDO (default "sudo"; set empty to run without sudo, used by tests)
 
 set -uo pipefail
@@ -26,21 +27,40 @@ RETRY_SLEEP="${RETRY_SLEEP:-3}"
 DISK_NEED_GB="${DISK_NEED_GB:-30}"
 DISK_WAIT_SECS="${DISK_WAIT_SECS:-240}"
 FREE_DISK_PIDFILE="${FREE_DISK_PIDFILE:-/tmp/free_disk.pid}"
+FREE_DISK_LEVEL="${FREE_DISK_LEVEL:-lean}"
+
+# Cleanup levels (T26). Moving a directory is an instant rename; the real cost
+# is the rm -rf (every file is an I/O op that competes with cache restores).
+#   lean (default): the two biggest preinstalled toolchains only.
+#   full          : lean + the rest (what this workflow always deleted before).
+# lean escalates to the rest automatically (see wait_disk) if too little space
+# is free, so a too-light default can never starve the build.
+LEAN_DIRS=(/usr/share/dotnet /usr/local/lib/android)
+REST_DIRS=(/opt/ghc /usr/lib/jvm /usr/share/swift /usr/local/share/powershell)
+REST_RM=(/var/lib/docker /var/cache/snapd /home/linuxbrew)
+
+# start_cleanup <dirs-to-move...> [-- <extra paths to rm in place>]
+start_cleanup() {
+  local trash=() extra=() d in_extra=false
+  for d in "$@"; do
+    if [ "$d" = "--" ]; then in_extra=true; continue; fi
+    if [ "$in_extra" = true ]; then extra+=("$d"); continue; fi
+    $SUDO mv "$d" "/tmp/_trash_$(basename "$d")" 2>/dev/null && trash+=("/tmp/_trash_$(basename "$d")")
+  done
+  ( $SUDO nice -n 19 ionice -c 3 rm -rf "${trash[@]}" "${extra[@]}" ) &
+  echo $! > "$FREE_DISK_PIDFILE"
+}
 
 free_disk() {
-  $SUDO mv /usr/share/dotnet           /tmp/_trash_dotnet   2>/dev/null || true
-  $SUDO mv /usr/local/lib/android      /tmp/_trash_android  2>/dev/null || true
-  $SUDO mv /opt/ghc                    /tmp/_trash_ghc      2>/dev/null || true
-  $SUDO mv /usr/lib/jvm                /tmp/_trash_jvm      2>/dev/null || true
-  $SUDO mv /usr/share/swift            /tmp/_trash_swift    2>/dev/null || true
-  $SUDO mv /usr/local/share/powershell /tmp/_trash_pwsh     2>/dev/null || true
-  ( $SUDO nice -n 19 ionice -c 3 rm -rf \
-      /tmp/_trash_dotnet /tmp/_trash_android /tmp/_trash_ghc \
-      /tmp/_trash_jvm /tmp/_trash_swift /tmp/_trash_pwsh \
-      /var/lib/docker /var/cache/snapd /home/linuxbrew ) &
-  echo $! > "$FREE_DISK_PIDFILE"
+  echo "💾 free before cleanup: $(avail_gb)G (level=${FREE_DISK_LEVEL})"
+  rm -f "${FREE_DISK_PIDFILE}.escalated"
+  if [ "$FREE_DISK_LEVEL" = "full" ]; then
+    start_cleanup "${LEAN_DIRS[@]}" "${REST_DIRS[@]}" -- "${REST_RM[@]}"
+  else
+    start_cleanup "${LEAN_DIRS[@]}"
+  fi
   mkdir -p /dev/shm/ldcache
-  echo "🧹 Background cleanup started (pid $(cat "$FREE_DISK_PIDFILE"))"
+  echo "🧹 Background cleanup started (level=${FREE_DISK_LEVEL}, pid $(cat "$FREE_DISK_PIDFILE"))"
 }
 
 swap_once() {
@@ -79,6 +99,13 @@ wait_disk() {
       echo "💾 ${avail}G free (need ${DISK_NEED_GB}G) — continuing"; return 0
     fi
     if [ -z "$pid" ] || [ ! -d "/proc/${pid}" ]; then
+      if [ "$FREE_DISK_LEVEL" != "full" ] && [ ! -f "${FREE_DISK_PIDFILE}.escalated" ]; then
+        echo "::notice title=Disk::lean cleanup left only ${avail}G (< ${DISK_NEED_GB}G) — escalating to the full cleanup. If this shows on EVERY run, set FREE_DISK_LEVEL=full."
+        : > "${FREE_DISK_PIDFILE}.escalated"
+        start_cleanup "${REST_DIRS[@]}" -- "${REST_RM[@]}"
+        pid=$(cat "$FREE_DISK_PIDFILE")
+        continue
+      fi
       echo "💾 ${avail}G free; background cleanup finished — continuing"; return 0
     fi
     if [ "$waited" -ge "$DISK_WAIT_SECS" ]; then

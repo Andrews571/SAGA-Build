@@ -19,6 +19,9 @@ warn() {
 
 error() {
   echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} $*" >&2
+  # Remember the message so the Checkpoint step can say WHAT failed in the
+  # auto-filed issue (see kernel/checkpoint/patch_issue.sh). Best effort only.
+  printf '%s\n' "$*" > "${SAGA_LAST_ERROR_FILE:-${RUNNER_TEMP:-/tmp}/saga-last-error.txt}" 2>/dev/null || true
   exit 1
 }
 
