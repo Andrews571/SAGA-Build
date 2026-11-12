@@ -5,6 +5,20 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M5 — Runner, `make -k`, docs e badges (T11, T27, T29, T30 parcial)
+**Arquivos:** `setup/runner_prep.sh` (novo), `.github/workflows/build.yml`, `build/make.sh`, `docs/ARQUITETURA.md`, `docs/ADDONS.md`, `docs/PIN-SCOUT.md` (novos), `docs/placebo.txt` (removido), `README.md`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| Tarefa | O quê | Por quê | Como |
+|---|---|---|---|
+| T11 | Swap com retry; limpeza de disco com PID; espera condicional | Uma falha passageira no swap matava o job, e o `rm -rf` em segundo plano podia ainda estar apagando quando o build precisava de espaço | `runner_prep.sh free-disk`: mesmos `mv` e `rm` de antes, gravando o PID em `/tmp/free_disk.pid`. `swap`: até 3 tentativas (`SWAP_ATTEMPTS`) com espera crescente; falha de vez = erro claro. `wait-disk` (passo novo antes de *Setup Build Environment*): só espera se houver menos de `DISK_NEED_GB` (30) livres **e** a limpeza ainda rodar, no máximo 240 s; com espaço de sobra não atrasa nada. Os 30 GB são uma estimativa: ajuste olhando o passo *Disk Usage* |
+| T27 | `make -k` só no Warm Run | `-k` continua compilando após um erro; no Build/Release só gasta runner num build já perdido | `make.sh` monta `-k` apenas quando `RUN_MODE` é `WARM RUN`; Build/Release param no primeiro erro |
+| T29 | Docs reais no lugar de `docs/placebo.txt` | Era só um arquivo de enfeite | `ARQUITETURA.md` (fluxo, pastas, convenções), `ADDONS.md` (como criar um addon) e `PIN-SCOUT.md` (fluxo e regras de decisão). README ganhou links |
+| T30 (parcial) | Badges Lint, Kernel e Download no README | Mostrar estado do lint, o kernel suportado e onde baixar | Lint = status do `lint.yml`; Kernel = badge estático `android14-6.1 GKI`; Download = link para o SAGA-Releases. **Falta o `LICENSE`** (aguarda decisão) |
+
+**Verificação:** `runner_prep.sh` testado com comandos simulados (swap ok na 1ª, ok na 3ª, falha total; espera com espaço sobrando, limpeza já terminada, limpeza ativa com timeout, espaço que aparece); `free-disk` testado só com `mv`/`rm` simulados (nada foi apagado). A lógica do `-k` testada para `Warm Run`, `Build`, `Release` e vazio. Lint local sem erros. Não rodei no GitHub: confira numa run real.
+
+---
+
 ## M4 — Pré-check do pin-scout e relatório do ccache (T8, T9)
 **Arquivos:** `.github/workflows/pin-scout.yml`, `kernel/checkpoint/scout_precheck.sh` (novo), `.github/workflows/build.yml`, `build/ccache_report.sh` (novo), `build/make.sh`, `docs/CHANGELOG-MANUTENCAO.md`
 

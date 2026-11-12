@@ -6,6 +6,9 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/Andrews571/SAGA-Build/build.yml?branch=main&label=build&logo=github&style=for-the-badge)](https://github.com/Andrews571/SAGA-Build/actions)
 [![Telegram](https://img.shields.io/badge/Telegram-SAGA-blue?style=for-the-badge&logo=telegram)](https://t.me/c/4443561826/1)
+[![Lint](https://img.shields.io/github/actions/workflow/status/Andrews571/SAGA-Build/lint.yml?branch=main&label=lint&logo=githubactions&style=for-the-badge)](https://github.com/Andrews571/SAGA-Build/actions/workflows/lint.yml)
+[![Kernel](https://img.shields.io/badge/kernel-android14--6.1%20GKI-informational?style=for-the-badge&logo=android)](https://github.com/Andrews571/SAGA-Build/tree/main/kernel/android14-6.1-lts)
+[![Download](https://img.shields.io/badge/download-SAGA--Releases-success?style=for-the-badge&logo=github)](https://github.com/Andrews571/SAGA-Releases/releases)
 </div>
 
 ---
@@ -25,6 +28,12 @@ This repo does **not** contain kernel source — it contains all the scripts and
 ## Build System
 
 - **MAKE** — Clang (AOSP / Neutron / WeebX / ZyC / Greenforce) + ccache-ECS
+
+---
+
+## 📚 Docs
+
+- [Arquitetura](docs/ARQUITETURA.md) · [Como adicionar um addon](docs/ADDONS.md) · [Pin Scout](docs/PIN-SCOUT.md) · [Changelog de manutenção](docs/CHANGELOG-MANUTENCAO.md)
 
 ---
 

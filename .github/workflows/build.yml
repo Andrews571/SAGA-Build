@@ -360,34 +360,16 @@ jobs:
           # PERSONAL_TOKEN-embedded remote for its push.
           persist-credentials: false
 
+      # setup/runner_prep.sh: background cleanup with a recorded PID, swap with
+      # retry, and a wait that only blocks when disk space is still too low.
       - name: "Free Disk Space"
-        run: |
-          sudo mv /usr/share/dotnet        /tmp/_trash_dotnet        2>/dev/null || true
-          sudo mv /usr/local/lib/android   /tmp/_trash_android       2>/dev/null || true
-          sudo mv /opt/ghc                 /tmp/_trash_ghc           2>/dev/null || true
-          sudo mv /usr/lib/jvm             /tmp/_trash_jvm           2>/dev/null || true
-          sudo mv /usr/share/swift         /tmp/_trash_swift         2>/dev/null || true
-          sudo mv /usr/local/share/powershell /tmp/_trash_pwsh      2>/dev/null || true
-          (sudo nice -n 19 ionice -c 3 rm -rf \
-            /tmp/_trash_dotnet /tmp/_trash_android /tmp/_trash_ghc \
-            /tmp/_trash_jvm /tmp/_trash_swift /tmp/_trash_pwsh \
-            /var/lib/docker /var/cache/snapd /home/linuxbrew \
-          ) &
-          mkdir -p /dev/shm/ldcache
+        run: bash setup/runner_prep.sh free-disk
 
       - name: "Setup Swap Space"
-        run: |
-          # Was thejerrybao/setup-swap-space@v1 — that repo now 404s
-          # (deleted/renamed upstream), so this is inline now instead:
-          # one less external action this workflow depends on staying up.
-          SWAP_SIZE_GB=12
-          SWAP_PATH=/mnt/swapfile
-          sudo swapoff "${SWAP_PATH}" 2>/dev/null || true
-          sudo fallocate -l "${SWAP_SIZE_GB}G" "${SWAP_PATH}"
-          sudo chmod 600 "${SWAP_PATH}"
-          sudo mkswap "${SWAP_PATH}"
-          sudo swapon "${SWAP_PATH}"
-          free -h
+        run: bash setup/runner_prep.sh swap
+
+      - name: "Wait for Disk Cleanup"  # no delay when >= DISK_NEED_GB (30) is already free
+        run: bash setup/runner_prep.sh wait-disk
 
       - name: "Setup Build Environment"  # restore-only: clang, arsenal, ccache, lto
         id: setup-build-env

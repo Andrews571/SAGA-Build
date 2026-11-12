@@ -82,7 +82,12 @@ else
     "${TOOL_CCACHE_BIN}" --zero-stats > /dev/null 2>&1 || true
     START_TIME=$(date +%s)
 
-    make "${MAKE_ARGS[@]}" CC="$CC_ARG" -k || error "Build failed!"
+    # -k (keep going after an error) only in Warm Run: there the goal is to compile
+    # as much as possible into ccache. Build/Release fail fast instead of burning
+    # runner minutes on a build that is already lost.
+    MAKE_KEEP_GOING=()
+    [ "${RUN_MODE^^}" = "WARM RUN" ] && MAKE_KEEP_GOING=(-k)
+    make "${MAKE_ARGS[@]}" CC="$CC_ARG" ${MAKE_KEEP_GOING[@]+"${MAKE_KEEP_GOING[@]}"} || error "Build failed!"
 
     BUILD_SECONDS=$(( $(date +%s) - START_TIME ))
     log "Build completed in ${BUILD_SECONDS}s ✅"
