@@ -12,11 +12,13 @@ on:
       - '.github/**'
       - '**.sh'
       - '**.py'
+      - 'kernel/addons/*/addon.meta'
   pull_request:
     paths:
       - '.github/**'
       - '**.sh'
       - '**.py'
+      - 'kernel/addons/*/addon.meta'
   workflow_dispatch:
 
 permissions:
@@ -63,6 +65,9 @@ jobs:
         run: |
           find . -name '*.py' -not -path './.git/*' -print0 | xargs -0 python3 -m py_compile
           find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+
+      - name: "❌ addon.meta (every addon documented)"
+        run: bash kernel/checkpoint/addon_watch.sh validate
 
       # ---------- informational (never fails the run) ----------
       - name: "⚠️ Warnings (not blocking)"

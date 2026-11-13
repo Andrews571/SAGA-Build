@@ -346,6 +346,10 @@ jobs:
       KERNEL_SOURCE:               ${{ inputs.kernel_source }}
       CCACHE_DIR:                  ${{ startsWith(inputs.build_system, 'Make') && format('{0}/.ccache', github.workspace) || '' }}
       CCACHE_MAXSIZE:              ${{ startsWith(inputs.build_system, 'Make') && '900M' || '' }}
+      # Runner disk cleanup (setup/runner_prep.sh). Change WITHOUT a commit via
+      # Settings > Variables > Actions: FREE_DISK_LEVEL = none | lean | full, DISK_NEED_GB.
+      FREE_DISK_LEVEL:             ${{ vars.FREE_DISK_LEVEL || 'lean' }}
+      DISK_NEED_GB:                ${{ vars.DISK_NEED_GB || '30' }}
 
     steps:
       - name: "Checkout"
@@ -408,6 +412,10 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_PATH }}
           if-no-files-found: warn
+
+      - name: "Disk Report"  # free space at the end (near peak usage) -> tune FREE_DISK_LEVEL
+        if: always()
+        run: bash setup/runner_prep.sh report
 
       - name: "Ccache Stats"
         if: always() && env.IS_MAKE == 'true'

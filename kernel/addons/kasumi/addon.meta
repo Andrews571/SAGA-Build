@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=kasumi
+desc=Kasumi: LKM de manipulação/ocultação de caminhos
+mode=git-clone
+upstream=https://github.com/Anatdx/Kasumi
+license=Apache-2.0
+track=branch
+track_ref=HEAD
+track_path=
+seen=94c20ca1dcc603b428ab9946777448845d6fa60c
+seen_at=2026-11-12
+notes=git clone --depth=1 a cada build

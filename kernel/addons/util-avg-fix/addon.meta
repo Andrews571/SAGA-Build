@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=util-avg-fix
+desc=Correção do cálculo inicial de util_avg em sched/fair
+mode=local
+upstream=
+license=?
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=backport do commit upstream 72bffbf57c52 do Linux

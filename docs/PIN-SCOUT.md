@@ -30,3 +30,9 @@ Para cada componente: **`good`** (último commit que compilou) e **`bad`** (list
 ## Manutenção
 - A lista `COMPONENTS` de `scout_precheck.sh` espelha o `scout.sh`; mude os dois juntos.
 - Para reverter um pin à mão, edite `good`/`bad` no `manifest.json` e comite.
+
+## Vigilância dos addons
+No mesmo workflow, o job **Watch addon upstreams** compara o upstream de cada addon (`addon.meta`) com o último estado revisado e mantém uma issue `📦 Addon upstream updates`. É só informativo (não dispara build nem altera pins). Veja [`ADDONS.md`](ADDONS.md).
+
+## Disco do runner (variáveis, sem commit)
+`Settings → Secrets and variables → Actions → Variables`: `FREE_DISK_LEVEL` (`none` | `lean` | `full`, padrão `lean`) e `DISK_NEED_GB` (padrão `30`). O passo **Disk Report** mostra o espaço livre no fim do job (perto do pico); se sobrar muito, use `none`. Os níveis `none` e `lean` escalam sozinhos para `full` se faltar espaço.

@@ -5,6 +5,24 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M7 — Vigilância de addons, nível de disco `none` e README (T20, T28)
+**Arquivos:** `kernel/addons/*/addon.meta` (25 novos), `kernel/checkpoint/addon_watch.sh` (novo), `.github/workflows/pin-scout.yml`, `.github/workflows/lint.yml`, `.github/workflows/build.yml`, `setup/runner_prep.sh`, `README.md`, `docs/ADDONS.md`, `docs/ADDONS-LISTA.md` (novo, gerado), `docs/PIN-SCOUT.md`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| Tarefa | O quê | Por quê | Como |
+|---|---|---|---|
+| T20 | `addon.meta` em cada addon + vigilância do upstream | Não dava para saber de onde vinha cada addon, qual licença, nem quando o upstream mudava (vários baixam a `main` a cada build, sem fixar versão) | 25 `addon.meta` com `mode`, `upstream`, `license`, `track`, `seen`. Preenchidos só com evidência: URL e forma de download lidas dos scripts, licença lida do arquivo LICENSE do upstream (ou SPDX do patch); sem prova fica `?`. `addon_watch.sh check` compara o upstream com `seen` (topo da branch, ou último commit que toca o caminho baixado) e mantém **uma** issue `📦 Addon upstream updates` (rótulo `addon-upstream`), que fecha sozinha quando tudo está em dia. Roda a cada 6 h como job **Watch addon upstreams** no `pin-scout.yml` (`continue-on-error`, só informa). `accept` marca como revisado; `validate` roda no **Lint** (barra addon sem `addon.meta` ou inválido); `doc` gera `docs/ADDONS-LISTA.md`. Cobre BORE, ADIOS, BBG, ntsync, BBRv3, kasumi, nomount, rekernel, le9uo, kcompressd, zram-ir, lz4kd, lz4zstd, unicode-fix e zeromount |
+| FREE_DISK `none` | Nível de limpeza `none` e variáveis de repositório | Os logs mostraram 86 GB livres antes de qualquer limpeza (disco de 145 GB) | `FREE_DISK_LEVEL=none` não apaga nada e escala para `full` se sobrar menos de `DISK_NEED_GB`. `FREE_DISK_LEVEL` e `DISK_NEED_GB` agora vêm de `vars.*` (Settings → Variables), sem commit; padrões `lean` e `30`. Novo passo **Disk Report** mostra o espaço livre no fim do job, perto do pico, para decidir com dados |
+| T28 | README completo | Faltavam variantes, kernels, addons e como disparar uma build | Seções Download (canais stable/experimental), Variantes e kernels suportados, Addons (link para a lista), Como rodar uma build (entradas e modos) |
+
+**Observações:**
+- `seen` é o commit do upstream **na data da revisão** (2026-11-12), não o commit de onde veio um patch `vendored-patch`; na primeira revisão de cada addon isso é só um ponto de partida.
+- Repos de origem sem arquivo LICENSE (WildKernels/kernel_patches, SukiSU_patch, mrcxlinux/kernel_patches, Super-Builders) ficam com licença `?`.
+- Não foi possível incluir captura do post do Telegram no README (sem acesso ao canal) e o link `t.me/c/...` do badge continua só para membros.
+
+**Verificação:** `addon_watch.sh` rodado contra o GitHub real (15 addons vigiados, todos "em dia", ~4 s); mudança simulada em branch e em caminho (clone parcial); criar, editar e fechar a issue com `gh` simulado; `accept`; `validate` com os três erros típicos; `doc`. `runner_prep.sh` com `none` (sem espaço sobrando e com espaço) e `report`. Lint local sem erros. Não rodei no GitHub.
+
+---
+
 ## M6 — Pins, issues de patch, paralelismo, disco, licença e badges (T19, T22, T23, T26, T30)
 **Arquivos:** `kernel/checkpoint/pins_doc.sh`, `kernel/checkpoint/patch_issue.sh` (novos), `kernel/checkpoint/engine.sh`, `functions.sh`, `build/make.sh`, `setup/runner_prep.sh`, `docs/PINS.md` (novo, gerado), `docs/PIN-SCOUT.md`, `LICENSE` (novo), `README.md`, `docs/CHANGELOG-MANUTENCAO.md`
 

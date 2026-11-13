@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=nomount
+desc=NoMount: framework de injeção de caminhos VFS (beta)
+mode=git-clone
+upstream=https://github.com/maxsteeel/nomount
+license=GPL-3.0
+track=branch
+track_ref=HEAD
+track_path=
+seen=bf1847f98fed382369c43bfd652cd93774b9b8e3
+seen_at=2026-11-12
+notes=git clone --depth=1 a cada build

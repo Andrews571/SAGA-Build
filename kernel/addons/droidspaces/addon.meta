@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=droidspaces
+desc=Droidspaces: suporte a runtime de containers LXC
+mode=local
+upstream=https://github.com/ravindu644/Droidspaces-OSS
+license=GPL-3.0
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=script e patch KaBI locais; o upstream (runtime LXC, GPL-3.0) é só referência e não é vigiado

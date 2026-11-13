@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=kcompressd
+desc=Kcompressd: compressão de memória em thread dedicada
+mode=vendored-patch
+upstream=https://github.com/firelzrd/kcompressd-unofficial
+license=GPL-2.0
+track=branch
+track_ref=HEAD
+track_path=
+seen=3a421686f84bf7fe1d8b12fe7e0db4a6e263abdf
+seen_at=2026-11-12
+notes=patch local v0.5

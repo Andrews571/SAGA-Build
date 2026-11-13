@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=rekernel
+desc=Re:Kernel: servidor Netlink para eventos de Binder/sinais
+mode=vendored-patch
+upstream=https://github.com/Sakion-Team/Re-Kernel
+license=GPL-2.0
+track=branch
+track_ref=HEAD
+track_path=
+seen=ac08296174d7fb2801c0eee1084f067a34f8a0fe
+seen_at=2026-11-12
+notes=inject.py integrado pelo SAGA

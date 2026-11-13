@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=clutch-signals
+desc=Ponte neutra de sinais entre ADIOS (I/O) e CC governor (CPU) (SAGA)
+mode=local
+upstream=
+license=GPL-2.0
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=SPDX GPL-2.0 no patch

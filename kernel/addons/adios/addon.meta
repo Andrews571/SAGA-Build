@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=adios
+desc=ADIOS: escalonador de I/O adaptativo por deadline (firelzrd)
+mode=vendored-patch
+upstream=https://github.com/firelzrd/adios
+license=GPL-2.0
+track=branch
+track_ref=HEAD
+track_path=
+seen=8117e935197fd45259ef77407b1c274d3386cd53
+seen_at=2026-11-12
+notes=patch local v3.3.5

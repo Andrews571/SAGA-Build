@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=ntsync
+desc=NTSync: primitivas de sincronização NT no kernel (Wine/Winlator)
+mode=fetch-latest
+upstream=https://github.com/WildKernels/kernel_patches
+license=?
+track=path
+track_ref=main
+track_path=common/ntsync
+seen=4085f3f1074d422ef328d26540ff4f75bc6b46c0
+seen_at=2026-11-12
+notes=baixa os patches da main a cada build; repo sem arquivo LICENSE

@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=mglru
+desc=MGLRU: força a ativação adaptativa em mm/vmscan.c
+mode=local
+upstream=
+license=?
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=patch.py local

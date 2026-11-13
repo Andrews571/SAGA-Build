@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=schedutil
+desc=Força o governor schedutil como padrão
+mode=local
+upstream=
+license=?
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=patches locais

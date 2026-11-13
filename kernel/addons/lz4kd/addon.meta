@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=lz4kd
+desc=LZ4KD: backends lz4k/lz4kd para zram
+mode=fetch-latest
+upstream=https://github.com/SukiSU-Ultra/SukiSU_patch
+license=?
+track=path
+track_ref=main
+track_path=other/zram
+seen=8f547861365904c7ccb35f3a357e0a85919d8238
+seen_at=2026-11-12
+notes=baixa arquivos da main a cada build; repo sem arquivo LICENSE

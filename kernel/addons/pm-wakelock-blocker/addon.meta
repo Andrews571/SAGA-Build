@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=pm-wakelock-blocker
+desc=Bloqueador de wakelock nomeado (SAGA)
+mode=local
+upstream=
+license=?
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=inspirado no Boeffla Wakelock Blocker, não é port

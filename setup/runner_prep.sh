@@ -2,7 +2,7 @@
 # ======================================================
 # 🧰 Runner prep — free disk, swap, wait-for-disk (Start-Build)
 # ======================================================
-# Usage: runner_prep.sh free-disk | swap | wait-disk
+# Usage: runner_prep.sh free-disk | swap | wait-disk | report
 #
 #  free-disk : moves the big preinstalled toolchains out of the way (instant
 #              rename) and deletes them in the BACKGROUND (low I/O priority),
@@ -14,7 +14,8 @@
 #
 # Env (all optional): SWAP_SIZE_GB=12  SWAP_PATH=/mnt/swapfile  SWAP_ATTEMPTS=3
 #   RETRY_SLEEP=3  DISK_NEED_GB=30  DISK_WAIT_SECS=240  FREE_DISK_PIDFILE=/tmp/free_disk.pid
-#   FREE_DISK_LEVEL=lean|full  (lean = dotnet+android, escalates to full if space is short)
+#   FREE_DISK_LEVEL=none|lean|full  (none = no cleanup, lean = dotnet+android; both escalate
+#                                    to full automatically if space is short)
 #   SUDO (default "sudo"; set empty to run without sudo, used by tests)
 
 set -uo pipefail
@@ -54,12 +55,13 @@ start_cleanup() {
 free_disk() {
   echo "💾 free before cleanup: $(avail_gb)G (level=${FREE_DISK_LEVEL})"
   rm -f "${FREE_DISK_PIDFILE}.escalated"
-  if [ "$FREE_DISK_LEVEL" = "full" ]; then
-    start_cleanup "${LEAN_DIRS[@]}" "${REST_DIRS[@]}" -- "${REST_RM[@]}"
-  else
-    start_cleanup "${LEAN_DIRS[@]}"
-  fi
+  rm -f "$FREE_DISK_PIDFILE"
   mkdir -p /dev/shm/ldcache
+  case "$FREE_DISK_LEVEL" in
+    none) echo "🧹 No cleanup (level=none) — escalates only if free space is short"; return 0 ;;
+    full) start_cleanup "${LEAN_DIRS[@]}" "${REST_DIRS[@]}" -- "${REST_RM[@]}" ;;
+    *)    start_cleanup "${LEAN_DIRS[@]}" ;;
+  esac
   echo "🧹 Background cleanup started (level=${FREE_DISK_LEVEL}, pid $(cat "$FREE_DISK_PIDFILE"))"
 }
 
@@ -100,9 +102,13 @@ wait_disk() {
     fi
     if [ -z "$pid" ] || [ ! -d "/proc/${pid}" ]; then
       if [ "$FREE_DISK_LEVEL" != "full" ] && [ ! -f "${FREE_DISK_PIDFILE}.escalated" ]; then
-        echo "::notice title=Disk::lean cleanup left only ${avail}G (< ${DISK_NEED_GB}G) — escalating to the full cleanup. If this shows on EVERY run, set FREE_DISK_LEVEL=full."
+        echo "::notice title=Disk::level ${FREE_DISK_LEVEL} left only ${avail}G (< ${DISK_NEED_GB}G) — escalating to the full cleanup. If this shows on EVERY run, set FREE_DISK_LEVEL=full."
         : > "${FREE_DISK_PIDFILE}.escalated"
-        start_cleanup "${REST_DIRS[@]}" -- "${REST_RM[@]}"
+        if [ "$FREE_DISK_LEVEL" = "none" ]; then
+          start_cleanup "${LEAN_DIRS[@]}" "${REST_DIRS[@]}" -- "${REST_RM[@]}"
+        else
+          start_cleanup "${REST_DIRS[@]}" -- "${REST_RM[@]}"
+        fi
         pid=$(cat "$FREE_DISK_PIDFILE")
         continue
       fi
@@ -116,12 +122,24 @@ wait_disk() {
   done
 }
 
+# End-of-job snapshot: the compiled tree is still on disk, so this is close to the
+# peak usage. Use it to decide how much cleanup (and DISK_NEED_GB) you really need.
+report() {
+  local size used avail
+  read -r size used avail < <(df -BG --output=size,used,avail / 2>/dev/null | tail -1 | tr -dc '0-9 \n')
+  echo "💾 end of job (level=${FREE_DISK_LEVEL}): ${avail:-?}G free, ${used:-?}G used of ${size:-?}G"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    echo "### 💾 Disk — level \`${FREE_DISK_LEVEL}\`: ${avail:-?}G free, ${used:-?}G used of ${size:-?}G at the end of the job" >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
 main() {
   case "${1:-}" in
+    report)    report ;;
     free-disk) free_disk ;;
     swap)      setup_swap ;;
     wait-disk) wait_disk ;;
-    *) echo "usage: $0 free-disk|swap|wait-disk" >&2; return 2 ;;
+    *) echo "usage: $0 free-disk|swap|wait-disk|report" >&2; return 2 ;;
   esac
 }
 

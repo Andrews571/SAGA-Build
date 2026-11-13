@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=reflex
+desc=REFLEX: governor de cpufreq (reescrita do SAGA)
+mode=local
+upstream=
+license=GPL-2.0
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=conceito do firelzrd/reflex v0.3.3; SPDX GPL-2.0 no patch

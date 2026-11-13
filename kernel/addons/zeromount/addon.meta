@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=zeromount
+desc=ZeroMount: redirecionamento de caminhos VFS
+mode=fetch-latest
+upstream=https://github.com/Enginex0/Super-Builders
+license=?
+track=path
+track_ref=main
+track_path=android14-6.1/ReSukiSU/patches/60_zeromount-android14-6.1.patch
+seen=cffc8546a4de862081c30c492a212b1228fd2433
+seen_at=2026-11-12
+notes=baixa o patch da main a cada build; projeto relacionado Enginex0/zeromount (GPL-3.0); Super-Builders sem arquivo LICENSE

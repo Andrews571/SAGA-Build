@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=le9uo
+desc=le9uo: proteção do working set de memória
+mode=vendored-patch
+upstream=https://github.com/firelzrd/le9uo
+license=GPL-2.0
+track=branch
+track_ref=HEAD
+track_path=
+seen=82c85543dfc4cd4ed3374d21a11d9a0acce0edda
+seen_at=2026-11-12
+notes=patch local v1.15

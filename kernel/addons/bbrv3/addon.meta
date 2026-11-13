@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=bbrv3
+desc=BBRv3: controle de congestionamento TCP (backport de fatalcoder524)
+mode=fetch-latest
+upstream=https://github.com/WildKernels/kernel_patches
+license=?
+track=path
+track_ref=main
+track_path=common/bbrv3
+seen=56009ac41400532c014e66a77c030ef529bf010e
+seen_at=2026-11-12
+notes=baixa o patch da main a cada build; repo sem arquivo LICENSE

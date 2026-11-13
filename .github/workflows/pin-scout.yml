@@ -79,3 +79,21 @@ jobs:
 
           echo "✅ Dispatched — check the Actions tab for the triggered run."
           echo "This job's own job doesn't wait for it: promotion/blacklist happens inside that run's own Checkpoint step, same as any other build.yml run."
+
+  # Informational only: tells (via one auto-updated issue) when the upstream of an
+  # addon changed since it was last reviewed. Never blocks and never builds.
+  # Details: docs/ADDONS.md (addon.meta) and kernel/checkpoint/addon_watch.sh.
+  addon-watch:
+    name: "Watch addon upstreams"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+
+      - name: "Compare upstreams with addon.meta"
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash "$GITHUB_WORKSPACE/kernel/checkpoint/addon_watch.sh" check --report

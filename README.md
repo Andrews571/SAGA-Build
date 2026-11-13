@@ -28,15 +28,66 @@ This repo does **not** contain kernel source — it contains all the scripts and
 
 ---
 
-## Build System
+## 📦 Download
 
-- **MAKE** — Clang (AOSP / Neutron / WeebX / ZyC / Greenforce) + ccache-ECS
+Kernels are published to **[SAGA-Releases](https://github.com/Andrews571/SAGA-Releases/releases)** (and to the Telegram channel) in two channels:
+
+| Channel | Addon profile | Pointer |
+|---|---|---|
+| **stable** | `Default_Addons` (ADIOS) | `ptr-stable` |
+| **experimental** | `CC_Addons` (ADIOS-Clutch + CC Governor + BORE-WARP + Clutch-Signals) | `ptr-experimental` |
+
+Each release ships one AnyKernel3 zip per variant. The badges above show the kernel version and build number currently on each channel.
+
+---
+
+## 🧩 Variants and supported kernels
+
+| Variant | What it is |
+|---|---|
+| `VANILLA` | Kernel + addons, no root solution |
+| `RESUKISU` | [ReSukiSU](https://github.com/ReSukiSU/ReSukiSU) (+ SuSFS) |
+| `SUKISU` | [SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra) (+ SuSFS) |
+| `KSUNEXT` | [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next) (+ SuSFS) |
+
+| Kernel | Android | Status |
+|---|---|---|
+| **6.1** | android14 | ✅ supported |
+| 5.10 / 5.15 / 6.6 / 6.12 | android12 / 13 / 15 / 16 | not available yet (no patch folder in this repo) |
+
+Build options: Clang toolchain (**AOSP**, **Neutron**, **WeebX**, **ZyC**, **Greenforce**) + ccache-ECS, LTO `NONE` / `THIN` / `FULL`, tick rate 100 / 250 / 500 / 1000 Hz.
+
+---
+
+## 🧰 Addons
+
+Always on: `bbrv3`, `bbg`, `bore`, `ntsync`, `util-avg-fix`, `unicode-fix`, `pm-wakelock-blocker`, `droidspaces`, `lz4zstd`, `lz4kd`, plus the profile addons (`adios`, or `adios-clutch` + `cc-governor` + `bore-warp` + `clutch-signals`).
+Toggles: `le9uo` and `kcompressd` (on by default), `zram-ir`, `rekernel`, `kasumi`, `mglru` (off by default), and one mountless engine (`nomount` or `zeromount`).
+
+The full list with origin, license and upstream tracking is in **[docs/ADDONS-LISTA.md](docs/ADDONS-LISTA.md)**.
+
+---
+
+## 🚀 Running a build
+
+**Actions → ⚔️ SAGA-Builder → Run workflow**, then pick:
+
+| Input | Options |
+|---|---|
+| **Run Mode** | `Dry Run` (no compile, validates the flow) · `Warm Run` (compiles only to warm the ccache/LTO caches; the Pin Scout uses it to test new pins) · `Build` (real build, posts to the test thread) · `Release` (real build + publish to SAGA-Releases and the Telegram release thread) |
+| **Build System** | `Make - AOSP` / `Neutron` / `WeebX` / `Zyc` / `Greenforce` |
+| **Kernel Version / Source** | `6.1` · `live` / `live-staging` / `mirror` / `ramabondanp` |
+| **Variants** | `Vanilla`, `ReSukiSU`, `SukiSU-Ultra`, `KernelSU-Next` (toggle each), `SuSFS` enable/disable |
+| **Addon Profile** | `Default_Addons` or `CC_Addons` (decides the release channel) |
+| **Extras** | Mountless engine, tick rate, LTO mode, addon toggles, changelog text, `Update Arsenal` |
+
+The **Pin Scout** runs every 6 hours and keeps the root-solution and SuSFS pins up to date on its own (see [docs/PIN-SCOUT.md](docs/PIN-SCOUT.md)). Leave `test_candidates` off when running by hand.
 
 ---
 
 ## 📚 Docs
 
-- [Arquitetura](docs/ARQUITETURA.md) · [Como adicionar um addon](docs/ADDONS.md) · [Pin Scout](docs/PIN-SCOUT.md) · [Pins verificados](docs/PINS.md) · [Changelog de manutenção](docs/CHANGELOG-MANUTENCAO.md)
+- [Arquitetura](docs/ARQUITETURA.md) · [Como adicionar um addon](docs/ADDONS.md) · [Lista de addons](docs/ADDONS-LISTA.md) · [Pin Scout](docs/PIN-SCOUT.md) · [Pins verificados](docs/PINS.md) · [Changelog de manutenção](docs/CHANGELOG-MANUTENCAO.md)
 
 ---
 

@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=adios-clutch
+desc=Variante experimental do ADIOS; exclusiva com o addon adios
+mode=local
+upstream=
+license=GPL-2.0
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=criada pelo SAGA a partir de análise do ADIOS; SPDX GPL-2.0 no patch
