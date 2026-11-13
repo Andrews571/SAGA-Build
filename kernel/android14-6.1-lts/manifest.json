@@ -113,15 +113,15 @@
     }
   },
   "ksunext_susfs_fork": {
-    "good": "ec4dc9689c50f4b86719279e8bdbc8790a018a6b",
+    "good": "a7c7f531ca80e9189fd0d8001eb37075de68cc7b",
     "bad": [
       "46768436ff35de01b1475a4ae6c19d6d4884abcf",
       "6ba3bf8faf8ea627d27ebd9af00a81738de71f5c",
       "b82928c4d15fd685c021c52dcfca0a08452a6a15"
     ],
     "verified": {
-      "run": "43327753709",
-      "at": "2026-11-12"
+      "run": "43526477934",
+      "at": "2026-11-13"
     }
   },
   "susfs_ksunext": {
