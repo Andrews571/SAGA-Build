@@ -5,6 +5,19 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M8 — Post unificado do Telegram e identidade CC
+**Arquivos:** `release/telegram/unified_caption.py` (novo, do outro chat), `release/telegram/channel_post.sh`, `release/telegram/caption.py`, `release/telegram/telegram.sh`, `release/anykernel.sh`, `release/github/github_release.sh`, `.github/workflows/build.yml`, `docs/POST-TELEGRAM.md` (novo), `docs/CHANGELOG-MANUTENCAO.md`
+
+| O quê | Por quê | Como |
+|---|---|---|
+| Um post só para canal e SAGA CHAT | Havia dois formatos (rich message com tabelas no canal e foto+legenda no chat) e nenhum era refinado | `channel_post.sh` gera o texto com `unified_caption.py` (título, Download por variante, bloco **Features** expansível com versão dos addons, changelog, links, bug report, hashtags) e envia o mesmo post ao canal e ao chat: `sendMessage` com prévia do banner acima do texto; se falhar, `sendPhoto` com a versão curta (≤1024). Se qualquer destino falhar, o job falha. O estilo com tabelas (rich message) ficou **comentado** no mesmo arquivo, com instruções para reativar |
+| Identidade dos builds CC | Distinguir os dois perfis de addons | `ADDON_PROFILE=CC_Addons` → zip `SAGA_CC-<ver>-<variante>-R<n>.zip`, título `SAGA_CC`, variantes `<Variante> - CC` e `#CCKernel` no post; o post por build (tópico de CI) também mostra `SAGA_CC`. `ADDON_PROFILE` passou a existir no env do `Start-Build` e do `Notify Channel` |
+| Publicação no SAGA-Releases aceita `SAGA_CC-` | O glob e o regex só reconheciam `SAGA-*.zip`, então um zip CC seria ignorado e a publicação ficaria vazia; o download de artefatos (`pattern`) também | Glob `SAGA*.zip`, regex `^(SAGA(_CC)?)-...`, `pattern: SAGA*.zip`. Os **assets** continuam `SAGA-...` por padrão (contrato do app de OTA); `SAGA_ASSET_KEEP_PREFIX=true` publica `SAGA_CC-...` |
+
+**Verificação:** `unified_caption.py` gerado para os dois perfis com versões de BORE/ADIOS/addons. `channel_post.sh` rodado ponta a ponta com um `curl` simulado: sucesso (canal e chat), falha do `sendMessage` com queda para `sendPhoto`, falha total com erro. Regex dos zips testada com `SAGA-`, `SAGA_CC-` e nomes inválidos. Lint local sem erros. **Não testado contra o Telegram de verdade**: a prévia do banner e o bloco expansível dependem do cliente do Telegram.
+
+---
+
 ## M7 — Vigilância de addons, nível de disco `none` e README (T20, T28)
 **Arquivos:** `kernel/addons/*/addon.meta` (25 novos), `kernel/checkpoint/addon_watch.sh` (novo), `.github/workflows/pin-scout.yml`, `.github/workflows/lint.yml`, `.github/workflows/build.yml`, `setup/runner_prep.sh`, `README.md`, `docs/ADDONS.md`, `docs/ADDONS-LISTA.md` (novo, gerado), `docs/PIN-SCOUT.md`, `docs/CHANGELOG-MANUTENCAO.md`
 

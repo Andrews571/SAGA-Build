@@ -348,6 +348,7 @@ jobs:
       CCACHE_MAXSIZE:              ${{ startsWith(inputs.build_system, 'Make') && '900M' || '' }}
       # Runner disk cleanup (setup/runner_prep.sh). Change WITHOUT a commit via
       # Settings > Variables > Actions: FREE_DISK_LEVEL = none | lean | full, DISK_NEED_GB.
+      ADDON_PROFILE:               ${{ inputs.addon_profile }}   # CC_Addons => zips named SAGA_CC-...
       FREE_DISK_LEVEL:             ${{ vars.FREE_DISK_LEVEL || 'lean' }}
       DISK_NEED_GB:                ${{ vars.DISK_NEED_GB || '30' }}
 
@@ -528,6 +529,7 @@ jobs:
           KERNEL_VERSION:      ${{ inputs.kernel_version }}
           ADDONS:              ${{ needs.prepare-matrix.outputs.addons }}
           CHANGELOG:           ${{ inputs.changelog }}
+          ADDON_PROFILE:       ${{ inputs.addon_profile }}
           # Lets channel_post.sh diff "variants selected for this run" against
           # "variants that actually produced a download link", so a matrix
           # job that failed (e.g. SUKISU with no promoted pin yet) surfaces
@@ -563,7 +565,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
-          pattern: SAGA-*.zip
+          pattern: SAGA*.zip
           path: /tmp/kernels
           merge-multiple: true
 

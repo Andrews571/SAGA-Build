@@ -108,6 +108,7 @@ print(json.dumps({'links':result,'versions':versions,'linux_ver':linux_ver,'kern
 ")
 
 VARIANT_LINKS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['links']))")
+# shellcheck disable=SC2034  # only used by the disabled rich-message block below
 VARIANT_VERSIONS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['versions']))")
 LINUX_VER=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['linux_ver'])")
 KERNEL_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['kernel_version'])")
@@ -165,15 +166,21 @@ if [ "$MISSING_VARIANTS_JSON" != "[]" ]; then
 fi
 
 # ------------------------------------------------------
-# Build rich message (tabelas + duas abas recolhíveis: "What's Inside?" e
-# "Features" — post único, banner embutido). Esse é o ÚNICO formato de post
-# agora; o caption MarkdownV2 + Telegraph antigo foi removido.
+# UNIFIED POST (canal + SAGA CHAT) — one model for both destinations:
+# title, Download per variant, expandable "Features" block (build info, flags,
+# SAGA features with addon versions), changelog, links, bug report, hashtags.
+# Built by unified_caption.py:
+#   FULL  (<= 4096 chars, with the expandable Features block) -> sendMessage
+#   SHORT (<= 1024 chars, no Features)                        -> fallback photo + caption
+# CC_Addons builds are named SAGA_CC and each variant link reads "<Variant> - CC".
 # ------------------------------------------------------
-RICH_MESSAGE_FILE="/tmp/channel_post_rich.json"
+UNIFIED_FULL_FILE="/tmp/channel_post_unified_full.txt"
+UNIFIED_SHORT_FILE="/tmp/channel_post_unified_short.txt"
 
 LINUX_VER="${LINUX_VER:-N/A}" \
 KERNEL_VERSION="${KERNEL_VERSION:-}" \
 ADDONS="${ADDONS:-}" \
+ADDON_PROFILE="${ADDON_PROFILE:-}" \
 BORE_VERSION="${BORE_VERSION:-}" \
 ADIOS_VERSION="${ADIOS_VERSION:-}" \
 BUILD_SYSTEM_DISPLAY="${BUILD_SYSTEM_DISPLAY:-}" \
@@ -186,64 +193,131 @@ GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
 GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
 VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
-VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
-BANNER_ATTACH_NAME="banner" \
 SAGA_ADDONS_DIR="${SAGA_PATCH_DIR}/kernel/addons" \
-python3 "${SAGA_PATCH_DIR}/release/telegram/rich_caption.py" "$RICH_MESSAGE_FILE" \
-    || error "Rich message builder failed"
+python3 "${SAGA_PATCH_DIR}/release/telegram/unified_caption.py" "$UNIFIED_FULL_FILE" "$UNIFIED_SHORT_FILE" \
+    || error "Unified post builder failed"
 
-# ------------------------------------------------------
-# Send rich message (banner + tabelas + abas) — multipart: "rich_message"
-# vai como campo texto (JSON), "banner" como arquivo, referenciado dentro
-# do JSON via "attach://banner" (mesma convenção de sendMediaGroup).
-# ------------------------------------------------------
-log "📸 Sending channel post (rich message → channel only)..."
+# The banner is shown as a large link preview ABOVE the text (needs a public URL).
+# If it can't be fetched Telegram just sends the text without it.
+BANNER_URL="${TELEGRAM_BANNER_URL:-https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/release/telegram/banner.jpg}"
+PREVIEW_JSON="{\"url\":\"${BANNER_URL}\",\"show_above_text\":true,\"prefer_large_media\":true}"
 
-if ! telegram_api_call "sendRichMessage" "/tmp/tg_channel_rich_response.json" "Channel rich message" \
-    -F "chat_id=${TELEGRAM_CHANNEL_ID}" \
-    -F "rich_message=<${RICH_MESSAGE_FILE}" \
-    -F "banner=@${BANNER_PATH}"; then
-    error "Channel rich message failed — group post skipped (it links to the channel post)"
-fi
+# send_unified_post <chat_id> <label>: full text first; photo + short caption if that fails.
+send_unified_post() {
+    local chat="$1" label="$2" resp="/tmp/tg_unified_${2}.json"
+    if telegram_api_call "sendMessage" "$resp" "${label} post" \
+        -F "chat_id=${chat}" \
+        -F "parse_mode=MarkdownV2" \
+        -F "link_preview_options=${PREVIEW_JSON}" \
+        -F "text=<${UNIFIED_FULL_FILE}"; then
+        log "✅ ${label} post sent (full text)"
+        return 0
+    fi
+    warn "${label}: full post failed — falling back to banner photo + short caption"
+    if telegram_api_call "sendPhoto" "$resp" "${label} photo post" \
+        -F "chat_id=${chat}" \
+        -F "parse_mode=MarkdownV2" \
+        -F "photo=@${BANNER_PATH}" \
+        -F "caption=<${UNIFIED_SHORT_FILE}"; then
+        log "✅ ${label} post sent (photo + short caption)"
+        return 0
+    fi
+    return 1
+}
 
-CHANNEL_MESSAGE_ID=$(echo "$TG_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['message_id'])" 2>/dev/null || echo "")
-ABOUT_URL=""
-if [ -n "$CHANNEL_MESSAGE_ID" ]; then
-    ABOUT_URL="https://t.me/c/${TELEGRAM_CHANNEL_ID#-100}/${CHANNEL_MESSAGE_ID}"
-    log "Channel post sent ✅ (message_id=${CHANNEL_MESSAGE_ID})"
-else
-    warn "Could not read channel message_id — group caption will omit the About Kernel link"
-fi
+POST_FAILED=""
+send_unified_post "${TELEGRAM_CHANNEL_ID}"    "channel" || POST_FAILED="${POST_FAILED} channel"
+send_unified_post "${TELEGRAM_DISCUSSION_ID}" "chat"    || POST_FAILED="${POST_FAILED} chat"
 
-# ------------------------------------------------------
-# Group post (discussion group): banner photo + caption with Download
-# links (one per variant) above "About Kernel" → channel rich post.
-# No add-ons text here; that all lives in the channel post.
-# ------------------------------------------------------
-GROUP_CAPTION_FILE="/tmp/channel_post_group_caption.txt"
+rm -f "$UNIFIED_FULL_FILE" "$UNIFIED_SHORT_FILE" /tmp/tg_unified_channel.json /tmp/tg_unified_chat.json
+[ -z "$POST_FAILED" ] || error "Unified post failed for:${POST_FAILED}"
 
-LINUX_VER="${LINUX_VER:-N/A}" \
-KERNEL_VERSION="${KERNEL_VERSION:-}" \
-CHANGELOG="${CHANGELOG:-}" \
-GITHUB_SHA="${GITHUB_SHA:-}" \
-GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
-GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
-GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
-VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
-VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
-ABOUT_URL="$ABOUT_URL" \
-python3 "${SAGA_PATCH_DIR}/release/telegram/caption.py" --channel-only "$GROUP_CAPTION_FILE" \
-    || error "Group caption builder failed"
-
-log "📨 Sending group post (photo + caption)..."
-if telegram_api_call "sendPhoto" "/tmp/tg_discussion_photo_response.json" "Group photo post" \
-    -F "chat_id=${TELEGRAM_DISCUSSION_ID}" \
-    -F "parse_mode=MarkdownV2" \
-    -F "photo=@${BANNER_PATH}" \
-    -F "caption=<${GROUP_CAPTION_FILE}"; then
-    log "✅ Channel rich message and group photo post sent"
-else
-    error "Group photo post failed (channel post was already sent)"
-fi
-
-rm -f "$RICH_MESSAGE_FILE" "$GROUP_CAPTION_FILE" /tmp/tg_channel_rich_response.json /tmp/tg_discussion_photo_response.json
+# ======================================================================
+# DISABLED — previous "rich message" (tables + collapsible tabs) channel post
+# and the separate photo+caption group post. Kept commented on purpose: to
+# bring the table style back, remove the leading "# " from the block below and
+# delete (or comment) the UNIFIED POST block above.
+# ======================================================================
+# # ------------------------------------------------------
+# # Build rich message (tabelas + duas abas recolhíveis: "What's Inside?" e
+# # "Features" — post único, banner embutido). Esse é o ÚNICO formato de post
+# # agora; o caption MarkdownV2 + Telegraph antigo foi removido.
+# # ------------------------------------------------------
+# RICH_MESSAGE_FILE="/tmp/channel_post_rich.json"
+#
+# LINUX_VER="${LINUX_VER:-N/A}" \
+# KERNEL_VERSION="${KERNEL_VERSION:-}" \
+# ADDONS="${ADDONS:-}" \
+# BORE_VERSION="${BORE_VERSION:-}" \
+# ADIOS_VERSION="${ADIOS_VERSION:-}" \
+# BUILD_SYSTEM_DISPLAY="${BUILD_SYSTEM_DISPLAY:-}" \
+# COMPILER_STRING="${COMPILER_STRING:-}" \
+# LTO_MODE="${LTO_MODE:-}" \
+# TICK_RATE="${TICK_RATE:-}" \
+# CHANGELOG="${CHANGELOG:-}" \
+# GITHUB_SHA="${GITHUB_SHA:-}" \
+# GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
+# GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
+# GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
+# VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
+# VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
+# BANNER_ATTACH_NAME="banner" \
+# SAGA_ADDONS_DIR="${SAGA_PATCH_DIR}/kernel/addons" \
+# python3 "${SAGA_PATCH_DIR}/release/telegram/rich_caption.py" "$RICH_MESSAGE_FILE" \
+#     || error "Rich message builder failed"
+#
+# # ------------------------------------------------------
+# # Send rich message (banner + tabelas + abas) — multipart: "rich_message"
+# # vai como campo texto (JSON), "banner" como arquivo, referenciado dentro
+# # do JSON via "attach://banner" (mesma convenção de sendMediaGroup).
+# # ------------------------------------------------------
+# log "📸 Sending channel post (rich message → channel only)..."
+#
+# if ! telegram_api_call "sendRichMessage" "/tmp/tg_channel_rich_response.json" "Channel rich message" \
+#     -F "chat_id=${TELEGRAM_CHANNEL_ID}" \
+#     -F "rich_message=<${RICH_MESSAGE_FILE}" \
+#     -F "banner=@${BANNER_PATH}"; then
+#     error "Channel rich message failed — group post skipped (it links to the channel post)"
+# fi
+#
+# CHANNEL_MESSAGE_ID=$(echo "$TG_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['message_id'])" 2>/dev/null || echo "")
+# ABOUT_URL=""
+# if [ -n "$CHANNEL_MESSAGE_ID" ]; then
+#     ABOUT_URL="https://t.me/c/${TELEGRAM_CHANNEL_ID#-100}/${CHANNEL_MESSAGE_ID}"
+#     log "Channel post sent ✅ (message_id=${CHANNEL_MESSAGE_ID})"
+# else
+#     warn "Could not read channel message_id — group caption will omit the About Kernel link"
+# fi
+#
+# # ------------------------------------------------------
+# # Group post (discussion group): banner photo + caption with Download
+# # links (one per variant) above "About Kernel" → channel rich post.
+# # No add-ons text here; that all lives in the channel post.
+# # ------------------------------------------------------
+# GROUP_CAPTION_FILE="/tmp/channel_post_group_caption.txt"
+#
+# LINUX_VER="${LINUX_VER:-N/A}" \
+# KERNEL_VERSION="${KERNEL_VERSION:-}" \
+# CHANGELOG="${CHANGELOG:-}" \
+# GITHUB_SHA="${GITHUB_SHA:-}" \
+# GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
+# GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
+# GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
+# VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
+# VARIANT_VERSIONS_JSON="$VARIANT_VERSIONS_JSON" \
+# ABOUT_URL="$ABOUT_URL" \
+# python3 "${SAGA_PATCH_DIR}/release/telegram/caption.py" --channel-only "$GROUP_CAPTION_FILE" \
+#     || error "Group caption builder failed"
+#
+# log "📨 Sending group post (photo + caption)..."
+# if telegram_api_call "sendPhoto" "/tmp/tg_discussion_photo_response.json" "Group photo post" \
+#     -F "chat_id=${TELEGRAM_DISCUSSION_ID}" \
+#     -F "parse_mode=MarkdownV2" \
+#     -F "photo=@${BANNER_PATH}" \
+#     -F "caption=<${GROUP_CAPTION_FILE}"; then
+#     log "✅ Channel rich message and group photo post sent"
+# else
+#     error "Group photo post failed (channel post was already sent)"
+# fi
+#
+# rm -f "$RICH_MESSAGE_FILE" "$GROUP_CAPTION_FILE" /tmp/tg_channel_rich_response.json /tmp/tg_discussion_photo_response.json

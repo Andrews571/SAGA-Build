@@ -199,8 +199,9 @@ def build_blocks(env):
                         env.get("GITHUB_RUN_ID", ""))
     run_id          = env.get("GITHUB_RUN_ID", "")
 
+    kernel_name = "SAGA_CC" if env.get("ADDON_PROFILE", "").strip() == "CC_Addons" else "SAGA"
     block_saga = (
-        "```SAGA\n"
+        f"```{kernel_name}\n"
         f"Linux        : {linux_ver}\n"
         f"Build System : {build_system}\n"
         f"Compiler     : {compiler}\n"

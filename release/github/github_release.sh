@@ -17,7 +17,8 @@
 # Variaveis de entrada (todas vem do build.yml):
 #   GH_TOKEN         token com Contents:write no repo de releases (secret SAGA_RELEASES_TOKEN)
 #   RELEASES_REPO    ex: Andrews571/SAGA-Releases
-#   ZIP_DIR          pasta com os SAGA-*.zip (padrao /tmp/kernels)
+#   ZIP_DIR          pasta com os SAGA-*.zip / SAGA_CC-*.zip (padrao /tmp/kernels)
+#   SAGA_ASSET_KEEP_PREFIX  true = os assets mantem o prefixo do zip (SAGA_CC-...); padrao false = sempre SAGA-...
 #   ADDON_PROFILE    Default_Addons | CC_Addons
 #   ADDONS           lista separada por virgula
 #   RUN_MODE         Release (qualquer outro valor: nao publica)
@@ -83,7 +84,7 @@ normalize_zip() {
 }
 
 shopt -s nullglob
-ZIPS=("$ZIP_DIR"/SAGA-*.zip)
+ZIPS=("$ZIP_DIR"/SAGA*.zip)
 if [ "${#ZIPS[@]}" -eq 0 ]; then
     warn "nenhum zip em $ZIP_DIR - nada para publicar"
     exit 0
@@ -98,7 +99,7 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 # ------------------------------------------------------
-# 1. Ler os zips: SAGA-<versao>-<variante>-R<run>.zip
+# 1. Ler os zips: SAGA[_CC]-<versao>-<variante>-R<run>.zip
 # ------------------------------------------------------
 VERSION=""
 RUN_NO=""
@@ -109,20 +110,26 @@ ASSET_FILES=()
 
 for zip in "${ZIPS[@]}"; do
     base="$(basename "$zip")"
-    if [[ ! "$base" =~ ^SAGA-([0-9]+\.[0-9]+\.[0-9]+)-(.+)-R([0-9]+)\.zip$ ]]; then
+    if [[ ! "$base" =~ ^(SAGA(_CC)?)-([0-9]+\.[0-9]+\.[0-9]+)-(.+)-R([0-9]+)\.zip$ ]]; then
         warn "nome de zip fora do padrao, ignorado: $base"
         continue
     fi
-    z_ver="${BASH_REMATCH[1]}"
-    variant="${BASH_REMATCH[2]}"
-    z_run="${BASH_REMATCH[3]}"
+    z_prefix="${BASH_REMATCH[1]}"
+    z_ver="${BASH_REMATCH[3]}"
+    variant="${BASH_REMATCH[4]}"
+    z_run="${BASH_REMATCH[5]}"
 
     root="${variant%%+*}"
     susfs=false
     [[ "$variant" == *"+SUSFS" ]] && susfs=true
 
     # "+" no nome do asset pode ser trocado pelo GitHub; usamos um nome seguro
-    asset_name="SAGA-${z_ver}-${variant//+/-}-R${z_run}.zip"
+    # Asset names stay SAGA-... by default (the OTA app contract); the CC identity is
+    # carried by the channel (ptr-experimental) and saga-release.json "profile".
+    # Set SAGA_ASSET_KEEP_PREFIX=true to publish SAGA_CC-... assets instead.
+    asset_prefix="SAGA"
+    [ "${SAGA_ASSET_KEEP_PREFIX:-false}" = "true" ] && asset_prefix="$z_prefix"
+    asset_name="${asset_prefix}-${z_ver}-${variant//+/-}-R${z_run}.zip"
 
     if ! src_zip="$(normalize_zip "$zip")"; then
         warn "${base} nao e um zip do AnyKernel3 (sem anykernel.sh/Image) - ignorado"
