@@ -30,7 +30,7 @@
     ]
   },
   "susfs_resukisu": {
-    "good": "69b8e734920b8f9ed885ab8d112969719698e242",
+    "good": "342943dbef8a1e996354fd94be4a98f4d556f3df",
     "bad": [
       "08066faea18f809bc3260b00291a32d098b08c92",
       "153f88df3be2501d2d33364f8fe05247aecb3cef",
@@ -42,7 +42,11 @@
       "c27ebe93c68e953c248b11bb747ef220ea648373",
       "e5b4d2879836cfb8379010a8ebee76c519f5c834",
       "f6c046775c0a14834748cc82c03f1d1b0285c206"
-    ]
+    ],
+    "verified": {
+      "run": "43526477934",
+      "at": "2026-11-13"
+    }
   },
   "sukisu": {
     "good": "0ca744a88835144c58d8256ebb32c279edabfcde",
