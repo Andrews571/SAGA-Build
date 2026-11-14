@@ -15,6 +15,6 @@
 | `susfs_resukisu` | [`342943dbef`](https://gitlab.com/simonpunk/susfs4ksu/-/commit/342943dbef8a1e996354fd94be4a98f4d556f3df) | 10 | 2026-11-13 | [43526477934](https://github.com/Andrews571/SAGA-Build/actions/runs/43526477934) |
 | `sukisu` | [`0ca744a888`](https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/0ca744a88835144c58d8256ebb32c279edabfcde) | 0 | — | — |
 | `sukisu_builtin` | [`f9aa2fec23`](https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/f9aa2fec23c3f4a06a935f69dc04cb85b261e7f3) | 20 | 2026-11-12 | [43241019266](https://github.com/Andrews571/SAGA-Build/actions/runs/43241019266) |
-| `susfs_sukisu` | [`342943dbef`](https://gitlab.com/simonpunk/susfs4ksu/-/commit/342943dbef8a1e996354fd94be4a98f4d556f3df) | 22 | 2026-11-13 | [43526477934](https://github.com/Andrews571/SAGA-Build/actions/runs/43526477934) |
+| `susfs_sukisu` | [`e6dc76f567`](https://gitlab.com/simonpunk/susfs4ksu/-/commit/e6dc76f5671835e71b733e8b2929a7b2406cb458) | 22 | 2026-11-14 | [43598329734](https://github.com/Andrews571/SAGA-Build/actions/runs/43598329734) |
 | `ksunext_susfs_fork` | [`a7c7f531ca`](https://github.com/pershoot/KernelSU-Next/commit/a7c7f531ca80e9189fd0d8001eb37075de68cc7b) | 3 | 2026-11-13 | [43526477934](https://github.com/Andrews571/SAGA-Build/actions/runs/43526477934) |
 | `susfs_ksunext` | [`caaf1bb650`](https://gitlab.com/pershoot/susfs4ksu/-/commit/caaf1bb650e312935f09a66d47294fc437f9d4ab) | 6 | 2026-11-13 | [43526477934](https://github.com/Andrews571/SAGA-Build/actions/runs/43526477934) |
