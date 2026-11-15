@@ -1,6 +1,6 @@
 {
   "resukisu": {
-    "good": "448eaca200e51bc689ce9f09c48b11f1cd74261e",
+    "good": "5d6d1843c8937f5ff2a145dc89a0cf46030ae6f8",
     "bad": [
       "03b60f260cce36f23efbd26c9c334edfdc9ce7eb",
       "0b4f56fd92bcc47a24bd4add8d7125239531c4f5",
@@ -29,7 +29,7 @@
       "f6cb7e70c10ebde149f3121ae68b945514fd0801"
     ],
     "verified": {
-      "run": "43720002181",
+      "run": "43770130885",
       "at": "2026-11-15"
     }
   },
