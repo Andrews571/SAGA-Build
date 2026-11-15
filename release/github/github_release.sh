@@ -18,6 +18,7 @@
 #   GH_TOKEN         token com Contents:write no repo de releases (secret SAGA_RELEASES_TOKEN)
 #   RELEASES_REPO    ex: Andrews571/SAGA-Releases
 #   ZIP_DIR          pasta com os SAGA-*.zip / SAGA_CC-*.zip (padrao /tmp/kernels)
+#   LINKS_DIR        (opcional) pasta com os variant-link-*.json; fornece o toolchain (Clang, LTO) ao saga-release.json
 #   SAGA_ASSET_KEEP_PREFIX  true = os assets mantem o prefixo do zip (SAGA_CC-...); padrao false = sempre SAGA-...
 #   ADDON_PROFILE    Default_Addons | CC_Addons
 #   ADDONS           lista separada por virgula
@@ -178,7 +179,35 @@ KMI="android14-${KERNEL_VERSION:-6.1}"
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-0}"
 
+# T21: toolchain used (from the per-variant link JSONs the build jobs produced).
+TOOLCHAIN_JSON='{}'
+if [ -n "${LINKS_DIR:-}" ] && compgen -G "${LINKS_DIR}/*.json" > /dev/null; then
+    TOOLCHAIN_JSON="$(jq -sc '[.[] | select((.compiler // "") != "")][0] // {} | {compiler: (.compiler // ""), lto: (.lto // ""), build_system: (.build_system // "")}' "${LINKS_DIR}"/*.json 2>/dev/null || echo '{}')"
+fi
+
+# T18: rollback info. The channel pointer still holds the PREVIOUS release's saga-release.json;
+# keep a reference to it ("previous") so the app (or a human) can go back. Each tag release
+# also carries its own saga-release.json, so "manifest" is enough to fetch the old variants/sha256.
+PREV_JSON='null'
+mkdir -p "$OUT_DIR/prev"
+if gh release download "$POINTER" --repo "$RELEASES_REPO" --pattern saga-release.json \
+        --dir "$OUT_DIR/prev" --clobber > /dev/null 2>&1 && [ -s "$OUT_DIR/prev/saga-release.json" ]; then
+    old_tag="$(jq -r '"kernel-\(.channel)-\(.kernel.version)-R\(.kernel.run)"' "$OUT_DIR/prev/saga-release.json" 2>/dev/null || true)"
+    if [ -n "$old_tag" ] && [ "$old_tag" != "$TAG" ]; then
+        PREV_JSON="$(jq -c --arg repo "$RELEASES_REPO" --arg tag "$old_tag" \
+            '{tag: $tag, version: .kernel.version, run: .kernel.run, built_at: .kernel.built_at, commit: .kernel.commit,
+              manifest: ("https://github.com/" + $repo + "/releases/download/" + $tag + "/saga-release.json")}' \
+            "$OUT_DIR/prev/saga-release.json" 2>/dev/null || echo null)"
+    elif [ "$old_tag" = "$TAG" ]; then
+        # re-publishing the same tag: keep the rollback target it already had
+        PREV_JSON="$(jq -c '.previous // null' "$OUT_DIR/prev/saga-release.json" 2>/dev/null || echo null)"
+    fi
+fi
+log "rollback: previous=$(jq -r '.tag // "none"' <<<"$PREV_JSON")"
+
 jq -s \
+    --argjson toolchain "$TOOLCHAIN_JSON" \
+    --argjson previous "$PREV_JSON" \
     --arg channel "$CHANNEL" \
     --arg profile "${ADDON_PROFILE:-Default_Addons}" \
     --arg version "$VERSION" \
@@ -200,6 +229,8 @@ jq -s \
         addons: ($addons | split(",") | map(select(length > 0))),
         changelog: $changelog,
         recommended: $recommended,
+        toolchain: $toolchain,
+        previous: $previous,
         variants: (map(. + { url: ($base + "/" + .file) }))
     }' "$VARIANTS_NDJSON" > "$OUT_DIR/saga-release.json"
 

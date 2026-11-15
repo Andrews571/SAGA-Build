@@ -72,6 +72,11 @@ cd "$TOOL_AK3_DIR"
 zip -r9 "$ZIP_PATH" . -x "*.git*" -x "*.github*" -x "*.md" -x "LICENSE" \
     || error "ZIP creation failed!"
 [ -f "$ZIP_PATH" ] || error "ZIP file not found after creation!"
+
+# T16: refuse to ship a broken zip. Runs BEFORE ZIP_PATH reaches $GITHUB_ENV, so a bad
+# zip is never uploaded as an artifact, posted to Telegram or published.
+bash "${SAGA_PATCH_DIR}/release/zip_check.sh" "$ZIP_PATH" "${KERNEL_VERSION}.${SUBLEVEL}" \
+    || error "ZIP sanity check failed — not publishing ${ZIP_NAME}"
 cd "$ROOT_DIR"
 
 log "ZIP ready: ${ZIP_NAME} ✅"

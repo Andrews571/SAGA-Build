@@ -208,7 +208,7 @@ send_unified_post() {
     if telegram_api_call "sendMessage" "$resp" "${label} post" \
         -F "chat_id=${chat}" \
         -F "parse_mode=MarkdownV2" \
-        -F "link_preview_options=${PREVIEW_JSON}" \
+        --form-string "link_preview_options=${PREVIEW_JSON}" \
         -F "text=<${UNIFIED_FULL_FILE}"; then
         log "✅ ${label} post sent (full text)"
         return 0

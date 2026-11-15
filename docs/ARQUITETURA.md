@@ -8,6 +8,9 @@ Este repo **não tem código-fonte do kernel**: só os scripts e workflows que b
 3. **build.sh**: branding → variante (KSU/SuSFS) → core → `run_addons` → `build/make.sh` (compila) → `run_postbuild` → empacota (`run_release`, AnyKernel3). Warm Run para depois do postbuild, sem empacotar.
 4. **Checkpoint** (`kernel/checkpoint/engine.sh`): promove ou marca como ruim o commit candidato testado.
 5. **Release/Telegram**: `release/telegram/*` publica o post; `build.yml` envia o zip ao SAGA-Releases.
+   - **Antes de publicar:** `release/zip_check.sh` valida cada zip (íntegro, `anykernel.sh`, imagem do kernel com tamanho plausível, versão do banner = versão da build); zip ruim derruba a build antes de subir o artefato.
+   - **Falha:** se um job de Build/Release falhar, `release/telegram/failure_alert.sh` avisa no tópico Test/Release com o link do log de cada job que falhou.
+   - **`saga-release.json`** (SAGA-Releases) traz também `toolchain` (Clang, LTO, build system) e `previous` (tag, versão, build e `manifest` do release anterior do canal, para rollback). Campos novos são só acréscimos: o app existente continua lendo o mesmo contrato.
 
 ## Modos (`run_mode`)
 - **Dry Run**: não compila; valida o fluxo.

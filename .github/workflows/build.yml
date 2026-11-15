@@ -569,9 +569,19 @@ jobs:
           path: /tmp/kernels
           merge-multiple: true
 
+      # toolchain (Clang/LTO) for saga-release.json comes from the per-variant link JSONs
+      - name: "Download Variant Links"
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: variant-link-*
+          path: /tmp/variant-links
+          merge-multiple: true
+
       - name: "Publish to SAGA-Releases"
         env:
           GH_TOKEN:           ${{ secrets.SAGA_RELEASES_TOKEN }}
+          LINKS_DIR:          /tmp/variant-links
           RELEASES_REPO:      Andrews571/SAGA-Releases
           ZIP_DIR:            /tmp/kernels
           ADDON_PROFILE:      ${{ inputs.addon_profile }}
@@ -584,3 +594,36 @@ jobs:
           GITHUB_REPOSITORY:  ${{ github.repository }}
           GITHUB_RUN_ID:      ${{ github.run_id }}
         run: bash release/github/github_release.sh
+
+  # ======================================================
+  # FAILURE ALERT — Telegram message (with log links) when a Build/Release run fails
+  # ======================================================
+  notify-failure:
+    name: "Notify Failure"
+    needs: [prepare-matrix, Start-Build, notify-channel, publish-kernel-release]
+    if: always() && (inputs.run_mode == 'Build' || inputs.run_mode == 'Release') && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read     # list the failed jobs of this run
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v7
+
+      - name: "Send failure alert"
+        env:
+          TELEGRAM_BOT_TOKEN:         ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:           ${{ vars.TELEGRAM_CHAT_ID }}
+          TELEGRAM_THREAD_ID_TEST:    ${{ vars.TELEGRAM_THREAD_ID_TEST }}
+          TELEGRAM_THREAD_ID_RELEASE: ${{ vars.TELEGRAM_THREAD_ID_RELEASE }}
+          GH_TOKEN:                   ${{ github.token }}
+          SAGA_PATCH_DIR:             ${{ github.workspace }}
+          RUN_MODE:                   ${{ inputs.run_mode }}
+          KERNEL_VERSION:             ${{ inputs.kernel_version }}
+          ADDON_PROFILE:              ${{ inputs.addon_profile }}
+          GITHUB_ACTOR:               ${{ github.actor }}
+          GITHUB_SERVER_URL:          ${{ github.server_url }}
+          GITHUB_REPOSITORY:          ${{ github.repository }}
+          GITHUB_RUN_ID:              ${{ github.run_id }}
+        run: bash release/telegram/failure_alert.sh

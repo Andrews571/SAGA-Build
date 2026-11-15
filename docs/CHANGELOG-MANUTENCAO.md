@@ -5,6 +5,22 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M9 — Release: teste do zip, alerta de falha, rollback e toolchain (T12, T16, T18, T21)
+**Arquivos:** `release/zip_check.sh`, `release/telegram/failure_alert.sh` (novos), `release/anykernel.sh`, `release/github/github_release.sh`, `release/telegram/channel_post.sh`, `.github/workflows/build.yml`, `docs/ARQUITETURA.md`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| Tarefa | O quê | Por quê | Como |
+|---|---|---|---|
+| T16 | Teste do zip antes de publicar | Um zip quebrado chegava ao Telegram e ao SAGA-Releases | `zip_check.sh` roda no `anykernel.sh` logo após o `zip`, **antes** de `ZIP_PATH` ir para o `$GITHUB_ENV` (zip ruim nunca vira artefato nem post). Falha se: zip corrompido (`unzip -t`), sem `anykernel.sh`, sem imagem (`Image`, `Image.gz`, `Image.gz-dtb`, `Image-dtb`), imagem menor que 5 MiB (`ZIP_MIN_IMAGE_MB`) ou banner `Linux version X.Y.Z` diferente da build. Se o banner não puder ser lido, só avisa. Custo medido: ~0,2 s para uma imagem de 36 MiB |
+| T12 | Alerta de falha no Telegram | Só o Checkpoint avisava (issue de candidato ruim); falhas de Build/Release passavam em silêncio | Job `notify-failure` (só Build e Release, quando algum job falha). `failure_alert.sh` lista os jobs que falharam (API do Actions, `actions: read`) com a etapa e o link do log, e posta no tópico Release ou Test. Melhor esforço: nunca falha o workflow. Warm Run não alerta (candidato ruim é esperado e já abre issue) |
+| T18 | Rollback no `saga-release.json` | O ponteiro do canal era sobrescrito e o release anterior se perdia | Antes de atualizar o ponteiro, lê o `saga-release.json` atual e grava `previous: {tag, version, run, built_at, commit, manifest}` (o `manifest` é o JSON do release anterior, que mostra variantes e sha256). Republicar a mesma tag preserva o `previous` dela. Campo novo, só acréscimo |
+| T21 | Toolchain no `saga-release.json` | Não constava qual Clang gerou o release | O job de publicação baixa os `variant-link-*` e grava `toolchain: {compiler, lto, build_system}`. Campo novo, só acréscimo |
+
+**Correção de M8:** `channel_post.sh` passou a enviar `link_preview_options` com `--form-string` (valor literal, sem interpretar `;` do curl).
+
+**Verificação:** `zip_check.sh` com 8 zips sintéticos (íntegro Image e Image.gz, versão errada, sem banner, minúsculo, sem imagem, sem `anykernel.sh`, corrompido); `failure_alert.sh` com `gh` simulado (com e sem lista de jobs); `github_release.sh` ponta a ponta com `gh` simulado (release anterior, primeiro release, mesma tag, `SAGA_ASSET_KEEP_PREFIX`). Lint local sem erros. Não rodei no GitHub: o `notify-failure` e o `zip_check` só se provam numa run real.
+
+---
+
 ## M8 — Post unificado do Telegram e identidade CC
 **Arquivos:** `release/telegram/unified_caption.py` (novo, do outro chat), `release/telegram/channel_post.sh`, `release/telegram/caption.py`, `release/telegram/telegram.sh`, `release/anykernel.sh`, `release/github/github_release.sh`, `.github/workflows/build.yml`, `docs/POST-TELEGRAM.md` (novo), `docs/CHANGELOG-MANUTENCAO.md`
 
