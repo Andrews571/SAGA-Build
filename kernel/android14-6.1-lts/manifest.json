@@ -57,7 +57,7 @@
     "bad": []
   },
   "sukisu_builtin": {
-    "good": "f9aa2fec23c3f4a06a935f69dc04cb85b261e7f3",
+    "good": "4bec532dd447e2852aa8932afa768255350c103a",
     "bad": [
       "0165c0556929f1b509a9b632a46ef09b67a7940e",
       "05f5cdf082d32bbc651c205ba4bdd1dc66cca7f5",
@@ -81,8 +81,8 @@
       "fbc67d004b3b68723e91dd86d50dead1120b4a9a"
     ],
     "verified": {
-      "run": "43241019266",
-      "at": "2026-11-12"
+      "run": "43770130885",
+      "at": "2026-11-15"
     }
   },
   "susfs_sukisu": {
