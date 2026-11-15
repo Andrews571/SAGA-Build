@@ -1,6 +1,6 @@
 {
   "resukisu": {
-    "good": "548d1dda060ca198823d8808804d01f5209ef4a9",
+    "good": "448eaca200e51bc689ce9f09c48b11f1cd74261e",
     "bad": [
       "03b60f260cce36f23efbd26c9c334edfdc9ce7eb",
       "0b4f56fd92bcc47a24bd4add8d7125239531c4f5",
@@ -27,7 +27,11 @@
       "f4435f007b16f61705089ff982e3f981a6017979",
       "f56219d2998dc00aa2a80eda8c2280b1455a3519",
       "f6cb7e70c10ebde149f3121ae68b945514fd0801"
-    ]
+    ],
+    "verified": {
+      "run": "43720002181",
+      "at": "2026-11-15"
+    }
   },
   "susfs_resukisu": {
     "good": "f76b81f2a6bf98e4029cc0c823c054edbec29803",
