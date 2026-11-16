@@ -15,7 +15,7 @@ html() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
 
 failed_jobs() {  # TSV: job name <TAB> job url <TAB> failing step
   gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" \
-    --jq '.jobs[] | select(.conclusion=="failure") | [.name, .html_url, (([.steps[] | select(.conclusion=="failure")][0].name) // "?")] | @tsv' 2>/dev/null
+    --jq '.jobs[] | select(.conclusion=="failure") | [.name, .html_url, (([.steps[] | select(.conclusion=="failure" or .conclusion=="timed_out" or .conclusion=="cancelled")][0].name) // "")] | @tsv' 2>/dev/null
 }
 
 build_text() {
@@ -29,7 +29,8 @@ build_text() {
     printf '\n<b>Failed</b>\n'
     while IFS=$'\t' read -r n u s; do
       [ -n "$n" ] || continue
-      printf '• <a href="%s">%s</a> — step “%s”\n' "$u" "$(html "$n")" "$(html "$s")"
+      if [ -n "$s" ]; then printf '• <a href="%s">%s</a> — step “%s”\n' "$u" "$(html "$n")" "$(html "$s")"
+      else printf '• <a href="%s">%s</a> — no failed step recorded (cancelled, timed out or runner problem)\n' "$u" "$(html "$n")"; fi
     done <<<"$jobs"
   fi
   printf '\n🔗 <a href="%s">Open the run</a>' "$run_url"

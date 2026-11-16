@@ -175,7 +175,10 @@ if [ "$RUN_MODE_UPPER" = "RELEASE" ] && [ -n "${TELEGRAM_CHANNEL_ID:-}" ]; then
         # build has one, needed by the channel's rich message (see
         # rich_caption.py) since that job only sees these per-variant JSONs,
         # never the per-job env directly.
-        echo "{\"variant\":\"${VARIANT_KEY}\",\"link\":\"${GROUP_MSG_LINK}\",\"linux_ver\":\"${LINUX_VER}\",\"kernel_version\":\"${KERNEL_VERSION}\",\"ksu_version\":\"${KERNEL_VARIANT_VERSION}\",\"bore_version\":\"${BORE_VERSION:-}\",\"adios_version\":\"${ADIOS_VERSION:-}\",\"build_system\":\"${BUILD_SYSTEM_DISPLAY:-}\",\"compiler\":\"${COMPILER_STRING:-}\",\"lto\":\"${LTO_MODE:-}\"}" > "${LINK_FILE}"
+        # T5 "Reports" data: zip size/sha256 and compile time of THIS variant.
+        ZIP_SIZE_BYTES="$(stat -c%s "${ZIP_PATH:-/nonexistent}" 2>/dev/null || echo 0)"
+        ZIP_SHA256="$(sha256sum "${ZIP_PATH:-/nonexistent}" 2>/dev/null | cut -d' ' -f1)"
+        echo "{\"variant\":\"${VARIANT_KEY}\",\"link\":\"${GROUP_MSG_LINK}\",\"linux_ver\":\"${LINUX_VER}\",\"kernel_version\":\"${KERNEL_VERSION}\",\"ksu_version\":\"${KERNEL_VARIANT_VERSION}\",\"bore_version\":\"${BORE_VERSION:-}\",\"adios_version\":\"${ADIOS_VERSION:-}\",\"build_system\":\"${BUILD_SYSTEM_DISPLAY:-}\",\"compiler\":\"${COMPILER_STRING:-}\",\"lto\":\"${LTO_MODE:-}\",\"zip_size\":${ZIP_SIZE_BYTES:-0},\"zip_sha256\":\"${ZIP_SHA256:-}\",\"build_seconds\":${BUILD_SECONDS:-0}}" > "${LINK_FILE}"
         log "Variant link saved → ${LINK_FILE} ✅"
     fi
 fi

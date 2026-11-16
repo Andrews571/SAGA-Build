@@ -12,14 +12,14 @@ Uso:
     SHORT_FILE : o mesmo texto SEM o bloco Features (<= 1024), usado no
                  fallback "foto + legenda" se o envio do texto completo falhar
 
-Le o mesmo ambiente do caption.py (VARIANT_LINKS_JSON, ADDONS, LINUX_VER ...) e
+Le o mesmo ambiente do caption.py (VARIANT_LINKS_JSON, ADDONS, LINUX_VER ...), VARIANT_REPORTS_JSON (T5) e
 tambem ADDON_PROFILE: com "CC_Addons" o kernel se chama SAGA_CC e as variantes
 ganham o sufixo " - CC" (ex: "Vanilla - CC").
 """
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 import caption as legacy
 import rich_caption as rich
@@ -143,9 +143,68 @@ def build_features_block(env, addons_root):
 
 
 # ---------------------------------------------------------------------------
+# Bloco "Reports" (expansivel): tempo, data, commit, run e zips (tamanho + sha256)
+# ---------------------------------------------------------------------------
+def fmt_duration(seconds):
+    seconds = int(seconds or 0)
+    if seconds <= 0:
+        return ""
+    m, sec = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m {sec:02d}s" if h else f"{m}m {sec:02d}s"
+
+
+def build_reports_block(env, links):
+    """Blockquote EXPANSIVEL com os relatorios da build, ou '' se nao houver dados."""
+    reports = _load_json_env(env, "VARIANT_REPORTS_JSON")
+    base = f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}"
+    sha = env.get("GITHUB_SHA", "").strip()
+    run_id = env.get("GITHUB_RUN_ID", "").strip()
+    run_no = env.get("GITHUB_RUN_NUMBER", "").strip()
+
+    rows = ["📊 *Reports*"]
+    secs = max([int(r.get("seconds") or 0) for r in reports.values()] or [0])
+    duration = fmt_duration(secs)
+    if duration:
+        rows.append(f"Built in: {esc(duration)}")
+    rows.append(f"Date: {esc(datetime.now(timezone.utc).strftime('%d %b %Y'))} UTC")
+    if sha:
+        rows.append(f"Commit: [{esc(sha[:7])}]({legacy.mdv2_escape_url(f'{base}/commit/{sha}')})")
+    if run_id:
+        run_label = f"\\#{esc(run_no)}" if run_no else esc(run_id)
+        rows.append(f"Run: [{run_label}]({legacy.mdv2_escape_url(f'{base}/actions/runs/{run_id}')})")
+    rows.append(f"Profile: {'CC Addons' if is_cc(env) else 'Default Addons'}")
+
+    zips = []
+    for key in links:
+        r = reports.get(key) or {}
+        size = int(r.get("size") or 0)
+        digest = (r.get("sha256") or "")[:8]
+        if not size and not digest:
+            continue
+        parts = []
+        if size:
+            parts.append(f"{size / 1048576:.1f} MB")
+        if digest:
+            parts.append(f"sha256 {digest}")
+        zips.append(f"{variant_label(key, env)}: {esc(' · '.join(parts))}")
+    if zips:
+        rows.append("")
+        rows.append("*Zips*")
+        rows.extend(zips)
+        rows.append("Full SHA256 in SAGA\\-Releases \\(saga\\-release\\.json\\)")
+
+    if len(rows) <= 1:
+        return ""
+    out = [("**>" if i == 0 else ">") + row for i, row in enumerate(rows)]
+    out[-1] += "||"
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
 # Post
 # ---------------------------------------------------------------------------
-def build_sections(env, links, features_block):
+def build_sections(env, links, features_block, reports_block="", footer_links=True):
     kernel_ver = env.get("KERNEL_VERSION", "")
     linux_ver = env.get("LINUX_VER", "N/A")
     android_ver = legacy.KERNEL_VERSION_TO_ANDROID.get(kernel_ver, "?")
@@ -170,14 +229,20 @@ def build_sections(env, links, features_block):
         body = "\n".join(f"- {legacy.mdv2_code_escape(e)}" for e in entries)
         sections.append(legacy.truncate("```Changelog\n" + body + "```", legacy.CHANGELOG_MAX_LEN))
 
-    base = f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}"
-    commits_url = f"{base}/commits/main/"
-    run_url = f"{base}/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
-    sections.append(
-        "[Commits]({}) \\| [Workflows]({})".format(
-            legacy.mdv2_escape_url(commits_url), legacy.mdv2_escape_url(run_url)
+    if reports_block:
+        sections.append(reports_block)
+
+    # Commits/Workflows links: only in the short (photo caption) version; in the full
+    # post the same info lives inside the Reports block.
+    if footer_links:
+        base = f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}"
+        commits_url = f"{base}/commits/main/"
+        run_url = f"{base}/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
+        sections.append(
+            "[Commits]({}) \\| [Workflows]({})".format(
+                legacy.mdv2_escape_url(commits_url), legacy.mdv2_escape_url(run_url)
+            )
         )
-    )
 
     group_url = legacy.mdv2_escape_url("https://t.me/sagakernel")
     sections.append(f"Found a bug? Let's discuss it in [SAGA CHAT]({group_url})")
@@ -199,8 +264,9 @@ def main():
 
     features = build_features_block(env, addons_root)
 
-    full = "\n\n".join(build_sections(env, links, features))
-    short = "\n\n".join(build_sections(env, links, ""))
+    reports = build_reports_block(env, links)
+    full = "\n\n".join(build_sections(env, links, features, reports, footer_links=not reports))
+    short = "\n\n".join(build_sections(env, links, "", "", footer_links=True))
     full = legacy.truncate(full, MESSAGE_LIMIT)
     short = legacy.truncate(short, legacy.CAPTION_LIMIT)
 

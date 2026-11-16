@@ -82,6 +82,7 @@ adios_version = ''
 build_system = ''
 compiler = ''
 lto = ''
+reports = {}
 for f in sorted(glob.glob(links_dir + '/*.json')):
     try:
         data = json.load(open(f))
@@ -102,14 +103,17 @@ for f in sorted(glob.glob(links_dir + '/*.json')):
         if not build_system: build_system = data.get('build_system','')
         if not compiler: compiler = data.get('compiler','')
         if not lto: lto = data.get('lto','')
+        if v and l:
+            reports[v] = {'size': data.get('zip_size', 0), 'sha256': data.get('zip_sha256', ''), 'seconds': data.get('build_seconds', 0)}
     except Exception as e:
         print('[warn] ' + str(e), file=sys.stderr)
-print(json.dumps({'links':result,'versions':versions,'linux_ver':linux_ver,'kernel_version':kernel_version,'bore_version':bore_version,'adios_version':adios_version,'build_system':build_system,'compiler':compiler,'lto':lto}))
+print(json.dumps({'links':result,'versions':versions,'linux_ver':linux_ver,'kernel_version':kernel_version,'bore_version':bore_version,'adios_version':adios_version,'build_system':build_system,'compiler':compiler,'lto':lto,'reports':reports}))
 ")
 
 VARIANT_LINKS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['links']))")
 # shellcheck disable=SC2034  # only used by the disabled rich-message block below
 VARIANT_VERSIONS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['versions']))")
+VARIANT_REPORTS_JSON=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['reports']))")
 LINUX_VER=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['linux_ver'])")
 KERNEL_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['kernel_version'])")
 BORE_VERSION=$(echo "$LINKS_PARSED" | python3 -c "import json,sys; print(json.load(sys.stdin)['bore_version'])")
@@ -193,6 +197,8 @@ GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}" \
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}" \
 GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
 VARIANT_LINKS_JSON="$VARIANT_LINKS_JSON" \
+VARIANT_REPORTS_JSON="$VARIANT_REPORTS_JSON" \
+GITHUB_RUN_NUMBER="${GITHUB_RUN_NUMBER:-}" \
 SAGA_ADDONS_DIR="${SAGA_PATCH_DIR}/kernel/addons" \
 python3 "${SAGA_PATCH_DIR}/release/telegram/unified_caption.py" "$UNIFIED_FULL_FILE" "$UNIFIED_SHORT_FILE" \
     || error "Unified post builder failed"

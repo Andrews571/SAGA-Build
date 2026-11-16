@@ -499,10 +499,50 @@ jobs:
   # ======================================================
   # NOTIFY CHANNEL (after all builds)
   # ======================================================
+  # ======================================================
+  # AUTOMATIC CHANGELOG (Release only) — compares with the previous release of the same
+  # channel: Linux/pins/addons/toolchain diffs + "Changelog:" commit trailers.
+  # continue-on-error: if it fails, the manual `changelog` input is used as before.
+  # Details: docs/CHANGELOG-RELEASE.md
+  # ======================================================
+  changelog:
+    name: "Build Changelog"
+    needs: [prepare-matrix, Start-Build]
+    if: inputs.run_mode == 'Release' && always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    outputs:
+      text: ${{ steps.cl.outputs.text }}
+    steps:
+      - name: "Checkout (full history for the commit range)"
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: "Download Variant Links"
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: variant-link-*
+          path: /tmp/variant-links
+          merge-multiple: true
+
+      - name: "Generate changelog"
+        id: cl
+        env:
+          ADDON_PROFILE:   ${{ inputs.addon_profile }}
+          ADDONS:          ${{ needs.prepare-matrix.outputs.addons }}
+          KERNEL_VERSION:  ${{ inputs.kernel_version }}
+          MANUAL:          ${{ inputs.changelog }}
+          LINKS_DIR:       /tmp/variant-links
+          RELEASES_REPO:   Andrews571/SAGA-Releases
+        run: python3 release/changelog.py
+
   notify-channel:
     name: "Notify Channel"
     runs-on: ubuntu-latest
-    needs: [prepare-matrix, Start-Build]
+    needs: [prepare-matrix, Start-Build, changelog]
     if: inputs.run_mode == 'Release' && always()
 
     steps:
@@ -528,7 +568,8 @@ jobs:
           LINKS_DIR:           /tmp/variant-links
           KERNEL_VERSION:      ${{ inputs.kernel_version }}
           ADDONS:              ${{ needs.prepare-matrix.outputs.addons }}
-          CHANGELOG:           ${{ inputs.changelog }}
+          CHANGELOG:           ${{ needs.changelog.outputs.text || inputs.changelog }}
+          GITHUB_RUN_NUMBER:   ${{ github.run_number }}
           ADDON_PROFILE:       ${{ inputs.addon_profile }}
           # Lets channel_post.sh diff "variants selected for this run" against
           # "variants that actually produced a download link", so a matrix
@@ -553,7 +594,7 @@ jobs:
   publish-kernel-release:
     name: "Publish Kernel Release"
     runs-on: ubuntu-latest
-    needs: [prepare-matrix, Start-Build]
+    needs: [prepare-matrix, Start-Build, changelog]
     if: inputs.run_mode == 'Release' && always()
 
     steps:
@@ -588,7 +629,7 @@ jobs:
           ADDONS:             ${{ needs.prepare-matrix.outputs.addons }}
           RUN_MODE:           ${{ inputs.run_mode }}
           KERNEL_VERSION:     ${{ inputs.kernel_version }}
-          CHANGELOG:          ${{ inputs.changelog }}
+          CHANGELOG:          ${{ needs.changelog.outputs.text || inputs.changelog }}
           GITHUB_SHA:         ${{ github.sha }}
           GITHUB_SERVER_URL:  ${{ github.server_url }}
           GITHUB_REPOSITORY:  ${{ github.repository }}

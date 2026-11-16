@@ -23,11 +23,13 @@ Recolhido (como chega):
 │ ┃ Kernel: Linux 6.1.190                  ⌄   │
 │                                              │
 │ ┌ Changelog ───────────────────────────────┐ │
-│ │ - Fix X                                  │ │
-│ │ - Add Y                                  │ │
+│ │ - Updated Linux 6.1.187 → 6.1.190        │ │
+│ │ - Updated ReSukiSU (548d1dd → 5d6d184)   │ │
 │ └──────────────────────────────────────────┘ │
 │                                              │
-│ Commits | Workflows                          │
+│ ┃ 📊 Reports                                 │
+│ ┃ Built in: 22m 10s                          │
+│ ┃ Date: 16 Nov 2026 UTC                  ⌄   │
 │                                              │
 │ Found a bug? Let's discuss it in SAGA CHAT   │
 │                                              │
@@ -64,6 +66,22 @@ Expandido (ao tocar em Features):
 │ ┃ • BBG                                      │
 │ ┃ • NTSync                                   │
 ```
+
+Reports expandido (ao tocar em Reports):
+```
+│ ┃ 📊 Reports                                 │
+│ ┃ Built in: 22m 10s                          │
+│ ┃ Date: 16 Nov 2026 UTC                      │
+│ ┃ Commit: 4fa9131            (link)          │
+│ ┃ Run: #478                  (link)          │
+│ ┃ Profile: Default Addons                    │
+│ ┃                                            │
+│ ┃ Zips                                       │
+│ ┃ Vanilla: 20.2 MB · sha256 3f9a1c2e         │
+│ ┃ ResukiSU: 20.3 MB · sha256 9b8c7d6e        │
+│ ┃ Full SHA256 in SAGA-Releases (saga-release.json) │
+```
+`Commits | Workflows` saiu do rodapé do post completo (agora estão em **Reports**); a versão curta (foto + legenda) mantém o rodapé antigo. O changelog é automático: ver [CHANGELOG-RELEASE.md](CHANGELOG-RELEASE.md).
 
 ## Perfil CC_Addons
 O kernel passa a se chamar **SAGA_CC**, cada variante ganha ` - CC` e as hashtags ganham `#CCKernel`:

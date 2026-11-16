@@ -5,6 +5,19 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M10 — Changelog automático e bloco Reports (T4, T5)
+**Arquivos:** `release/changelog.py` (novo), `release/telegram/unified_caption.py`, `release/telegram/channel_post.sh`, `release/telegram/telegram.sh`, `release/telegram/failure_alert.sh`, `.github/workflows/build.yml`, `docs/CHANGELOG-RELEASE.md` (novo), `docs/POST-TELEGRAM.md`, `docs/ARQUITETURA.md`, `README.md`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| Tarefa | O quê | Por quê | Como |
+|---|---|---|---|
+| T4 | Changelog automático por release | O changelog era digitado à mão e usar os commits direto seria ruído (commits longos e técnicos, de CI e docs) | Novo job `Build Changelog` (`changelog.py`) compara com o release anterior **do mesmo canal** (`ptr-stable`/`ptr-experimental`) e gera linhas curtas: texto manual, trailers `Changelog:` dos commits, `Updated Linux a → b`, `Updated <pin> (a → b)` (diff do `manifest.json` no commit anterior), `Added/Removed <addon>` e `Updated toolchain`. Commits **sem** o trailer são ignorados. Máximo de 10 linhas. `notify-channel` e `publish-kernel-release` usam o texto do job (`needs.changelog.outputs.text`) e, se vazio ou se o job falhar, o campo manual como antes |
+| T5 | Bloco expansível **Reports** no post | Tempo, commit, run e arquivos não apareciam; o rodapé repetia informação | `telegram.sh` grava por variante `zip_size`, `zip_sha256` e `build_seconds` no JSON do link; `channel_post.sh` repassa como `VARIANT_REPORTS_JSON` e `GITHUB_RUN_NUMBER`; `unified_caption.py` monta Reports (Built in, Date UTC, Commit com link, Run com link, Profile e tamanho + 8 primeiros caracteres do sha256 por zip). `Commits | Workflows` saiu do post completo (continua na versão curta de foto + legenda) |
+| T12 (ajuste) | Alerta de falha sem `step "?"` | No primeiro uso o alerta mostrou `step "?"`: o job falhou sem nenhuma etapa marcada como falha | O filtro agora considera etapas `failure`, `timed_out` e `cancelled`; sem nenhuma, a mensagem diz "no failed step recorded (cancelled, timed out or runner problem)" |
+
+**Verificação:** `changelog.py` em um repositório git temporário (commit com trailer, commit sem trailer ignorado, trailer em minúsculas, bump de pin, addons adicionados e removidos, troca de Linux e Clang, sem nada novo, primeiro release, limite de linhas); `unified_caption.py` nos dois perfis; `channel_post.sh` ponta a ponta com `curl` simulado e os campos novos; filtro `jq` do alerta com um JSON no formato da API (etapa falhada, cancelada, sem etapa). Lint local sem erros. **Não testado no GitHub/Telegram real.**
+
+---
+
 ## M9 — Release: teste do zip, alerta de falha, rollback e toolchain (T12, T16, T18, T21)
 **Arquivos:** `release/zip_check.sh`, `release/telegram/failure_alert.sh` (novos), `release/anykernel.sh`, `release/github/github_release.sh`, `release/telegram/channel_post.sh`, `.github/workflows/build.yml`, `docs/ARQUITETURA.md`, `docs/CHANGELOG-MANUTENCAO.md`
 
