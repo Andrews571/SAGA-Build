@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: "Install linters"
         run: |
@@ -65,6 +65,17 @@ jobs:
         run: |
           find . -name '*.py' -not -path './.git/*' -print0 | xargs -0 python3 -m py_compile
           find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+
+      # Third-party actions must be pinned to a full commit SHA (tags can be moved by their author).
+      # Local actions (./.github/actions/...) and "# vX.Y.Z" comments are fine.
+      - name: "❌ Actions pinned by SHA"
+        run: |
+          bad=$(grep -rnE '^\s*(-\s+)?uses:\s+[^./ ][^@ ]*@' .github --include='*.yml' | grep -vE '@[0-9a-f]{40}(\s|$)' || true)
+          if [ -n "$bad" ]; then
+            echo "$bad" | while IFS= read -r l; do echo "::error::action not pinned to a 40-char SHA: ${l#*:}"; done
+            exit 1
+          fi
+          echo "all external actions are pinned"
 
       - name: "❌ addon.meta (every addon documented)"
         run: bash kernel/checkpoint/addon_watch.sh validate

@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Cheap check (git ls-remote, no build): is there any upstream commit that
       # scout.sh would turn into a candidate? If not, skip the 3-variant Warm Run.
@@ -90,7 +90,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: "Compare upstreams with addon.meta"
         env:

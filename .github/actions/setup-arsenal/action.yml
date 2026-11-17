@@ -62,13 +62,13 @@ runs:
 
     - name: "Cache Clang"  # restores if present; auto-saves at end of job if it was missing
       if: startsWith(inputs.build-system, 'Make')
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/clang-cache
         key: clang-${{ steps.clang-key.outputs.clang_variant }}-${{ steps.runner-img.outputs.image }}
 
     - name: "Cache Arsenal"  # restores if present; auto-saves at end of job if it was missing
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/ccache-bin

@@ -5,6 +5,20 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M11 — Actions fixadas por SHA, semeadura de cache e decisões sobre T17/T25 (T10, T24)
+**Arquivos:** `.github/workflows/*.yml` e `.github/actions/*/action.yml` (24 `uses:`), `.github/dependabot.yml` (novo), `.github/workflows/lint.yml`, `.github/actions/restore-caches/action.yml`, `.github/actions/restore-lto-cache/action.yml`, `.github/actions/setup-build-env/action.yml`, `.github/workflows/build.yml`, `docs/CACHES.md` (novo), `docs/ARQUITETURA.md`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| Tarefa | O quê | Por quê | Como |
+|---|---|---|---|
+| T10 | Actions de terceiros fixadas por SHA + Dependabot | `@v7` é uma etiqueta que o autor pode mover; o SHA é imutável | As 5 formas usadas (`checkout`, `download-artifact`, `upload-artifact`, `cache`, `cache/restore`) foram resolvidas pelo `git ls-remote` para o commit que a etiqueta aponta hoje e o comentário guarda a versão exata: checkout v7.0.1, download-artifact v8.0.2, upload-artifact v7.0.2, cache v6.1.0 (todas existem; os commits têm 40+ dias). O código executado não muda. `dependabot.yml`: PR semanal agrupado, `directories: / e /.github/actions/*`, `cooldown 14 dias`, prefixo `chore(deps)` (chega silencioso no Telegram). **Lint** novo passo barra qualquer action externa sem SHA de 40 caracteres |
+| T24 | Semeadura de cache entre irmãos | Branch ou variante sem cache próprio começava do zero (~22 min) | Ver `docs/CACHES.md`. `restore-caches` e `restore-lto-cache` aceitam uma lista de assets de reserva; `setup-build-env` monta a lista (mesma variante em `main` → VANILLA da branch → VANILLA de `main`) com a nova entrada `default-ref`. Não muda nada quando o cache próprio existe |
+| T25 | **Não implementada (decisão)** | Um job-base em série deixaria o tempo total maior que o atual (variantes já em paralelo, ccache já reaproveita o igual) e só economizaria minutos de runner, gratuitos em repo público | Justificativa em `docs/CACHES.md`; revisar se o tempo com cache quente passar de ~15 min |
+| T17 | **Dispensada (decisão do usuário)** | Os perfis `Default_Addons` e `CC_Addons` já separam estável de experimental | `Minimal`/`Custom` serviriam só para bissecção de regressões; retomar se aparecer essa necessidade |
+
+**Verificação:** guarda do Lint testado (passa no repo; falha com `@v7`); nomes de fallback para 4 combinações de variante/branch; os scripts reais de restore (extraídos dos YAML) com `gh` simulado: cache próprio, semeado, só o da branch padrão, nada, próprio corrompido caindo para o próximo, sem release de cache, e o equivalente do LTO. Lint local sem erros. Usei um `zstd` de teste no lugar do real. **Não rodei no GitHub.**
+
+---
+
 ## M10 — Changelog automático e bloco Reports (T4, T5)
 **Arquivos:** `release/changelog.py` (novo), `release/telegram/unified_caption.py`, `release/telegram/channel_post.sh`, `release/telegram/telegram.sh`, `release/telegram/failure_alert.sh`, `.github/workflows/build.yml`, `docs/CHANGELOG-RELEASE.md` (novo), `docs/POST-TELEGRAM.md`, `docs/ARQUITETURA.md`, `README.md`, `docs/CHANGELOG-MANUTENCAO.md`
 

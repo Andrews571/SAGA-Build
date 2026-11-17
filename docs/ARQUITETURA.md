@@ -23,6 +23,7 @@ Este repo **não tem código-fonte do kernel**: só os scripts e workflows que b
 |---|---|
 | `.github/workflows/` | `build`, `pin-scout`, `notify`, `lint`, `keep-alive`, `kernel-source`, `mirror-reference` |
 | `.github/actions/` | ações compostas (restore/save de caches, setup-arsenal, setup-build-env) |
+| `.github/dependabot.yml` | atualização semanal das actions (PR agrupado) |
 | `setup/` | caminhos, dependências, ccache, clang, `runner_prep.sh` |
 | `build/` | `make.sh` (compilação), `ccache_report.sh` (relatório do ccache) |
 | `kernel/addons/<nome>/` | addons (ver `ADDONS.md`) |
@@ -31,6 +32,7 @@ Este repo **não tem código-fonte do kernel**: só os scripts e workflows que b
 | `release/telegram/` | posts do Telegram |
 
 ## Segurança dos workflows
+- **Actions de terceiros fixadas por SHA** (`uses: actions/checkout@<sha> # v7.0.1`). O Lint barra `@v7` solto; o Dependabot abre um PR semanal agrupado (`.github/dependabot.yml`, com 14 dias de carência) e o comentário `# vX.Y.Z` é o que ele atualiza.
 - Nunca use `${{ ... }}` dentro de `run:`: passe o valor por `env:` e use `"${VAR}"`.
 - `permissions: contents: read` por padrão; eleve só no job que precisa.
 - O workflow **Lint** barra erros de sintaxe/expressão; avisos só aparecem no log.

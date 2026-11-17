@@ -5,9 +5,12 @@ inputs:
   asset-name:
     description: "Release asset filename, e.g. lto-data-6.1-VANILLA-NEUTRON-THIN-main.tar.zst"
     required: true
+  fallback-asset-names:
+    description: "Comma-separated asset names tried, in order, when asset-name does not exist (seed from a sibling cache; the ThinLTO cache is content-addressed)."
+    required: false
+    default: ""
   gh-token:
     required: true
-
 runs:
   using: composite
   steps:
@@ -16,27 +19,30 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.gh-token }}
         IN_ASSET_NAME: ${{ inputs.asset-name }}
+        IN_FALLBACKS: ${{ inputs.fallback-asset-names }}
+        REPO: ${{ github.repository }}
       run: |
-        ASSET_NAME="${IN_ASSET_NAME}"
-
-        if gh release view cache --repo "${{ github.repository }}" > /dev/null 2>&1; then
-          echo "Checking for LTO cache asset: ${ASSET_NAME}"
-          if gh release download cache \
-            --repo "${{ github.repository }}" \
-            --pattern "${ASSET_NAME}" \
-            --dir /tmp/ 2>/dev/null; then
-            if [ -f "/tmp/${ASSET_NAME}" ]; then
-              echo "Restoring LTO cache from ${ASSET_NAME}..."
+        if gh release view cache --repo "$REPO" > /dev/null 2>&1; then
+          candidates=("${IN_ASSET_NAME}")
+          IFS=',' read -ra fb <<< "${IN_FALLBACKS:-}"
+          for f in "${fb[@]}"; do [ -n "$f" ] && [ "$f" != "$IN_ASSET_NAME" ] && candidates+=("$f"); done
+          for ASSET_NAME in "${candidates[@]}"; do
+            echo "Checking for LTO cache asset: ${ASSET_NAME}"
+            rm -f "/tmp/${ASSET_NAME}"
+            if gh release download cache --repo "$REPO" --pattern "${ASSET_NAME}" --dir /tmp/ 2>/dev/null && [ -f "/tmp/${ASSET_NAME}" ]; then
+              label="own cache"
+              [ "$ASSET_NAME" != "$IN_ASSET_NAME" ] && label="SEEDED from sibling cache"
+              echo "Restoring LTO cache from ${ASSET_NAME} (${label})..."
               sudo mkdir -p /dev/shm/ldcache
-              sudo tar --zstd -xf "/tmp/${ASSET_NAME}" -C / && {
+              if sudo tar --zstd -xf "/tmp/${ASSET_NAME}" -C /; then
                 rm -f "/tmp/${ASSET_NAME}"
-                echo "LTO cache restored ✅"
+                echo "LTO cache restored ✅ (${label})"
+                [ "$label" != "own cache" ] && echo "::notice title=LTO cache::own cache missing or unusable — seeded from ${ASSET_NAME}"
                 exit 0
-              } || {
-                echo "❌ Failed to extract LTO cache — starting fresh"
-                rm -f "/tmp/${ASSET_NAME}"
-              }
+              fi
+              echo "❌ Failed to extract ${ASSET_NAME} — trying the next candidate"
+              rm -f "/tmp/${ASSET_NAME}"
             fi
-          fi
+          done
         fi
-        echo "⚠️ No LTO cache found (${ASSET_NAME}) — starting fresh"
+        echo "⚠️ No LTO cache found (${IN_ASSET_NAME}) — starting fresh"

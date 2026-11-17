@@ -87,7 +87,7 @@ The **Pin Scout** runs every 6 hours and keeps the root-solution and SuSFS pins 
 
 ## 📚 Docs
 
-- [Arquitetura](docs/ARQUITETURA.md) · [Como adicionar um addon](docs/ADDONS.md) · [Lista de addons](docs/ADDONS-LISTA.md) · [Post do Telegram](docs/POST-TELEGRAM.md) · [Changelog dos releases](docs/CHANGELOG-RELEASE.md) · [Pin Scout](docs/PIN-SCOUT.md) · [Pins verificados](docs/PINS.md) · [Changelog de manutenção](docs/CHANGELOG-MANUTENCAO.md)
+- [Arquitetura](docs/ARQUITETURA.md) · [Como adicionar um addon](docs/ADDONS.md) · [Lista de addons](docs/ADDONS-LISTA.md) · [Post do Telegram](docs/POST-TELEGRAM.md) · [Changelog dos releases](docs/CHANGELOG-RELEASE.md) · [Caches](docs/CACHES.md) · [Pin Scout](docs/PIN-SCOUT.md) · [Pins verificados](docs/PINS.md) · [Changelog de manutenção](docs/CHANGELOG-MANUTENCAO.md)
 
 ---
 

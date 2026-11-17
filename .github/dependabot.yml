@@ -1,0 +1,19 @@
+# Keeps the GitHub Actions used by the workflows and composite actions up to date.
+# Actions are pinned by commit SHA (the "# vX.Y.Z" comment is what Dependabot bumps).
+# Dependabot opens ONE grouped PR per week; merge it after the Lint run passes.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 14     # ignore versions published in the last 2 weeks (supply-chain safety)
+    commit-message:
+      prefix: "chore(deps)"   # "chore(deps): bump ..." arrives silent in the Telegram push notice
+    groups:
+      github-actions:
+        patterns: ["*"]

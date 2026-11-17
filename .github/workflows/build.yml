@@ -209,7 +209,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Fails in seconds (instead of after minutes of setup) when the chosen
       # kernel version has no patch folder — same condition build.sh checks late.
@@ -354,7 +354,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # v6+ persists creds via a global includeIf.gitdir config pointing
           # at a file under $RUNNER_TEMP, not .git/config in this repo — so
@@ -387,6 +387,7 @@ jobs:
           kernel-variant:  ${{ matrix.kernel_variant }}
           susfs:          ${{ matrix.susfs }}
           lto-mode:     ${{ inputs.lto_mode }}
+          default-ref:    ${{ github.event.repository.default_branch }}
           gh-token:       ${{ secrets.PERSONAL_TOKEN }}
 
       - name: "Disk Usage"
@@ -408,7 +409,7 @@ jobs:
         # this is what lets a fork with zero secrets configured still get
         # its build output, instead of it only ever reaching Telegram.
         if: always() && steps.build.outcome == 'success' && env.ZIP_PATH != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_PATH }}
@@ -490,7 +491,7 @@ jobs:
 
       - name: "Upload Variant Link"  # for channel post aggregation
         if: inputs.run_mode == 'Release'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: variant-link-${{ matrix.kernel_variant }}${{ matrix.susfs && '-susfs' || '' }}
           path: variant-links/
@@ -516,13 +517,13 @@ jobs:
       text: ${{ steps.cl.outputs.text }}
     steps:
       - name: "Checkout (full history for the commit range)"
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: "Download Variant Links"
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: variant-link-*
           path: /tmp/variant-links
@@ -547,10 +548,10 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: "Download Variant Links"
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: variant-link-*
           path: /tmp/variant-links
@@ -599,12 +600,12 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: "Download Kernel Zips"
         # os zips ja sobem como artefatos (nome do artefato = nome do zip)
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: SAGA*.zip
           path: /tmp/kernels
@@ -613,7 +614,7 @@ jobs:
       # toolchain (Clang/LTO) for saga-release.json comes from the per-variant link JSONs
       - name: "Download Variant Links"
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: variant-link-*
           path: /tmp/variant-links
@@ -650,7 +651,7 @@ jobs:
       actions: read     # list the failed jobs of this run
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: "Send failure alert"
         env:
