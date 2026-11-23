@@ -196,6 +196,10 @@ run_addons() {
     if [[ ",${ADDONS}," == *,nomount,* ]] && [[ ",${ADDONS}," == *,zeromount,* ]]; then
         error "Addon conflict: 'nomount' and 'zeromount' both redirect VFS paths and cannot be combined — pick one."
     fi
+    if [[ ",${ADDONS}," == *,eevdf-bore,* ]] && \
+       { [[ ",${ADDONS}," == *,bore,* ]] || [[ ",${ADDONS}," == *,bore-warp,* ]]; }; then
+        error "Addon conflict: 'eevdf-bore' replaces the CFS-based 'bore'/'bore-warp' scheduler stack — combine none of them."
+    fi
     if [ "${KERNEL_VARIANT:-}" = "VANILLA" ]; then
         # Both zeromount and nomount exist to hide root/mount artifacts
         # from detection — meaningless on VANILLA, which has no root

@@ -64,12 +64,13 @@ on:
           - "nomount"
           - "zeromount"
       addon_profile:
-        description: "Addon Profile (Default: ADIOS | CC: ADIOS-Clutch + CC Governor + BORE-WARP + Clutch-Signals)"
+        description: "Addon Profile (Default: ADIOS | CC: ADIOS-Clutch + CC Governor + BORE-WARP + Clutch-Signals | Test: Default with EEVDF + BORE 7.0 instead of BORE, no Release)"
         type: choice
         default: "Default_Addons"
         options:
           - "Default_Addons"
           - "CC_Addons"
+          - "Test_Addons"
       tick_rate:
         description: "Tick Rate (CONFIG_HZ)"
         type: choice
@@ -228,6 +229,7 @@ jobs:
         env:
           SUSFS_ENABLED: ${{ inputs.susfs == 'enable' }}
           ADDON_PROFILE: ${{ inputs.addon_profile }}
+          RUN_MODE: ${{ inputs.run_mode }}
           IN_VANILLA: ${{ inputs.vanilla }}
           IN_RESUKISU: ${{ inputs.resukisu }}
           IN_SUKISU: ${{ inputs.sukisu }}
@@ -262,12 +264,23 @@ jobs:
           # these addons already sets its own default: ADIOS/ADIOS-Clutch via
           # CONFIG_MQ_IOSCHED_DEFAULT_ADIOS + boot enforcer, cc-governor via
           # its delayed cpufreq enforcer). Order matters: bore-warp after bore.
+          # CPU scheduler: BORE (CFS) everywhere, except Test_Addons which swaps
+          # it for EEVDF + BORE 7.0 (eevdf-bore is exclusive with bore/bore-warp).
+          SCHED_ADDON="bore"
           if [ "${ADDON_PROFILE}" = "CC_Addons" ]; then
             PROFILE_ADDONS="bore-warp,clutch-signals,adios-clutch,cc-governor"
+          elif [ "${ADDON_PROFILE}" = "Test_Addons" ]; then
+            SCHED_ADDON="eevdf-bore"
+            PROFILE_ADDONS="adios"
+            # Experimental scheduler core: never published to a release channel.
+            if [ "${RUN_MODE}" = "Release" ]; then
+              echo "::error title=Test_Addons cannot be released::Test_Addons (EEVDF + BORE 7.0) is not boot-validated yet. Use run_mode Build/Warm Run/Dry Run."
+              exit 1
+            fi
           else
             PROFILE_ADDONS="adios"
           fi
-          ADDONS="bbrv3,bbg,bore,${PROFILE_ADDONS},ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${ADDON_REKERNEL}droidspaces,${ADDON_KASUMI}lz4zstd,lz4kd,${ADDON_MOUNTLESS}${ADDON_MGLRU}${ADDON_LE9UO}${ADDON_KCOMPRESSD}${ADDON_ZRAM_IR}"
+          ADDONS="bbrv3,bbg,${SCHED_ADDON},${PROFILE_ADDONS},ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${ADDON_REKERNEL}droidspaces,${ADDON_KASUMI}lz4zstd,lz4kd,${ADDON_MOUNTLESS}${ADDON_MGLRU}${ADDON_LE9UO}${ADDON_KCOMPRESSD}${ADDON_ZRAM_IR}"
           echo "addons=${ADDONS}" >> $GITHUB_OUTPUT
           # "/" -> "-" so this is safe to use as a filesystem path component
           # (cache asset filenames) wherever ref_name is needed downstream.
