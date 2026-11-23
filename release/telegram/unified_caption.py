@@ -45,6 +45,8 @@ def is_cc(env):
 
 
 def kernel_name(env):
+    if env.get("ADDON_PROFILE", "").strip() == "Test_Addons":
+        return "SAGA_TEST"
     return "SAGA_CC" if is_cc(env) else "SAGA"
 
 

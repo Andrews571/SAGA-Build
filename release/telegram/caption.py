@@ -53,6 +53,7 @@ ADDON_DISPLAY_NAMES = {
     "zeromount":   "ZeroMount",
     "nomount":     "NoMount",
     "bore":        "BORE",
+    "eevdf-bore":  "EEVDF+BORE",
     "adios":       "ADIOS",
     "kasumi":      "Kasumi",
     "ntsync":      "NTSync",
@@ -82,7 +83,7 @@ TOGGLE_ADDON_ORDER = ["rekernel", "droidspaces", "lz4zstd", "lz4kd", "mglru", "l
 # build_telegraph_content() for the channel post's Telegraph page) —
 # they're the always-on, version-worth-mentioning features, the rest are
 # plain on/off toggles. Order here is display order in that block.
-FEATURE_ADDON_TOKENS = ["bore", "adios", "bbrv3", "bbg", "ntsync"]
+FEATURE_ADDON_TOKENS = ["bore", "eevdf-bore", "adios", "bbrv3", "bbg", "ntsync"]
 
 
 def mdv2_escape(s):
@@ -152,6 +153,9 @@ def build_feature_lines(env):
     if "bore" in addon_tokens:
         v = env.get("BORE_VERSION", "").strip().lstrip("v")
         lines.append(f"Bore - {v} (backport)" if v else "Bore (backport)")
+    if "eevdf-bore" in addon_tokens:
+        v = env.get("BORE_VERSION", "").strip().lstrip("v")
+        lines.append(f"EEVDF + Bore - {v} (backport)" if v else "EEVDF + Bore (backport)")
     if "adios" in addon_tokens:
         v = env.get("ADIOS_VERSION", "").strip().lstrip("v")
         lines.append(f"ADIOS - {v}" if v else "ADIOS")
@@ -199,7 +203,8 @@ def build_blocks(env):
                         env.get("GITHUB_RUN_ID", ""))
     run_id          = env.get("GITHUB_RUN_ID", "")
 
-    kernel_name = "SAGA_CC" if env.get("ADDON_PROFILE", "").strip() == "CC_Addons" else "SAGA"
+    profile = env.get("ADDON_PROFILE", "").strip()
+    kernel_name = "SAGA_TEST" if profile == "Test_Addons" else ("SAGA_CC" if profile == "CC_Addons" else "SAGA")
     block_saga = (
         f"```{kernel_name}\n"
         f"Linux        : {linux_ver}\n"
