@@ -1,0 +1,217 @@
+From ccb66190bc19593fe32f90b33f07121dd052ded6 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 05:50:42 -0300
+Subject: [PATCH] sched/fair: protect_slice, PREEMPT_SHORT, PLACE_REL_DEADLINE
+ (6.12/6.15 semantics)
+
+slice/rel_deadline share KABI slot 4 (u32+u32): layout unchanged.
+Delayed dequeue and custom slices intentionally not included.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DREwy12p2CD14uT4q9ENmB
+---
+ include/linux/sched.h   |  3 +-
+ kernel/sched/core.c     |  1 +
+ kernel/sched/fair.c     | 82 +++++++++++++++++++++++++++++++++++++----
+ kernel/sched/features.h | 12 ++++++
+ 4 files changed, 90 insertions(+), 8 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index e05d62d3c..b62e5e031 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -588,7 +588,8 @@ struct sched_entity {
+ 	ANDROID_KABI_USE(1, u64 deadline);
+ 	ANDROID_KABI_USE(2, u64 min_deadline);
+ 	ANDROID_KABI_USE(3, s64 vlag);
+-	ANDROID_KABI_USE(4, u64 slice);
++	/* request size (ns) and "deadline is stored relative to vruntime" flag */
++	ANDROID_KABI_USE2(4, u32 slice, u32 rel_deadline);
+ };
+ 
+ struct sched_rt_entity {
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index fba9ce8c0..730dbc6b5 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -4552,6 +4552,7 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
+ 	p->se.nr_migrations		= 0;
+ 	p->se.vruntime			= 0;
+ 	p->se.vlag			= 0;
++	p->se.rel_deadline		= 0;
+ 	p->se.deadline			= 0;
+ 	p->se.min_deadline		= 0;
+ 	INIT_LIST_HEAD(&p->se.group_node);
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index e4e753456..911328042 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -827,6 +827,26 @@ struct sched_entity *__pick_first_entity(struct cfs_rq *cfs_rq)
+ 	return __node_2_se(left);
+ }
+ 
++/*
++ * HACK, stash a copy of deadline at the point of pick in vlag,
++ * which isn't used until dequeue.
++ */
++static inline void set_protect_slice(struct sched_entity *se)
++{
++	se->vlag = se->deadline;
++}
++
++static inline bool protect_slice(struct sched_entity *se)
++{
++	return se->vlag == se->deadline;
++}
++
++static inline void cancel_protect_slice(struct sched_entity *se)
++{
++	if (protect_slice(se))
++		se->vlag = se->deadline + 1;
++}
++
+ /*
+  * Earliest Eligible Virtual Deadline First
+  *
+@@ -851,7 +871,7 @@ static struct sched_entity *__pick_eevdf(struct cfs_rq *cfs_rq)
+ 	 * Once selected, run a task until it either becomes non-eligible or
+ 	 * until it gets a new slice. See the HACK in set_next_entity().
+ 	 */
+-	if (sched_feat(RUN_TO_PARITY) && curr && curr->vlag == curr->deadline)
++	if (sched_feat(RUN_TO_PARITY) && curr && protect_slice(curr))
+ 		return curr;
+ 
+ 	while (node) {
+@@ -1106,6 +1126,37 @@ static void update_tg_load_avg(struct cfs_rq *cfs_rq)
+ }
+ #endif /* CONFIG_SMP */
+ 
++/*
++ * The tree is ordered by vruntime here, but the preemption heuristics (as in
++ * mainline >= 6.12) compare virtual deadlines.
++ */
++static inline bool deadline_before(const struct sched_entity *a,
++				   const struct sched_entity *b)
++{
++	return (s64)(a->deadline - b->deadline) < 0;
++}
++
++static inline bool do_preempt_short(struct cfs_rq *cfs_rq,
++				    struct sched_entity *pse, struct sched_entity *se)
++{
++	if (!sched_feat(PREEMPT_SHORT))
++		return false;
++
++	if (pse->slice >= se->slice)
++		return false;
++
++	if (!entity_eligible(cfs_rq, pse))
++		return false;
++
++	if (deadline_before(pse, se))
++		return true;
++
++	if (!entity_eligible(cfs_rq, se))
++		return true;
++
++	return false;
++}
++
+ /*
+  * Update the current task's runtime statistics.
+  */
+@@ -4942,6 +4993,12 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 				       &vruntime);
+ 	se->vruntime = vruntime - lag;
+ 
++	if (sched_feat(PLACE_REL_DEADLINE) && se->rel_deadline) {
++		se->deadline += se->vruntime;
++		se->rel_deadline = 0;
++		return;
++	}
++
+ 	/*
+ 	 * When joining the competition; the existing tasks will be,
+ 	 * on average, halfway through their slice, as such start tasks
+@@ -5073,6 +5130,10 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 
+ 	/* Remember the lag so wakeup/migration/restore can re-place us. */
+ 	update_entity_lag(cfs_rq, se);
++	if (sched_feat(PLACE_REL_DEADLINE) && !(flags & DEQUEUE_SLEEP)) {
++		se->deadline -= se->vruntime;
++		se->rel_deadline = 1;
++	}
+ 
+ 	clear_buddies(cfs_rq, se);
+ 
+@@ -5113,6 +5174,8 @@ void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
+ 		update_stats_wait_end_fair(cfs_rq, se);
+ 		__dequeue_entity(cfs_rq, se);
+ 		update_load_avg(cfs_rq, se, UPDATE_TG);
++
++		set_protect_slice(se);
+ 	}
+ 
+ 	update_stats_curr_start(cfs_rq, se);
+@@ -5135,11 +5198,6 @@ void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
+ 
+ 	se->prev_sum_exec_runtime = se->sum_exec_runtime;
+ 
+-	/*
+-	 * HACK, stash a copy of deadline at the point of pick in vlag,
+-	 * which isn't used until dequeue. Used by RUN_TO_PARITY.
+-	 */
+-	se->vlag = se->deadline;
+ }
+ EXPORT_SYMBOL_GPL(set_next_entity);
+ 
+@@ -7803,8 +7861,11 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+ 	 * Preempt an idle group in favor of a non-idle group (and don't preempt
+ 	 * in the inverse case).
+ 	 */
+-	if (cse_is_idle && !pse_is_idle)
++	if (cse_is_idle && !pse_is_idle) {
++		/* a non-idle entity preempting an idle one: no slice protection */
++		cancel_protect_slice(se);
+ 		goto preempt;
++	}
+ 	if (cse_is_idle != pse_is_idle)
+ 		return;
+ 
+@@ -7816,6 +7877,13 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+ 	if (ignore)
+ 		return;
+ 
++	/*
++	 * If @p has a shorter slice than current and is eligible, override
++	 * current's slice protection in order to allow preemption.
++	 */
++	if (do_preempt_short(cfs_rq_of(se), pse, se))
++		cancel_protect_slice(se);
++
+ 	/*
+ 	 * EEVDF: preempt if the woken entity is the one that would be picked
+ 	 * right now (eligible, earliest virtual deadline).
+diff --git a/kernel/sched/features.h b/kernel/sched/features.h
+index 4ec8b4f49..61c35fd3e 100644
+--- a/kernel/sched/features.h
++++ b/kernel/sched/features.h
+@@ -99,3 +99,15 @@ SCHED_FEAT(LATENCY_WARN, false)
+  * 0-lag point or until is has exhausted it's slice.
+  */
+ SCHED_FEAT(RUN_TO_PARITY, true)
++
++/*
++ * Allow tasks with a shorter slice to disregard the current task's
++ * RUN_TO_PARITY protection (only matters with differing slices).
++ */
++SCHED_FEAT(PREEMPT_SHORT, true)
++
++/*
++ * Keep the virtual deadline relative to vruntime across dequeue/enqueue
++ * that is not a sleep (migration, nice change, cgroup move).
++ */
++SCHED_FEAT(PLACE_REL_DEADLINE, true)
+-- 
+2.43.0
+

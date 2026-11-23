@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=eevdf-bore
+desc=EEVDF (nivel 6.6/6.12) + BORE 7.0 para android14-6.1, KMI-neutro
+mode=local
+upstream=https://github.com/firelzrd/bore-scheduler
+license=GPL-2.0
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=serie de 4 patches; incompativel com bore/bore-warp; nao testado em boot
