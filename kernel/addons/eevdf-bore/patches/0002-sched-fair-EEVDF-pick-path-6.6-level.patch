@@ -1,7 +1,7 @@
-From 0ce65c0646d56997fe19b8c9ef87f53ee8a43aeb Mon Sep 17 00:00:00 2001
+From d4d75dd7a4af3994f1559118f16b06392f6174e5 Mon Sep 17 00:00:00 2001
 From: claude <noreply@anthropic.com>
 Date: Fri, 20 Nov 2026 00:48:16 -0300
-Subject: [PATCH] sched/fair: EEVDF pick path (mainline v6.6 level)
+Subject: [PATCH 2/4] sched/fair: EEVDF pick path (mainline v6.6 level)
 
 Augmented rbtree with min_deadline, pick_eevdf, entity_eligible,
 place_entity with PLACE_LAG, update_deadline, yield deadline push,
@@ -1158,10 +1158,10 @@ index 65f21c687..4ec8b4f49 100644
 + */
 +SCHED_FEAT(RUN_TO_PARITY, true)
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 362b537c0..abcc8dde3 100644
+index 78247b9fb..759b4b53c 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -2193,6 +2193,7 @@ extern const u32		sched_prio_to_wmult[40];
+@@ -2202,6 +2202,7 @@ extern const u32		sched_prio_to_wmult[40];
  #endif
  
  #define ENQUEUE_WAKEUP_SYNC	0x80
@@ -1169,7 +1169,7 @@ index 362b537c0..abcc8dde3 100644
  
  #define RETRY_TASK		((void *)-1UL)
  
-@@ -2492,6 +2493,8 @@ extern const_debug unsigned int sysctl_sched_nr_migrate;
+@@ -2501,6 +2502,8 @@ extern const_debug unsigned int sysctl_sched_nr_migrate;
  extern const_debug unsigned int sysctl_sched_migration_cost;
  
  #ifdef CONFIG_SCHED_DEBUG

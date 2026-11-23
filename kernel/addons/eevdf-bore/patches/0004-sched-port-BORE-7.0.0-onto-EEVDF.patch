@@ -1,4 +1,4 @@
-From edbb4fbe5a38b5d059f15a37ed6b82c673c4753c Mon Sep 17 00:00:00 2001
+From b76b376799e695dcf300b42b188c824517264cbd Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Mon, 23 Nov 2026 09:28:11 -0300
 Subject: [PATCH 4/4] sched: port BORE 7.0.0 onto EEVDF (6.1 / KMI-neutral)
@@ -1315,10 +1315,10 @@ index 911328042..1238519c4 100644
  	if (task_on_rq_queued(p)) {
  		/*
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index abcc8dde3..80f21d24d 100644
+index 759b4b53c..3f9f362f4 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -2493,6 +2493,10 @@ extern const_debug unsigned int sysctl_sched_nr_migrate;
+@@ -2502,6 +2502,10 @@ extern const_debug unsigned int sysctl_sched_nr_migrate;
  extern const_debug unsigned int sysctl_sched_migration_cost;
  
  #ifdef CONFIG_SCHED_DEBUG

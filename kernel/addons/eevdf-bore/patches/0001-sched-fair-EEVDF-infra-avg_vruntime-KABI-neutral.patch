@@ -1,8 +1,8 @@
-From 2691e6a3aa07a3391fc9c3ebd5ccf469831bd328 Mon Sep 17 00:00:00 2001
+From e2ce86fa925fc675edc99823abc9c2f7d05a499c Mon Sep 17 00:00:00 2001
 From: claude <noreply@anthropic.com>
 Date: Fri, 20 Nov 2026 00:28:23 -0300
-Subject: [PATCH] sched/fair: EEVDF infra (avg_vruntime, KABI-neutral layout),
- drop last/skip buddies
+Subject: [PATCH 1/4] sched/fair: EEVDF infra (avg_vruntime, KABI-neutral
+ layout), drop last/skip buddies
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01DREwy12p2CD14uT4q9ENmB
@@ -11,8 +11,8 @@ Claude-Session: https://claude.ai/code/session_01DREwy12p2CD14uT4q9ENmB
  kernel/sched/debug.c    |   2 +
  kernel/sched/fair.c     | 182 +++++++++++++++++++++-------------------
  kernel/sched/features.h |   7 --
- kernel/sched/sched.h    |   9 +-
- 5 files changed, 108 insertions(+), 101 deletions(-)
+ kernel/sched/sched.h    |  14 ++++
+ 5 files changed, 115 insertions(+), 99 deletions(-)
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index fa14590d6..e05d62d3c 100644
@@ -370,25 +370,32 @@ index 5ca310230..65f21c687 100644
   * Consider buddies to be cache hot, decreases the likeliness of a
   * cache buddy being migrated away, increases cache locality.
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 848680566..362b537c0 100644
+index 848680566..78247b9fb 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -583,8 +583,12 @@ struct cfs_rq {
+@@ -583,8 +583,21 @@ struct cfs_rq {
  	 */
  	struct sched_entity	*curr;
  	struct sched_entity	*next;
--	struct sched_entity	*last;
--	struct sched_entity	*skip;
 +	/*
 +	 * EEVDF: replaces the old last/skip buddies. Same size and offset, so
-+	 * struct cfs_rq (embedded in struct rq) keeps its layout.
++	 * struct cfs_rq (embedded in struct rq) keeps its layout. genksyms
++	 * (modversions) must keep seeing the old fields: struct cfs_rq is
++	 * reachable from task_struct/rq, so changing it would alter the CRC of
++	 * wake_up_process(), set_user_nice(), runqueues, ... and vendor modules
++	 * would refuse to load (KMI break).
 +	 */
++#ifdef __GENKSYMS__
+ 	struct sched_entity	*last;
+ 	struct sched_entity	*skip;
++#else
 +	s64			avg_vruntime;
 +	unsigned long		avg_load;
++#endif
  
  #ifdef	CONFIG_SCHED_DEBUG
  	unsigned int		nr_spread_over;
-@@ -2809,6 +2813,7 @@ static inline void resched_latency_warn(int cpu, u64 latency) {}
+@@ -2809,6 +2822,7 @@ static inline void resched_latency_warn(int cpu, u64 latency) {}
  #endif /* CONFIG_SCHED_DEBUG */
  
  extern void init_cfs_rq(struct cfs_rq *cfs_rq);
