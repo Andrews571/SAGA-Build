@@ -14,7 +14,7 @@ workflow → Addon Profile `Test_Addons` (= Default_Addons com este addon no lug
 Fora do escopo: delayed dequeue, custom slice, árvore ordenada por deadline do 6.12.
 
 ## KMI
-Estado novo usa o padding `ANDROID_KABI_RESERVE` (sched_entity 1-4, task_struct 4-8) e
+Estado novo usa o padding `ANDROID_KABI_RESERVE` (sched_entity 1-4, sched_rt_entity 1-4, signal_struct 1; task_struct fica livre p/ o patch sysvipc) e
 troca de lugar `last/skip` ↔ `avg_vruntime/avg_load` no `cfs_rq`. Conferido com
 `-fdump-record-layouts`: tamanhos e offsets de `sched_entity`(320), `cfs_rq`(384),
 `rq`(3840), `task_struct`(4800) iguais à base.

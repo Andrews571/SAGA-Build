@@ -1,39 +1,43 @@
-From d283e43c677e50e4e2aa572c1a8b1b7f760f0c4d Mon Sep 17 00:00:00 2001
-From: claude <noreply@anthropic.com>
-Date: Fri, 20 Nov 2026 05:57:57 -0300
-Subject: [PATCH] sched: port BORE 7.0.0 onto EEVDF (6.1 / KMI-neutral)
+From edbb4fbe5a38b5d059f15a37ed6b82c673c4753c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 23 Nov 2026 09:28:11 -0300
+Subject: [PATCH 4/4] sched: port BORE 7.0.0 onto EEVDF (6.1 / KMI-neutral)
 
-bore_ctx lives in task_struct ANDROID_KABI slots 4-8 (sizeof unchanged).
+BORE state lives in free KABI slots: per-task fields in sched_rt_entity
+slots 1-4, thread-group cache in signal_struct slot 1. task_struct KABI
+slots are left untouched so SAGA's sysvipc KABI patch (slots 6-8) can
+apply on top. sizeof(task_struct) unchanged.
 Keeps SAGA's sched_bore_topapp_discount / _smooth_boost. DELAY_ZERO and
 delayed-dequeue paths of upstream are not part of this port.
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01DREwy12p2CD14uT4q9ENmB
 ---
- include/linux/sched.h        |  32 ++
+ include/linux/sched.h        |  31 ++
  include/linux/sched/bore.h   |  64 ++++
+ include/linux/sched/signal.h |   5 +
  init/Kconfig                 |  10 +
  kernel/Kconfig.hz            |   8 +
  kernel/exit.c                |   4 +
  kernel/fork.c                |  13 +
  kernel/futex/waitwake.c      |  10 +
  kernel/sched/Makefile        |   1 +
- kernel/sched/bore.c          | 583 +++++++++++++++++++++++++++++++++++
+ kernel/sched/bore.c          | 582 +++++++++++++++++++++++++++++++++++
  kernel/sched/build_utility.c |   4 +
  kernel/sched/core.c          |  12 +
  kernel/sched/debug.c         |  50 +++
  kernel/sched/fair.c          | 150 ++++++++-
  kernel/sched/sched.h         |   4 +
- 14 files changed, 938 insertions(+), 7 deletions(-)
+ 15 files changed, 941 insertions(+), 7 deletions(-)
  create mode 100644 include/linux/sched/bore.h
  create mode 100644 kernel/sched/bore.c
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index b62e5e031..257c0c498 100644
+index b62e5e031..e5e8a0728 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -751,6 +751,29 @@ struct kmap_ctrl {
- #endif
+@@ -592,6 +592,29 @@ struct sched_entity {
+ 	ANDROID_KABI_USE2(4, u32 slice, u32 rel_deadline);
  };
  
 +#ifdef CONFIG_SCHED_BORE
@@ -59,33 +63,31 @@ index b62e5e031..257c0c498 100644
 +} __aligned(8);
 +#endif /* CONFIG_SCHED_BORE */
 +
- struct task_struct {
- #ifdef CONFIG_THREAD_INFO_IN_TASK
- 	/*
-@@ -1564,11 +1587,20 @@ struct task_struct {
- 		/* Save user-dumpable when mm goes away */
- 		unsigned	user_dumpable:1;
- 		});
-+#ifdef CONFIG_SCHED_BORE
-+	/* BORE 7.0 per-task state lives in the former KABI padding (5 x u64) */
-+	ANDROID_KABI_USE(4, u64 bore_burst_time);
-+	ANDROID_KABI_USE(5, u64 bore_credit_sleep);
-+	ANDROID_KABI_USE(6, struct bore_state bore_ms);
-+	ANDROID_KABI_USE(7, struct bore_bc bore_subtree);
-+	ANDROID_KABI_USE(8, struct bore_bc bore_group);
-+#else
- 	ANDROID_KABI_RESERVE(4);
- 	ANDROID_KABI_RESERVE(5);
- 	ANDROID_KABI_RESERVE(6);
- 	ANDROID_KABI_RESERVE(7);
- 	ANDROID_KABI_RESERVE(8);
-+#endif
+ struct sched_rt_entity {
+ 	struct list_head		run_list;
+ 	unsigned long			timeout;
+@@ -609,10 +632,18 @@ struct sched_rt_entity {
+ 	struct rt_rq			*my_q;
+ #endif
  
- 	/*
- 	 * New fields for task_struct should be added above here, so that
++#ifdef CONFIG_SCHED_BORE
++	/* BORE 7.0 per-task state (accessed as p->rt.bore_*) */
++	ANDROID_KABI_USE(1, u64 bore_burst_time);
++	ANDROID_KABI_USE(2, u64 bore_credit_sleep);
++	ANDROID_KABI_USE(3, struct bore_state bore_ms);
++	ANDROID_KABI_USE(4, struct bore_bc bore_subtree);
++#else
+ 	ANDROID_KABI_RESERVE(1);
+ 	ANDROID_KABI_RESERVE(2);
+ 	ANDROID_KABI_RESERVE(3);
+ 	ANDROID_KABI_RESERVE(4);
++#endif
+ } __randomize_layout;
+ 
+ struct sched_dl_entity {
 diff --git a/include/linux/sched/bore.h b/include/linux/sched/bore.h
 new file mode 100644
-index 000000000..e1e8dda60
+index 000000000..9383b0390
 --- /dev/null
 +++ b/include/linux/sched/bore.h
 @@ -0,0 +1,64 @@
@@ -129,7 +131,7 @@ index 000000000..e1e8dda60
 +extern u8   __read_mostly sched_bore_topapp_smooth_boost;
 +
 +static inline u8 bore_score(struct task_struct *p)
-+{ return p->bore_ms.penalty >> 8; }
++{ return p->rt.bore_ms.penalty >> 8; }
 +
 +extern u8   effective_prio_bore(struct task_struct *p);
 +extern void update_curr_bore(struct task_struct *p, u64 delta_exec);
@@ -153,6 +155,23 @@ index 000000000..e1e8dda60
 +	struct cfs_rq *cfs_rq, struct sched_entity *se, unsigned long weight);
 +
 +#endif /* _KERNEL_SCHED_BORE_H */
+diff --git a/include/linux/sched/signal.h b/include/linux/sched/signal.h
+index f3461a4e6..f2d9efb50 100644
+--- a/include/linux/sched/signal.h
++++ b/include/linux/sched/signal.h
+@@ -247,7 +247,12 @@ struct signal_struct {
+ 						 * permissions.
+ 						 */
+ 
++#ifdef CONFIG_SCHED_BORE
++	/* BORE thread-group burst cache (accessed via p->signal->bore_group) */
++	ANDROID_KABI_USE(1, struct bore_bc bore_group);
++#else
+ 	ANDROID_KABI_RESERVE(1);
++#endif
+ 	ANDROID_KABI_RESERVE(2);
+ 	ANDROID_KABI_RESERVE(3);
+ 	ANDROID_KABI_RESERVE(4);
 diff --git a/init/Kconfig b/init/Kconfig
 index 0688f9b9e..fdb45474d 100644
 --- a/init/Kconfig
@@ -246,7 +265,7 @@ index a3c709d2f..fd547f2d9 100644
  			attach_pid(p, PIDTYPE_TGID);
  			attach_pid(p, PIDTYPE_PGID);
 diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
-index 0d02bbcaa..b426d0210 100644
+index 0d02bbcaa..d73f324dc 100644
 --- a/kernel/futex/waitwake.c
 +++ b/kernel/futex/waitwake.c
 @@ -4,6 +4,10 @@
@@ -265,11 +284,11 @@ index 0d02bbcaa..b426d0210 100644
  		if (!timeout || timeout->task) {
  			trace_android_vh_futex_sleep_start(current);
 +#ifdef CONFIG_SCHED_BORE
-+			current->bore_ms.futex_waiting = true;
++			current->rt.bore_ms.futex_waiting = true;
 +#endif
  			schedule();
 +#ifdef CONFIG_SCHED_BORE
-+			current->bore_ms.futex_waiting = false;
++			current->rt.bore_ms.futex_waiting = false;
 +#endif
  		}
  	}
@@ -285,10 +304,10 @@ index ff1738cec..1ae9325cf 100644
 +obj-$(CONFIG_SCHED_BORE) += bore.o
 diff --git a/kernel/sched/bore.c b/kernel/sched/bore.c
 new file mode 100644
-index 000000000..b92f214da
+index 000000000..7989fc917
 --- /dev/null
 +++ b/kernel/sched/bore.c
-@@ -0,0 +1,583 @@
+@@ -0,0 +1,582 @@
 +/*
 + *  Burst-Oriented Response Enhancer (BORE) CPU Scheduler
 + *  Copyright (C) 2021-2025 Masahito Suzuki <firelzrd@gmail.com>
@@ -363,7 +382,7 @@ index 000000000..b92f214da
 +
 +void bore_note_sleep(struct task_struct *p, u64 now)
 +{
-+	p->bore_credit_sleep = now;
++	p->rt.bore_credit_sleep = now;
 +}
 +
 +u64 bore_credit_ns(struct task_struct *p)
@@ -371,10 +390,10 @@ index 000000000..b92f214da
 +	u64 cap = (u64)sched_credit_cap_us * 1000ULL;
 +	u64 slept = 0, credit = 0;
 +
-+	if (p->bore_credit_sleep) {
-+		slept = rq_clock(task_rq(p)) - p->bore_credit_sleep;
++	if (p->rt.bore_credit_sleep) {
++		slept = rq_clock(task_rq(p)) - p->rt.bore_credit_sleep;
 +		if ((s64)slept > 0) {
-+			p->bore_credit_sleep = 0;
++			p->rt.bore_credit_sleep = 0;
 +			credit = slept < cap ? slept : cap;
 +		} else {
 +			slept = 0;
@@ -416,9 +435,9 @@ index 000000000..b92f214da
 +	unsigned long weight = scale_load(sched_prio_to_weight[prio]);
 +
 +	if (se->on_rq) {
-+		p->bore_ms.stop_update = true;
++		p->rt.bore_ms.stop_update = true;
 +		reweight_entity(cfs_rq_of(se), se, weight);
-+		p->bore_ms.stop_update = false;
++		p->rt.bore_ms.stop_update = false;
 +	} else
 +		se->load.weight = weight;
 +	se->load.inv_weight = sched_prio_to_wmult[prio];
@@ -443,10 +462,10 @@ index 000000000..b92f214da
 +	
 +	u8  prev_prio = effective_prio_bore(p);
 +
-+	s32 diff = (s32)p->bore_ms.curr_penalty - (s32)p->bore_ms.prev_penalty;
-+	u16 max_val = p->bore_ms.curr_penalty - (diff & (diff >> 31));
++	s32 diff = (s32)p->rt.bore_ms.curr_penalty - (s32)p->rt.bore_ms.prev_penalty;
++	u16 max_val = p->rt.bore_ms.curr_penalty - (diff & (diff >> 31));
 +	u32 is_kthread = !!(p->flags & PF_KTHREAD);
-+	p->bore_ms.penalty = max_val & -(s32)(!is_kthread);
++	p->rt.bore_ms.penalty = max_val & -(s32)(!is_kthread);
 +
 +	u8 new_prio = effective_prio_bore(p);
 +	if (new_prio != prev_prio)
@@ -454,12 +473,12 @@ index 000000000..b92f214da
 +}
 +
 +void update_curr_bore(struct task_struct *p, u64 delta_exec) {
-+		if (p->bore_ms.stop_update) return;
++		if (p->rt.bore_ms.stop_update) return;
 +
-+	p->bore_burst_time += delta_exec;
-+	u32 curr_penalty = p->bore_ms.curr_penalty = calc_burst_penalty(p->bore_burst_time);
++	p->rt.bore_burst_time += delta_exec;
++	u32 curr_penalty = p->rt.bore_ms.curr_penalty = calc_burst_penalty(p->rt.bore_burst_time);
 +
-+	if (curr_penalty <= p->bore_ms.prev_penalty) return;
++	if (curr_penalty <= p->rt.bore_ms.prev_penalty) return;
 +	update_penalty(p);
 +}
 +
@@ -469,11 +488,11 @@ index 000000000..b92f214da
 +
 +	if (sched_bore_topapp_smooth_boost && bore_topapp_boosted(p))
 +		extra_shift = sched_bore_topapp_smooth_boost;
-+	new_penalty = binary_smooth(p->bore_ms.curr_penalty,
-+				    p->bore_ms.prev_penalty, extra_shift);
-+	p->bore_ms.prev_penalty = new_penalty;
-+	p->bore_ms.curr_penalty = 0;
-+	p->bore_burst_time = 0;
++	new_penalty = binary_smooth(p->rt.bore_ms.curr_penalty,
++				    p->rt.bore_ms.prev_penalty, extra_shift);
++	p->rt.bore_ms.prev_penalty = new_penalty;
++	p->rt.bore_ms.curr_penalty = 0;
++	p->rt.bore_burst_time = 0;
 +	update_penalty(p);
 +}
 +
@@ -520,7 +539,7 @@ index 000000000..b92f214da
 +		(u32)(((u64)total * bore_reciprocal_lut[count]) >> 32);
 +
 +	struct bore_bc new_bc = {
-+		.penalty = max(average, p->bore_ms.penalty),
++		.penalty = max(average, p->rt.bore_ms.penalty),
 +		.timestamp = now >> BORE_BC_TIMESTAMP_SHIFT
 +	};
 +	WRITE_ONCE(bc->value, new_bc.value);
@@ -533,7 +552,7 @@ index 000000000..b92f214da
 +	if (clone_flags & CLONE_PARENT)
 +		parent = rcu_dereference(parent->real_parent);
 +
-+	struct bore_bc *bc = &parent->bore_subtree;
++	struct bore_bc *bc = &parent->rt.bore_subtree;
 +
 +	if (burst_cache_expired(bc, now)) {
 +		struct task_struct *child;
@@ -544,7 +563,7 @@ index 000000000..b92f214da
 +
 +			if (!task_is_bore_eligible(child)) continue;
 +			count++;
-+			total += child->bore_ms.penalty;
++			total += child->rt.bore_ms.penalty;
 +		}
 +
 +		update_burst_cache(bc, parent, count, total, now);
@@ -570,7 +589,7 @@ index 000000000..b92f214da
 +			count_children_upto2(ancestor) <= sole_child_count;
 +			ancestor = next, sole_child_count = 1) {}
 +
-+	struct bore_bc *bc = &ancestor->bore_subtree;
++	struct bore_bc *bc = &ancestor->rt.bore_subtree;
 +
 +	if (burst_cache_expired(bc, now)) {
 +		struct task_struct *direct_child;
@@ -590,7 +609,7 @@ index 000000000..b92f214da
 +
 +			if (!task_is_bore_eligible(descendant)) continue;
 +			count++;
-+			total += descendant->bore_ms.penalty;
++			total += descendant->rt.bore_ms.penalty;
 +		}
 +
 +		update_burst_cache(bc, ancestor, count, total, now);
@@ -603,7 +622,7 @@ index 000000000..b92f214da
 +static u32 inherit_from_thread_group(struct task_struct *p, u64 now) {
 +	struct bore_bc bc_val;
 +	struct task_struct *leader = p->group_leader;
-+	struct bore_bc *bc = &leader->bore_group;
++	struct bore_bc *bc = &leader->signal->bore_group;
 +
 +	if (burst_cache_expired(bc, now)) {
 +		struct task_struct *sibling;
@@ -615,7 +634,7 @@ index 000000000..b92f214da
 +
 +			if (!task_is_bore_eligible(sibling)) continue;
 +			count++;
-+			total += sibling->bore_ms.penalty;
++			total += sibling->rt.bore_ms.penalty;
 +		}
 +
 +		update_burst_cache(bc, leader, count, total, now);
@@ -648,22 +667,21 @@ index 000000000..b92f214da
 +		inherited_penalty -= min(inherited_penalty, discount);
 +	}
 +#endif
-+	if (p->bore_ms.prev_penalty < inherited_penalty)
-+		p->bore_ms.prev_penalty = inherited_penalty;
-+	p->bore_ms.curr_penalty  = 0;
-+	p->bore_burst_time    = 0;
-+	p->bore_ms.stop_update   = false;
-+	p->bore_ms.futex_waiting = false;
++	if (p->rt.bore_ms.prev_penalty < inherited_penalty)
++		p->rt.bore_ms.prev_penalty = inherited_penalty;
++	p->rt.bore_ms.curr_penalty  = 0;
++	p->rt.bore_burst_time    = 0;
++	p->rt.bore_ms.stop_update   = false;
++	p->rt.bore_ms.futex_waiting = false;
 +	update_penalty(p);
 +	rcu_read_unlock();
 +}
 +
 +void reset_task_bore(struct task_struct *p)
-+{ p->bore_burst_time = 0;
-+	p->bore_credit_sleep = 0;
-+	memset(&p->bore_ms, 0, sizeof(p->bore_ms));
-+	memset(&p->bore_subtree, 0, sizeof(p->bore_subtree));
-+	memset(&p->bore_group, 0, sizeof(p->bore_group)); }
++{ p->rt.bore_burst_time = 0;
++	p->rt.bore_credit_sleep = 0;
++	memset(&p->rt.bore_ms, 0, sizeof(p->rt.bore_ms));
++	memset(&p->rt.bore_subtree, 0, sizeof(p->rt.bore_subtree)); }
 +
 +static void update_inherit_type(void) {
 +	switch(sched_burst_inherit_type) {
@@ -1002,7 +1020,7 @@ index 6572a71d3..404009cdb 100644
  	P(se.avg.load_sum);
  	P(se.avg.runnable_sum);
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 911328042..fc9bd7f48 100644
+index 911328042..1238519c4 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,10 @@
@@ -1094,7 +1112,7 @@ index 911328042..fc9bd7f48 100644
 +		if (static_branch_likely(&sched_bore_key)) {
 +			if ((static_branch_likely(&sched_burst_protect_slice_cond_key) ||
 +			     static_branch_unlikely(&sched_burst_protect_slice_prefer_key)) &&
-+			    (!entity_is_task(curr) || !task_of(curr)->bore_ms.futex_waiting))
++			    (!entity_is_task(curr) || !task_of(curr)->rt.bore_ms.futex_waiting))
 +				return curr;
 +		} else
 +#endif
@@ -1191,7 +1209,7 @@ index 911328042..fc9bd7f48 100644
  
 +#ifdef CONFIG_SCHED_BORE
 +	if (static_branch_likely(&sched_bore_key) &&
-+	    entity_is_task(se) && task_of(se)->bore_ms.futex_waiting)
++	    entity_is_task(se) && task_of(se)->rt.bore_ms.futex_waiting)
 +		goto vslice_found;
 +#endif
 +	vslice = calc_delta_fair(se->slice, se);

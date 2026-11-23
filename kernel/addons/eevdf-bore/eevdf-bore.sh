@@ -10,7 +10,8 @@
 #
 # KMI-neutro: todo estado novo mora no padding ANDROID_KABI_RESERVE
 #   sched_entity : slots 1-4 (deadline, min_deadline, vlag, slice+rel_deadline)
-#   task_struct  : slots 4-8 (estado do BORE, 40 bytes)
+#   sched_rt_entity: slots 1-4 (estado por task do BORE); signal_struct: slot 1 (cache do grupo)
+#   task_struct  : intocado (slots 6-8 pertencem ao patch sysvipc do SAGA)
 #   cfs_rq       : avg_vruntime/avg_load trocam de lugar com last/skip
 # sizeof/offsets de sched_entity, cfs_rq, rq e task_struct ficam idênticos
 # (conferido com -fdump-record-layouts contra a base 6.1.190).
