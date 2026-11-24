@@ -1,4 +1,4 @@
-From b76b376799e695dcf300b42b188c824517264cbd Mon Sep 17 00:00:00 2001
+From 00faa58d314517065e8b3b5319c363c65c0739ef Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Mon, 23 Nov 2026 09:28:11 -0300
 Subject: [PATCH 4/4] sched: port BORE 7.0.0 onto EEVDF (6.1 / KMI-neutral)
@@ -22,13 +22,13 @@ Claude-Session: https://claude.ai/code/session_01DREwy12p2CD14uT4q9ENmB
  kernel/fork.c                |  13 +
  kernel/futex/waitwake.c      |  10 +
  kernel/sched/Makefile        |   1 +
- kernel/sched/bore.c          | 582 +++++++++++++++++++++++++++++++++++
+ kernel/sched/bore.c          | 583 +++++++++++++++++++++++++++++++++++
  kernel/sched/build_utility.c |   4 +
  kernel/sched/core.c          |  12 +
  kernel/sched/debug.c         |  50 +++
  kernel/sched/fair.c          | 150 ++++++++-
  kernel/sched/sched.h         |   4 +
- 15 files changed, 941 insertions(+), 7 deletions(-)
+ 15 files changed, 942 insertions(+), 7 deletions(-)
  create mode 100644 include/linux/sched/bore.h
  create mode 100644 kernel/sched/bore.c
 
@@ -304,10 +304,10 @@ index ff1738cec..1ae9325cf 100644
 +obj-$(CONFIG_SCHED_BORE) += bore.o
 diff --git a/kernel/sched/bore.c b/kernel/sched/bore.c
 new file mode 100644
-index 000000000..7989fc917
+index 000000000..ad54e491a
 --- /dev/null
 +++ b/kernel/sched/bore.c
-@@ -0,0 +1,582 @@
+@@ -0,0 +1,583 @@
 +/*
 + *  Burst-Oriented Response Enhancer (BORE) CPU Scheduler
 + *  Copyright (C) 2021-2025 Masahito Suzuki <firelzrd@gmail.com>
@@ -880,6 +880,7 @@ index 000000000..7989fc917
 +		.extra1		= SYSCTL_ZERO,
 +		.extra2		= &maxval_1_million,
 +	},
++	{}	/* 6.1: sysctl tables are sentinel-terminated */
 +};
 +
 +static int __init sched_bore_sysctl_init(void) {
