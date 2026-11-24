@@ -1,4 +1,4 @@
-From 1d0921f91eb41e5d46d3f540287da68783330f79 Mon Sep 17 00:00:00 2001
+From 72b5388d0c808456a8042fad50dce8714ffe3141 Mon Sep 17 00:00:00 2001
 From: claude <noreply@anthropic.com>
 Date: Tue, 24 Nov 2026 16:04:47 -0300
 Subject: [PATCH] sched/fair: drop dead CFS leftovers (KMI symbols kept)
@@ -15,8 +15,8 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01DREwy12p2CD14uT4q9ENmB
 ---
  kernel/sched/debug.c |  3 ---
- kernel/sched/fair.c  | 47 +++++++++++---------------------------------
- 2 files changed, 11 insertions(+), 39 deletions(-)
+ kernel/sched/fair.c  | 49 +++++++++++---------------------------------
+ 2 files changed, 12 insertions(+), 40 deletions(-)
 
 diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
 index 404009cdb..64d763078 100644
@@ -33,7 +33,7 @@ index 404009cdb..64d763078 100644
  
  	debugfs_create_u32("latency_warn_ms", 0644, debugfs_sched, &sysctl_resched_latency_warn_ms);
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index f024fa147..4b06d33df 100644
+index f024fa147..4ed296377 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -98,9 +98,16 @@ static unsigned int normalized_sysctl_sched_base_slice	= 750000ULL;
@@ -167,6 +167,15 @@ index f024fa147..4b06d33df 100644
  	int next_buddy_marked = 0;
  	int cse_is_idle, pse_is_idle;
  	bool ignore = false;
+@@ -7962,7 +7937,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+ 	if (unlikely(throttled_hierarchy(cfs_rq_of(pse))))
+ 		return;
+ 
+-	if (sched_feat(NEXT_BUDDY) && scale && !(wake_flags & WF_FORK)) {
++	if (sched_feat(NEXT_BUDDY) && !(wake_flags & WF_FORK)) {
+ 		set_next_buddy(pse);
+ 		next_buddy_marked = 1;
+ 	}
 -- 
 2.43.0
 
