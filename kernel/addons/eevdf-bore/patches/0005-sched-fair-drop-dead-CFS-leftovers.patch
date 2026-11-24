@@ -1,0 +1,172 @@
+From 1d0921f91eb41e5d46d3f540287da68783330f79 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Tue, 24 Nov 2026 16:04:47 -0300
+Subject: [PATCH] sched/fair: drop dead CFS leftovers (KMI symbols kept)
+
+Remove sched_nr_latency, check_spread(), the unused 'scale' variable and the
+scaling of tunables EEVDF no longer reads; drop the matching debugfs files
+(latency_ns, min_granularity_ns, idle_min_granularity_ns). The exported
+sysctl_sched_{latency,min_granularity,idle_min_granularity,wakeup_granularity}
+symbols stay because they are part of the GKI KMI, and
+sysctl_sched_wakeup_granularity is still passed to the
+check_preempt_wakeup vendor hook.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DREwy12p2CD14uT4q9ENmB
+---
+ kernel/sched/debug.c |  3 ---
+ kernel/sched/fair.c  | 47 +++++++++++---------------------------------
+ 2 files changed, 11 insertions(+), 39 deletions(-)
+
+diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
+index 404009cdb..64d763078 100644
+--- a/kernel/sched/debug.c
++++ b/kernel/sched/debug.c
+@@ -358,9 +358,6 @@ static __init int sched_init_debug(void)
+ #else
+ 	debugfs_create_u32("base_slice_ns", 0644, debugfs_sched, &sysctl_sched_base_slice);
+ #endif
+-	debugfs_create_u32("latency_ns", 0644, debugfs_sched, &sysctl_sched_latency);
+-	debugfs_create_u32("min_granularity_ns", 0644, debugfs_sched, &sysctl_sched_min_granularity);
+-	debugfs_create_u32("idle_min_granularity_ns", 0644, debugfs_sched, &sysctl_sched_idle_min_granularity);
+ 	debugfs_create_u32("wakeup_granularity_ns", 0644, debugfs_sched, &sysctl_sched_wakeup_granularity);
+ 
+ 	debugfs_create_u32("latency_warn_ms", 0644, debugfs_sched, &sysctl_resched_latency_warn_ms);
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index f024fa147..4b06d33df 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -98,9 +98,16 @@ static unsigned int normalized_sysctl_sched_base_slice	= 750000ULL;
+ #endif
+ EXPORT_SYMBOL_GPL(sysctl_sched_base_slice);
+ 
++/*
++ * Legacy CFS tunables sysctl_sched_{latency,min_granularity,
++ * idle_min_granularity,wakeup_granularity}: EEVDF does not use them any more
++ * (slice == sysctl_sched_base_slice). The symbols stay exported because they
++ * are part of the GKI KMI that vendor modules may link against; only
++ * sysctl_sched_wakeup_granularity is still handed to the
++ * check_preempt_wakeup vendor hook.
++ */
+ unsigned int sysctl_sched_latency			= 6000000ULL;
+ EXPORT_SYMBOL_GPL(sysctl_sched_latency);
+-static unsigned int normalized_sysctl_sched_latency	= 6000000ULL;
+ 
+ /*
+  * The initial- and re-scaling of tunables is configurable
+@@ -122,7 +129,6 @@ unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LOG;
+  */
+ unsigned int sysctl_sched_min_granularity			= 750000ULL;
+ EXPORT_SYMBOL_GPL(sysctl_sched_min_granularity);
+-static unsigned int normalized_sysctl_sched_min_granularity	= 750000ULL;
+ 
+ /*
+  * Minimal preemption granularity for CPU-bound SCHED_IDLE tasks.
+@@ -134,13 +140,8 @@ unsigned int sysctl_sched_idle_min_granularity			= 750000ULL;
+ EXPORT_SYMBOL_GPL(sysctl_sched_idle_min_granularity);
+ 
+ /*
+- * This value is kept at sysctl_sched_latency/sysctl_sched_min_granularity
+- */
+-static unsigned int sched_nr_latency = 8;
+-
+-/*
+- * After fork, child runs first. If set to 0 (default) then
+- * parent will (try to) run first.
++ * Obsolete with EEVDF (no effect), kept so existing userspace tweaks that
++ * write kernel.sched_child_runs_first do not fail.
+  */
+ unsigned int sysctl_sched_child_runs_first __read_mostly;
+ 
+@@ -298,8 +299,6 @@ static void update_sysctl(void)
+ 		max(1UL, DIV_ROUND_UP(sysctl_sched_min_base_slice, nsecs_per_tick));
+ #define SET_SYSCTL(name) \
+ 	(sysctl_##name = (factor) * normalized_sysctl_##name)
+-	SET_SYSCTL(sched_min_granularity);
+-	SET_SYSCTL(sched_latency);
+ 	SET_SYSCTL(sched_wakeup_granularity);
+ #undef SET_SYSCTL
+ }
+@@ -316,8 +315,6 @@ static void update_sysctl(void)
+ #define SET_SYSCTL(name) \
+ 	(sysctl_##name = (factor) * normalized_sysctl_##name)
+ 	SET_SYSCTL(sched_base_slice);
+-	SET_SYSCTL(sched_min_granularity);
+-	SET_SYSCTL(sched_latency);
+ 	SET_SYSCTL(sched_wakeup_granularity);
+ #undef SET_SYSCTL
+ }
+@@ -1029,16 +1026,11 @@ int sched_update_scaling(void)
+ {
+ 	unsigned int factor = get_update_sysctl_factor();
+ 
+-	sched_nr_latency = DIV_ROUND_UP(sysctl_sched_latency,
+-					sysctl_sched_min_granularity);
+-
+ #define WRT_SYSCTL(name) \
+ 	(normalized_sysctl_##name = sysctl_##name / (factor))
+ #ifndef CONFIG_SCHED_BORE
+ 	WRT_SYSCTL(sched_base_slice);
+ #endif
+-	WRT_SYSCTL(sched_min_granularity);
+-	WRT_SYSCTL(sched_latency);
+ 	WRT_SYSCTL(sched_wakeup_granularity);
+ #undef WRT_SYSCTL
+ 
+@@ -5041,19 +5033,6 @@ static inline void update_misfit_status(struct task_struct *p, struct rq *rq) {}
+ 
+ #endif /* CONFIG_SMP */
+ 
+-static void check_spread(struct cfs_rq *cfs_rq, struct sched_entity *se)
+-{
+-#ifdef CONFIG_SCHED_DEBUG
+-	s64 d = se->vruntime - cfs_rq->min_vruntime;
+-
+-	if (d < 0)
+-		d = -d;
+-
+-	if (d > 3*sysctl_sched_latency)
+-		schedstat_inc(cfs_rq->nr_spread_over);
+-#endif
+-}
+-
+ static void
+ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ {
+@@ -5200,7 +5179,6 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 
+ 	check_schedstat_required();
+ 	update_stats_enqueue_fair(cfs_rq, se, flags);
+-	check_spread(cfs_rq, se);
+ 	if (!curr)
+ 		__enqueue_entity(cfs_rq, se);
+ 	se->on_rq = 1;
+@@ -5369,7 +5347,6 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
+ 	/* throttle cfs_rqs exceeding runtime */
+ 	check_cfs_rq_runtime(cfs_rq);
+ 
+-	check_spread(cfs_rq, prev);
+ 
+ 	if (prev->on_rq) {
+ 		update_stats_wait_start_fair(cfs_rq, prev);
+@@ -6325,8 +6302,7 @@ static void hrtick_update(struct rq *rq)
+ 	if (!hrtick_enabled_fair(rq) || curr->sched_class != &fair_sched_class)
+ 		return;
+ 
+-	if (cfs_rq_of(&curr->se)->nr_running < sched_nr_latency)
+-		hrtick_start_fair(rq, curr);
++	hrtick_start_fair(rq, curr);
+ }
+ #else /* !CONFIG_SCHED_HRTICK */
+ static inline void
+@@ -7941,7 +7917,6 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+ 	struct task_struct *curr = rq->curr;
+ 	struct sched_entity *se = &curr->se, *pse = &p->se;
+ 	struct cfs_rq *cfs_rq = task_cfs_rq(curr);
+-	int scale = cfs_rq->nr_running >= sched_nr_latency;
+ 	int next_buddy_marked = 0;
+ 	int cse_is_idle, pse_is_idle;
+ 	bool ignore = false;
+-- 
+2.43.0
+
