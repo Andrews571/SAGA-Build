@@ -1,4 +1,4 @@
-From 00faa58d314517065e8b3b5319c363c65c0739ef Mon Sep 17 00:00:00 2001
+From 255918518c0d08235c6487027d664b1a020c6267 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Mon, 23 Nov 2026 09:28:11 -0300
 Subject: [PATCH 4/4] sched: port BORE 7.0.0 onto EEVDF (6.1 / KMI-neutral)
@@ -1021,7 +1021,7 @@ index 6572a71d3..404009cdb 100644
  	P(se.avg.load_sum);
  	P(se.avg.runnable_sum);
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 911328042..1238519c4 100644
+index 768163cc7..f024fa147 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,10 @@
@@ -1122,7 +1122,7 @@ index 911328042..1238519c4 100644
  
  	while (node) {
  		struct sched_entity *se = __node_2_se(node);
-@@ -972,7 +1020,9 @@ int sched_update_scaling(void)
+@@ -986,7 +1034,9 @@ int sched_update_scaling(void)
  
  #define WRT_SYSCTL(name) \
  	(normalized_sysctl_##name = sysctl_##name / (factor))
@@ -1132,7 +1132,7 @@ index 911328042..1238519c4 100644
  	WRT_SYSCTL(sched_min_granularity);
  	WRT_SYSCTL(sched_latency);
  	WRT_SYSCTL(sched_wakeup_granularity);
-@@ -1157,6 +1207,37 @@ static inline bool do_preempt_short(struct cfs_rq *cfs_rq,
+@@ -1171,6 +1221,37 @@ static inline bool do_preempt_short(struct cfs_rq *cfs_rq,
  	return false;
  }
  
@@ -1170,7 +1170,7 @@ index 911328042..1238519c4 100644
  /*
   * Update the current task's runtime statistics.
   */
-@@ -1193,6 +1274,9 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1207,6 +1288,9 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (entity_is_task(curr)) {
  		struct task_struct *curtask = task_of(curr);
  
@@ -1180,7 +1180,7 @@ index 911328042..1238519c4 100644
  		trace_sched_stat_runtime(curtask, delta_exec, curr->vruntime);
  		cgroup_account_cputime(curtask, delta_exec);
  		account_group_exec_runtime(curtask, delta_exec);
-@@ -3585,8 +3669,8 @@ static inline void
+@@ -3599,8 +3683,8 @@ static inline void
  dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se) { }
  #endif
  
@@ -1191,7 +1191,7 @@ index 911328042..1238519c4 100644
  {
  	unsigned long old_weight = se->load.weight;
  
-@@ -4951,11 +5035,10 @@ static void check_spread(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -4973,11 +5057,10 @@ static void check_spread(struct cfs_rq *cfs_rq, struct sched_entity *se)
  static void
  place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  {
@@ -1204,7 +1204,7 @@ index 911328042..1238519c4 100644
  
  	/*
  	 * Due to how V is constructed as the weighted average of entities,
-@@ -4999,6 +5082,17 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5021,6 +5104,17 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  		return;
  	}
  
@@ -1222,7 +1222,7 @@ index 911328042..1238519c4 100644
  	/*
  	 * When joining the competition; the existing tasks will be,
  	 * on average, halfway through their slice, as such start tasks
-@@ -5007,8 +5101,22 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5029,8 +5123,22 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -1245,7 +1245,7 @@ index 911328042..1238519c4 100644
  }
  
  static void check_enqueue_throttle(struct cfs_rq *cfs_rq);
-@@ -6382,6 +6490,17 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6404,6 +6512,17 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  
  	util_est_dequeue(&rq->cfs, p);
  
@@ -1263,7 +1263,7 @@ index 911328042..1238519c4 100644
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
  		dequeue_entity(cfs_rq, se, flags);
-@@ -7883,6 +8002,10 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+@@ -7905,6 +8024,10 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
  	 */
  	if (do_preempt_short(cfs_rq_of(se), pse, se))
  		cancel_protect_slice(se);
@@ -1274,7 +1274,7 @@ index 911328042..1238519c4 100644
  
  	/*
  	 * EEVDF: preempt if the woken entity is the one that would be picked
-@@ -8127,6 +8250,7 @@ static void yield_task_fair(struct rq *rq)
+@@ -8149,6 +8272,7 @@ static void yield_task_fair(struct rq *rq)
  	struct cfs_rq *cfs_rq = task_cfs_rq(curr);
  	struct sched_entity *se = &curr->se;
  
@@ -1282,7 +1282,7 @@ index 911328042..1238519c4 100644
  	/*
  	 * Are we the only task in the tree?
  	 */
-@@ -8134,6 +8258,7 @@ static void yield_task_fair(struct rq *rq)
+@@ -8156,6 +8280,7 @@ static void yield_task_fair(struct rq *rq)
  		return;
  
  	clear_buddies(cfs_rq, se);
@@ -1290,7 +1290,7 @@ index 911328042..1238519c4 100644
  
  	if (curr->policy != SCHED_BATCH) {
  		update_rq_clock(rq);
-@@ -8149,6 +8274,14 @@ static void yield_task_fair(struct rq *rq)
+@@ -8171,6 +8296,14 @@ static void yield_task_fair(struct rq *rq)
  		rq_clock_skip_update(rq);
  	}
  
@@ -1305,7 +1305,7 @@ index 911328042..1238519c4 100644
  	/*
  	 * EEVDF yield: push our deadline out by one request so that the
  	 * others get picked first.
-@@ -12234,6 +12367,9 @@ static void switched_from_fair(struct rq *rq, struct task_struct *p)
+@@ -12256,6 +12389,9 @@ static void switched_from_fair(struct rq *rq, struct task_struct *p)
  static void switched_to_fair(struct rq *rq, struct task_struct *p)
  {
  	attach_task_cfs_rq(p);
