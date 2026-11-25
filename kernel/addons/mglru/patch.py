@@ -1,91 +1,159 @@
 import sys
 
-MARKER = "SAGA: force MGLRU on (core-only test)"
+# MGLRU v2 (SAGA) — liga o MGLRU TARDE e ignora o "echo 0" da ROM.
+#
+# Por que: a ColorOS roda `echo 0 > /sys/kernel/mm/lru_gen/enabled` em
+# post-fs-data (init.oplus.nandswap.sh, ~11 s de boot). A v1 transformava
+# esse `0` em "liga o CORE" no meio do init (bootloop). Aqui:
+#   1) o kernel liga o MGLRU completo (como 'y') SAGA_MGLRU_DELAY_S segundos
+#      depois do late_initcall, quando o init/boot_completed ja passou;
+#   2) escrita numerica 0 vinda do userspace e IGNORADA (e logada);
+#      'n' continua desligando e fica "sticky" (cancela a ativacao tardia);
+#   3) toda escrita em `enabled` e logada (valor, processo, pid).
+MARKER = "SAGA: MGLRU v2"
 
-# --- Anchor 1: request only CORE on write --------------------------------
-CAPS_ANCHOR = (
+OLD_STORE = (
+    "/* see Documentation/admin-guide/mm/multigen_lru.rst for details */\n"
+    "static ssize_t store_enabled(struct kobject *kobj, struct kobj_attribute *attr,\n"
+    "\t\t\t     const char *buf, size_t len)\n"
+    "{\n"
+    "\tint i;\n"
+    "\tunsigned int caps;\n"
+    "\n"
+    "\tif (tolower(*buf) == 'n')\n"
+    "\t\tcaps = 0;\n"
+    "\telse if (tolower(*buf) == 'y')\n"
+    "\t\tcaps = -1;\n"
     "\telse if (kstrtouint(buf, 0, &caps))\n"
     "\t\treturn -EINVAL;\n"
     "\n"
-    "\tfor (i = 0; i < NR_LRU_GEN_CAPS; i++) {"
-)
-CAPS_REPLACEMENT = (
-    "\telse if (kstrtouint(buf, 0, &caps))\n"
-    "\t\treturn -EINVAL;\n"
+    "\tfor (i = 0; i < NR_LRU_GEN_CAPS; i++) {\n"
+    "\t\tbool enabled = caps & BIT(i);\n"
     "\n"
-    "\t/* " + MARKER + ": force CORE only. MM_WALK/NONLEAF_YOUNG are\n"
-    "\t * deliberately NOT forced here — this build exists to isolate\n"
-    "\t * whether a reclaim deadlock seen on this device comes from basic\n"
-    "\t * generation eviction (CORE) or from the active page-table walk\n"
-    "\t * (MM_WALK/NONLEAF_YOUNG). Do not add those bits back until CORE\n"
-    "\t * alone has been confirmed stable.\n"
-    "\t */\n"
-    "\tcaps |= BIT(LRU_GEN_CORE);\n"
-    "\n"
-    "\tfor (i = 0; i < NR_LRU_GEN_CAPS; i++) {"
-)
-
-# --- Anchor 2: leave lru_gen_change_state() untouched, no hardcode -------
-# With only CORE forced above, `enabled` for i == LRU_GEN_CORE is always
-# true anyway (the bit is always present in caps), so no change is needed
-# here — kept as a no-op anchor check purely to fail loud if upstream
-# refactors this function, same as the other patch variants.
-STATE_ANCHOR = (
     "\t\tif (i == LRU_GEN_CORE)\n"
-    "\t\t\tlru_gen_change_state(enabled);"
+    "\t\t\tlru_gen_change_state(enabled);\n"
+    "\t\telse if (enabled)\n"
+    "\t\t\tstatic_branch_enable(&lru_gen_caps[i]);\n"
+    "\t\telse\n"
+    "\t\t\tstatic_branch_disable(&lru_gen_caps[i]);\n"
+    "\t}\n"
+    "\n"
+    "\treturn len;\n"
+    "}\n"
 )
 
+NEW_STORE = (
+    "/* " + MARKER + ": delayed enable + ignore userspace numeric 0 */\n"
+    "#define SAGA_MGLRU_DELAY_S\t90\n"
+    "\n"
+    "static bool saga_mglru_user_off;\t/* 'n' written: cancel delayed enable */\n"
+    "\n"
+    "static void saga_mglru_apply_caps(unsigned int caps)\n"
+    "{\n"
+    "\tint i;\n"
+    "\n"
+    "\tfor (i = 0; i < NR_LRU_GEN_CAPS; i++) {\n"
+    "\t\tbool enabled = caps & BIT(i);\n"
+    "\n"
+    "\t\tif (i == LRU_GEN_CORE)\n"
+    "\t\t\tlru_gen_change_state(enabled);\n"
+    "\t\telse if (enabled)\n"
+    "\t\t\tstatic_branch_enable(&lru_gen_caps[i]);\n"
+    "\t\telse\n"
+    "\t\t\tstatic_branch_disable(&lru_gen_caps[i]);\n"
+    "\t}\n"
+    "}\n"
+    "\n"
+    "static void saga_mglru_delayed_enable(struct work_struct *work)\n"
+    "{\n"
+    "\tif (READ_ONCE(saga_mglru_user_off)) {\n"
+    "\t\tpr_info(\"saga-mglru: delayed enable skipped (userspace wrote 'n')\\n\");\n"
+    "\t\treturn;\n"
+    "\t}\n"
+    "\tsaga_mglru_apply_caps(-1);\t/* same as writing 'y' */\n"
+    "\tpr_info(\"saga-mglru: enabled after %ds delay, caps=0x%04x\\n\", SAGA_MGLRU_DELAY_S,\n"
+    "\t\t(unsigned int)((get_cap(LRU_GEN_CORE) ? BIT(LRU_GEN_CORE) : 0) |\n"
+    "\t\t\t(arch_has_hw_pte_young() && get_cap(LRU_GEN_MM_WALK) ? BIT(LRU_GEN_MM_WALK) : 0) |\n"
+    "\t\t\t(arch_has_hw_nonleaf_pmd_young() && get_cap(LRU_GEN_NONLEAF_YOUNG) ? BIT(LRU_GEN_NONLEAF_YOUNG) : 0)));\n"
+    "}\n"
+    "static DECLARE_DELAYED_WORK(saga_mglru_enable_work, saga_mglru_delayed_enable);\n"
+    "\n"
+    "/* see Documentation/admin-guide/mm/multigen_lru.rst for details */\n"
+    "static ssize_t store_enabled(struct kobject *kobj, struct kobj_attribute *attr,\n"
+    "\t\t\t     const char *buf, size_t len)\n"
+    "{\n"
+    "\tunsigned int caps;\n"
+    "\tint vis = (int)strcspn(buf, \"\\n\");\n"
+    "\n"
+    "\tif (vis > 16)\n"
+    "\t\tvis = 16;\n"
+    "\n"
+    "\tif (tolower(*buf) == 'n') {\n"
+    "\t\tcaps = 0;\n"
+    "\t\tWRITE_ONCE(saga_mglru_user_off, true);\n"
+    "\t} else if (tolower(*buf) == 'y') {\n"
+    "\t\tcaps = -1;\n"
+    "\t\tWRITE_ONCE(saga_mglru_user_off, false);\n"
+    "\t} else if (kstrtouint(buf, 0, &caps)) {\n"
+    "\t\treturn -EINVAL;\n"
+    "\t}\n"
+    "\n"
+    "\t/* ROM init scripts (ColorOS nandswap) do `echo 0`: ignore it. */\n"
+    "\tif (!caps && tolower(*buf) != 'n') {\n"
+    "\t\tpr_info(\"saga-mglru: ignored userspace write '%.*s' by %s[%d] (use 'n' to disable)\\n\",\n"
+    "\t\t\tvis, buf, current->comm, task_pid_nr(current));\n"
+    "\t\treturn len;\n"
+    "\t}\n"
+    "\n"
+    "\tpr_info(\"saga-mglru: write '%.*s' by %s[%d]\\n\",\n"
+    "\t\tvis, buf, current->comm, task_pid_nr(current));\n"
+    "\tsaga_mglru_apply_caps(caps);\n"
+    "\n"
+    "\treturn len;\n"
+    "}\n"
+)
 
-def apply(content, anchor, replacement, label):
-    if anchor not in content:
-        return content, False, label
-    return content.replace(anchor, replacement, 1), True, None
+OLD_INIT = (
+    "\tdebugfs_create_file(\"lru_gen_full\", 0444, NULL, NULL, &lru_gen_ro_fops);\n"
+    "\n"
+    "\treturn 0;\n"
+    "};\n"
+    "late_initcall(init_lru_gen);\n"
+)
+NEW_INIT = (
+    "\tdebugfs_create_file(\"lru_gen_full\", 0444, NULL, NULL, &lru_gen_ro_fops);\n"
+    "\n"
+    "\t/* " + MARKER + ": turn MGLRU on once boot has settled */\n"
+    "\tschedule_delayed_work(&saga_mglru_enable_work, SAGA_MGLRU_DELAY_S * HZ);\n"
+    "\n"
+    "\treturn 0;\n"
+    "};\n"
+    "late_initcall(init_lru_gen);\n"
+)
 
 
 def main():
     if len(sys.argv) < 2:
-        print("[error] usage: patch_core_only.py <vmscan.c>", flush=True)
+        print("[error] usage: patch.py <vmscan.c>", flush=True)
         sys.exit(1)
-
     path = sys.argv[1]
-    with open(path, "r") as f:
-        content = f.read()
+    content = open(path).read()
 
     if MARKER in content:
-        print("[info] mglru_force_enable: already patched (core-only) — skipping", flush=True)
+        print("[info] mglru v2: already patched — skipping", flush=True)
         sys.exit(0)
-
-    if "luminaire: force MGLRU on" in content and MARKER not in content:
-        print(
-            "[error] mglru_force_enable: a different mglru patch variant is "
-            "already applied — revert it first, this version is not meant "
-            "to stack on top of it",
-            flush=True,
-        )
+    if "SAGA: force MGLRU on (core-only test)" in content or "luminaire: force MGLRU on" in content:
+        print("[error] mglru v2: an older mglru patch variant is applied — start from a clean tree", flush=True)
         sys.exit(1)
 
-    content, ok1, why1 = apply(content, CAPS_ANCHOR, CAPS_REPLACEMENT, "caps anchor")
-    _, ok2, why2 = apply(content, STATE_ANCHOR, "", "state anchor (presence check only)")
-
-    if not ok1 or not ok2:
-        missing = [w for w in (why1, why2) if w]
-        print(
-            "[warn] mglru_force_enable: " + ", ".join(missing) +
-            " not found in expected form — upstream may have refactored "
-            "store_enabled(). Skipping MGLRU patch, build continues without it.",
-            flush=True,
-        )
+    if OLD_STORE not in content or OLD_INIT not in content:
+        print("[warn] mglru v2: store_enabled()/init_lru_gen() not in the expected form — "
+              "upstream may have refactored. Skipping MGLRU patch, build continues without it.", flush=True)
         sys.exit(0)
 
-    with open(path, "w") as f:
-        f.write(content)
-
-    print(
-        "[info] mglru_force_enable: CORE-ONLY test patch applied — "
-        "MM_WALK/NONLEAF_YOUNG left untouched (whatever this kernel's "
-        "default is) ✅",
-        flush=True,
-    )
+    content = content.replace(OLD_STORE, NEW_STORE, 1).replace(OLD_INIT, NEW_INIT, 1)
+    open(path, "w").write(content)
+    print("[info] mglru v2: delayed enable (%ds) + ignore userspace '0' + write log ✅" % 90, flush=True)
 
 
 if __name__ == "__main__":

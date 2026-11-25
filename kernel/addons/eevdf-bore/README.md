@@ -1,7 +1,7 @@
 # eevdf-bore — EEVDF + BORE 7.0 para android14-6.1
 
 **Status: compila (objetos do escalonador), NÃO testado em boot.** Opt-in:
-workflow → Addon Profile `Test_Addons` (= Default_Addons com este addon no lugar do `bore`; não publica Release). Os perfis `Default_Addons`/`CC_Addons` continuam com o `bore`.
+workflow → Addon Profile `Optimized_Addons` (padrão do workflow: este addon no lugar do `bore`, mais `mglru`; ainda não publica Release). Os perfis `Default_Addons`/`CC_Addons` continuam com o `bore`.
 
 ## O que muda no kernel
 | Patch | Conteúdo |
@@ -20,7 +20,7 @@ troca de lugar `last/skip` ↔ `avg_vruntime/avg_load` no `cfs_rq`. Conferido co
 `rq`(3840), `task_struct`(4800) iguais à base.
 
 ## Conflitos
-`bore` e `bore-warp` (o build aborta). Fora do perfil `Test_Addons` ele não é usado. Testado em dry-run junto com: util-avg-fix, cc-governor,
+`bore` e `bore-warp` (o build aborta). Fora do perfil `Optimized_Addons` ele não é usado. Testado em dry-run junto com: util-avg-fix, cc-governor,
 clutch-signals, reflex, kcompressd, le9uo.
 
 ## Hooks vendor

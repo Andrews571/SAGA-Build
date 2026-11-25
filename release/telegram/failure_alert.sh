@@ -21,7 +21,7 @@ failed_jobs() {  # TSV: job name <TAB> job url <TAB> failing step
 build_text() {
   local name="SAGA" run_url jobs n u s
   [ "${ADDON_PROFILE:-}" = "CC_Addons" ] && name="SAGA_CC"
-  [ "${ADDON_PROFILE:-}" = "Test_Addons" ] && name="SAGA_TEST"
+  [ "${ADDON_PROFILE:-}" = "Optimized_Addons" ] && name="SAGA_OPT"
   run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   printf '❌ <b>%s build failed</b>\n' "$name"
   printf 'Mode: %s · Kernel %s · by %s\n' "$(html "${RUN_MODE:-?}")" "$(html "${KERNEL_VERSION:-?}")" "$(html "${GITHUB_ACTOR:-?}")"

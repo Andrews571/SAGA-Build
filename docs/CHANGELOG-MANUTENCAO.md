@@ -5,6 +5,21 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M12 — Perfil Optimized_Addons (EEVDF + BORE 7.0 + MGLRU v2) como padrão
+**Arquivos:** `.github/workflows/build.yml`, `.github/workflows/pin-scout.yml`, `kernel/addons/mglru/{mglru.sh,patch.py,addon.meta}`, `kernel/addons/eevdf-bore/{addon.meta,README.md}`, `release/anykernel.sh`, `release/telegram/{caption.py,unified_caption.py,failure_alert.sh}`, `docs/ADDONS-LISTA.md`, `docs/CHANGELOG-RELEASE.md`, `docs/POST-TELEGRAM.md`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| O quê | Por quê | Como |
+|---|---|---|
+| Perfil `Test_Addons` virou **`Optimized_Addons`** e é o padrão do `addon_profile` (`Optimized_Addons`, `Default_Addons`, `CC_Addons`) | O EEVDF + BORE 7.0 já passou em aparelho (boot, uso diário, sem avisos do escalonador) e deixou de ser só teste | `Optimized_Addons` = `Default_Addons` com `eevdf-bore` no lugar do `bore` e o addon `mglru` incluído. `Default_Addons` e `CC_Addons` não mudam. O token `mglru` entra uma vez só: o toggle manual `mglru` é ignorado quando o perfil já o traz. Zips e posts do perfil usam o nome `SAGA_OPT` (antes `SAGA_TEST`) |
+| `Optimized_Addons` **não publica Release** (por enquanto) | MGLRU v2 ainda não passou um dia inteiro de uso no aparelho; o canal estável/experimental só aceita os perfis `Default_Addons`/`CC_Addons` | `Build Variant Matrix` falha cedo com a mensagem do erro se `run_mode=Release` com este perfil. `Build`, `Warm Run` e `Dry Run` funcionam. Para liberar depois: tirar o bloqueio e mapear o perfil a um canal em `github_release.sh` |
+| `pin-scout.yml` passa `addon_profile=Default_Addons` | O padrão do workflow mudou; sem isso os pins candidatos seriam validados com o escalonador novo e um erro do EEVDF marcaria um pin bom como ruim | `-f addon_profile="Default_Addons"` no disparo do Warm Run |
+| `mglru` **v2** (reescrito) | A v1 forçava o CORE em toda escrita em `lru_gen/enabled`, inclusive no `echo 0` que a ColorOS faz em `post-fs-data` (~11 s), no meio do init: bootloop. Diagnóstico no aparelho: o MGLRU do kernel funciona (`0x0003` = CORE + MM_WALK; 10 min com pressão de memória sem travar, sem direct reclaim nem stalls, swap-out de ~10 mil/s para ~50/s) | O kernel liga o MGLRU completo 90 s depois do `late_initcall` (delayed work, equivale a escrever `y`). Escrita numérica `0` do userspace é ignorada e logada (`saga-mglru: ignored userspace write ...`); `n` ainda desliga e cancela a ativação tardia; toda escrita em `enabled` vai para o dmesg com processo e pid. Falha alto (aviso, build segue sem o patch) se `store_enabled()`/`init_lru_gen()` mudarem de forma |
+| `eevdf-bore` entra na `main` com a série 0001–0005 e aparece em `ADDONS-LISTA.md` | A `main` ainda tinha a série antiga (sem as correções de boot: sentinela do sysctl, CRC do `cfs_rq`, heap `min_deadline`, KABI) | Merge de `test-addons-profile`; `addon.meta` atualizado (5 patches, validado em aparelho). `docs/ADDONS-LISTA.md` regenerado por `addon_watch.sh doc` |
+
+**Verificação:** `patch.py` do `mglru` aplicado duas vezes (segunda = pula, idempotente) e `mm/vmscan.c` compilado com clang (arm64, config 6.1 do aparelho) sem avisos; cadeia do perfil (`eevdf-bore`, `adios`, `util-avg-fix`, `pm-wakelock-blocker`, `mglru`, `le9uo`, `kcompressd`) aplicada em ordem sobre o kernel base e `vmscan.o`, `fair.o`, `core.o` compilados; Lint/actionlint local. **Não testado no GitHub nem em boot:** o boot com `mglru` v2 e o uso de um dia completo no aparelho ainda faltam. Se der problema, `echo n > /sys/kernel/mm/lru_gen/enabled` desliga sem recompilar e o dmesg (`saga-mglru:`) mostra quem escreveu e quando.
+
+---
+
 ## M11 — Actions fixadas por SHA, semeadura de cache e decisões sobre T17/T25 (T10, T24)
 **Arquivos:** `.github/workflows/*.yml` e `.github/actions/*/action.yml` (24 `uses:`), `.github/dependabot.yml` (novo), `.github/workflows/lint.yml`, `.github/actions/restore-caches/action.yml`, `.github/actions/restore-lto-cache/action.yml`, `.github/actions/setup-build-env/action.yml`, `.github/workflows/build.yml`, `docs/CACHES.md` (novo), `docs/ARQUITETURA.md`, `docs/CHANGELOG-MANUTENCAO.md`
 

@@ -1,6 +1,6 @@
 # Changelog automático dos releases
 
-O changelog do post e do SAGA-Releases (`Changelog` no Telegram, `changelog` no `saga-release.json`) é montado sozinho a cada **Release** pelo job **Build Changelog** (`release/changelog.py`). Ele compara este release com o **release anterior do mesmo canal** (stable = `Default_Addons`, experimental = `CC_Addons`) e escreve linhas curtas:
+O changelog do post e do SAGA-Releases (`Changelog` no Telegram, `changelog` no `saga-release.json`) é montado sozinho a cada **Release** pelo job **Build Changelog** (`release/changelog.py`). Ele compara este release com o **release anterior do mesmo canal** (stable = `Default_Addons`, experimental = `CC_Addons`; o perfil `Optimized_Addons` ainda não tem canal e não publica Release) e escreve linhas curtas:
 
 | Fonte | Exemplo de linha | Precisa fazer algo? |
 |---|---|---|

@@ -16,7 +16,7 @@ esac
 # CC_Addons builds get their own identity: SAGA_CC-<ver>-<variant>-R<run>.zip
 ZIP_PREFIX="SAGA"
 [ "${ADDON_PROFILE:-}" = "CC_Addons" ] && ZIP_PREFIX="SAGA_CC"
-[ "${ADDON_PROFILE:-}" = "Test_Addons" ] && ZIP_PREFIX="SAGA_TEST"
+[ "${ADDON_PROFILE:-}" = "Optimized_Addons" ] && ZIP_PREFIX="SAGA_OPT"
 ZIP_NAME="${ZIP_PREFIX}-${KERNEL_VERSION}.${SUBLEVEL}-${ZIP_VARIANT_TAG}-R${GITHUB_RUN_NUMBER:-0}.zip"
 export ZIP_NAME
 

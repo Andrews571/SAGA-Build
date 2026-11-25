@@ -17,12 +17,13 @@
 | `cc-governor` | CC Governor (Cerebral Clutch): governor conservador (SAGA) | local | SAGA | GPL-2.0 | — |
 | `clutch-signals` | Ponte neutra de sinais entre ADIOS (I/O) e CC governor (CPU) (SAGA) | local | SAGA | GPL-2.0 | — |
 | `droidspaces` | Droidspaces: suporte a runtime de containers LXC | local | [ravindu644/Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS) | GPL-3.0 | — |
+| `eevdf-bore` | EEVDF (nivel 6.6/6.12) + BORE 7.0 para android14-6.1, KMI-neutro | local | [firelzrd/bore-scheduler](https://github.com/firelzrd/bore-scheduler) | GPL-2.0 | — |
 | `kasumi` | Kasumi: LKM de manipulação/ocultação de caminhos | git-clone | [Anatdx/Kasumi](https://github.com/Anatdx/Kasumi) | Apache-2.0 | branch `HEAD` |
 | `kcompressd` | Kcompressd: compressão de memória em thread dedicada | vendored-patch | [firelzrd/kcompressd-unofficial](https://github.com/firelzrd/kcompressd-unofficial) | GPL-2.0 | branch `HEAD` |
 | `le9uo` | le9uo: proteção do working set de memória | vendored-patch | [firelzrd/le9uo](https://github.com/firelzrd/le9uo) | GPL-2.0 | branch `HEAD` |
 | `lz4kd` | LZ4KD: backends lz4k/lz4kd para zram | fetch-latest | [SukiSU-Ultra/SukiSU_patch](https://github.com/SukiSU-Ultra/SukiSU_patch) | ? | caminho `other/zram` |
 | `lz4zstd` | LZ4 1.10.0 + ZSTD 1.5.7 para zram | fetch-latest | [mrcxlinux/kernel_patches](https://github.com/mrcxlinux/kernel_patches) | ? | caminho `zram` |
-| `mglru` | MGLRU: força a ativação adaptativa em mm/vmscan.c | local | SAGA | ? | — |
+| `mglru` | MGLRU v2: liga 90 s após o boot e ignora o echo 0 da ROM (mm/vmscan.c) | local | SAGA | ? | — |
 | `nomount` | NoMount: framework de injeção de caminhos VFS (beta) | git-clone | [maxsteeel/nomount](https://github.com/maxsteeel/nomount) | GPL-3.0 | branch `HEAD` |
 | `ntsync` | NTSync: primitivas de sincronização NT no kernel (Wine/Winlator) | fetch-latest | [WildKernels/kernel_patches](https://github.com/WildKernels/kernel_patches) | ? | caminho `common/ntsync` |
 | `pm-wakelock-blocker` | Bloqueador de wakelock nomeado (SAGA) | local | SAGA | ? | — |
