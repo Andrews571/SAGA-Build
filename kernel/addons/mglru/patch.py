@@ -132,7 +132,7 @@ NEW_INIT = (
 )
 
 
-# --- v2.1: two small behaviour fixes from mainline (6.7 / 6.12) -----------------
+# --- v2.1: one small behaviour fix from mainline (6.7) -----------------
 MARKER2 = "SAGA: MGLRU v2.1"
 
 OLD_OFFLINE = (
@@ -151,28 +151,14 @@ NEW_OFFLINE = (
     "\n"
     "\t/* skip the aging path at the default priority */\n"
 )
-OLD_GFPIO = (
-    "\telse if (swappiness == 200)\n"
-    "\t\ttype = LRU_GEN_ANON;\n"
-    "\telse\n"
-    "\t\ttype = get_type_to_scan(lruvec, swappiness, &tier);\n"
-)
-NEW_GFPIO = (
-    "\telse if (swappiness == 200)\n"
-    "\t\ttype = LRU_GEN_ANON;\n"
-    "\telse if (!(sc->gfp_mask & __GFP_IO))\t/* " + MARKER2 + " (mainline 6.12): clean page cache is likelier than clean swapcache */\n"
-    "\t\ttype = LRU_GEN_FILE;\n"
-    "\telse\n"
-    "\t\ttype = get_type_to_scan(lruvec, swappiness, &tier);\n"
-)
 
 
 def apply_v21(content):
     if MARKER2 in content:
         return content, "already"
-    if OLD_OFFLINE not in content or OLD_GFPIO not in content:
+    if OLD_OFFLINE not in content:
         return content, "shape"
-    return content.replace(OLD_OFFLINE, NEW_OFFLINE, 1).replace(OLD_GFPIO, NEW_GFPIO, 1), "ok"
+    return content.replace(OLD_OFFLINE, NEW_OFFLINE, 1), "ok"
 
 
 def main():
@@ -200,9 +186,9 @@ def main():
     content = content.replace(OLD_STORE, NEW_STORE, 1).replace(OLD_INIT, NEW_INIT, 1)
     content, st = apply_v21(content)
     if st == "shape":
-        print("[warn] mglru v2.1: get_nr_to_scan()/isolate_folios() not in the expected form — extras skipped (delayed-enable part still applied).", flush=True)
+        print("[warn] mglru v2.1: get_nr_to_scan() not in the expected form — extra skipped (delayed-enable part still applied).", flush=True)
     open(path, "w").write(content)
-    print("[info] mglru v2.1 extras (offline memcg, !GFP_IO file-first): %s" % st, flush=True)
+    print("[info] mglru v2.1 extra (offline memcg scrape): %s" % st, flush=True)
     print("[info] mglru v2: delayed enable (%ds) + ignore userspace '0' + write log ✅" % 90, flush=True)
 
 

@@ -5,16 +5,16 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
-## M13 — mglru v2.1: dois ajustes de comportamento do mainline
+## M13 — mglru v2.1: ajuste de memcg offline (e um ajuste descartado)
 **Arquivos:** `kernel/addons/mglru/{patch.py,mglru.sh,addon.meta}`, `docs/ADDONS-LISTA.md`, `docs/CHANGELOG-MANUTENCAO.md`
 
 | O quê | Por quê | Como |
 |---|---|---|
 | Memcg deletado é esvaziado com mais força (mainline `4376807bf2`, 6.7) | Memcgs de apps mortos ficavam com páginas frias presas | `get_nr_to_scan()`: depois do `should_run_aging`, `if (nr_to_scan && !mem_cgroup_online(memcg)) return nr_to_scan;` |
-| Sem `__GFP_IO`, tenta arquivo antes de anon (mainline 6.12) | Page cache limpo é mais provável que swapcache limpo quando a alocação não pode fazer IO | `isolate_folios()`: ramo `else if (!(sc->gfp_mask & __GFP_IO)) type = LRU_GEN_FILE;` antes de `get_type_to_scan()` |
+| **Descartado:** "sem `__GFP_IO`, tenta arquivo antes de anon" (mainline 6.12) | Ao verificar a cadeia com o `le9uo`, o ramo novo em `isolate_folios()` contorna o override de proteção do working set que o `le9uo` põe em `get_type_to_scan()`, e fazia o hunk do `le9uo` aplicar com fuzz 2 | Removido do `patch.py`. A cadeia (`mglru` antes do `le9uo`) volta a aplicar sem fuzz |
 
-**Escopo:** só esses dois. A comparação função a função com 6.6/6.12 mostrou que o resto da diferença é refatoração (`mm_state`, `should_walk_mmu`, `flush_reclaim_state`) sem efeito no aparelho e com risco de KMI. Nenhuma estrutura mudou. Os extras entram no mesmo `patch.py`, idempotentes e com aviso (não erro) se o formato do `vmscan.c` mudar; o resto do addon continua aplicando.
-**Risco:** são correções aceitas no mainline e atingem caminhos estreitos (memcg offline; reclaim sem IO), mas não há garantia de ganho nem de ausência de piora; nada foi medido em aparelho ainda. Verificado: aplica duas vezes (segunda pula) e `vmscan.o` compila sem avisos.
+**Escopo:** a comparação função a função com 6.6/6.12 mostrou que o resto da diferença é refatoração (`mm_state`, `should_walk_mmu`, `flush_reclaim_state`) sem efeito no aparelho e com risco de KMI. Nenhuma estrutura mudou. O extra é idempotente e só avisa (não falha) se o formato do `vmscan.c` mudar.
+**Verificação:** cadeia completa (`eevdf-bore`, `adios`, `util-avg-fix`, `pm-wakelock-blocker`, `mglru`, `le9uo`, `kcompressd`) aplicada em árvore limpa e `vmscan.o`/`fair.o` compilados. Nada foi medido em aparelho ainda; sem garantia de ganho.
 
 ---
 
