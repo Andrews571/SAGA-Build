@@ -13,6 +13,9 @@
 #   2) ignora escrita numérica 0 do userspace (loga processo e pid);
 #   3) 'n' continua desligando (e cancela a ativação tardia);
 #   4) toda escrita em `enabled` vai para o dmesg ("saga-mglru: ...").
+#   v2.1: 2 ajustes pequenos do mainline em vmscan.c: memcg deletado é
+#   esvaziado com mais força (get_nr_to_scan) e, sem __GFP_IO, tenta arquivo
+#   antes de anon (isolate_folios). Não mudam estruturas nem KMI.
 # Validado em aparelho (Poco X7, ColorOS): MGLRU ligado em runtime com
 # pressão de memória sem travar; ver docs/CHANGELOG-MANUTENCAO.md.
 # STATUS: o boot com este addon ainda precisa de teste em aparelho.
@@ -25,7 +28,7 @@ grep -q "^static ssize_t store_enabled(struct kobject \*kobj," "$VMSCAN_C" \
 python3 "$PATCHER" "$VMSCAN_C"
 rc=$?
 if [ $rc -eq 0 ]; then
-    log "mglru v2 (delayed enable + ignore userspace 0) applied ✅"
+    log "mglru v2.1 (delayed enable + ignore userspace 0 + 2 mainline fixes) applied ✅"
 else
     error "mglru: patch script failed!"
 fi

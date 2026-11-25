@@ -1,6 +1,6 @@
 # Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
 name=mglru
-desc=MGLRU v2: liga 90 s após o boot e ignora o echo 0 da ROM (mm/vmscan.c)
+desc=MGLRU v2.1: liga 90 s após o boot e ignora o echo 0 da ROM + 2 ajustes do mainline (mm/vmscan.c)
 mode=local
 upstream=
 license=?
