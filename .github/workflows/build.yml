@@ -64,13 +64,13 @@ on:
           - "nomount"
           - "zeromount"
       addon_profile:
-        description: "Addon Profile (Default: ADIOS | CC: ADIOS-Clutch + CC Governor + BORE-WARP + Clutch-Signals | Test: Default with EEVDF + BORE 7.0 instead of BORE, no Release)"
+        description: "Addon Profile (Optimized: EEVDF + BORE 7.0 + MGLRU + ADIOS, no Release yet | Default: BORE + ADIOS | CC: ADIOS-Clutch + CC Governor + BORE-WARP + Clutch-Signals)"
         type: choice
-        default: "Default_Addons"
+        default: "Optimized_Addons"
         options:
+          - "Optimized_Addons"
           - "Default_Addons"
           - "CC_Addons"
-          - "Test_Addons"
       tick_rate:
         description: "Tick Rate (CONFIG_HZ)"
         type: choice
@@ -101,7 +101,7 @@ on:
         type: boolean
         default: true
       mglru:
-        description: "MGLRU force-enable - CORE-only test patch (default OFF; o kernel já nasce com LRU_GEN_ENABLED=y)"
+        description: "MGLRU v2 (liga ~90 s após o boot e ignora o echo 0 da ROM) - já incluído no Optimized_Addons; marque só para Default/CC"
         type: boolean
         default: false
       lto_mode:
@@ -264,23 +264,29 @@ jobs:
           # these addons already sets its own default: ADIOS/ADIOS-Clutch via
           # CONFIG_MQ_IOSCHED_DEFAULT_ADIOS + boot enforcer, cc-governor via
           # its delayed cpufreq enforcer). Order matters: bore-warp after bore.
-          # CPU scheduler: BORE (CFS) everywhere, except Test_Addons which swaps
-          # it for EEVDF + BORE 7.0 (eevdf-bore is exclusive with bore/bore-warp).
+          # CPU scheduler: BORE (CFS) in Default/CC; Optimized_Addons swaps it for
+          # EEVDF + BORE 7.0 (eevdf-bore is exclusive with bore/bore-warp) and adds
+          # the MGLRU v2 addon (delayed enable, see kernel/addons/mglru).
           SCHED_ADDON="bore"
+          PROFILE_MGLRU=""
           if [ "${ADDON_PROFILE}" = "CC_Addons" ]; then
             PROFILE_ADDONS="bore-warp,clutch-signals,adios-clutch,cc-governor"
-          elif [ "${ADDON_PROFILE}" = "Test_Addons" ]; then
+          elif [ "${ADDON_PROFILE}" = "Optimized_Addons" ]; then
             SCHED_ADDON="eevdf-bore"
             PROFILE_ADDONS="adios"
-            # Experimental scheduler core: never published to a release channel.
+            PROFILE_MGLRU="mglru,"
+            # New scheduler core + MGLRU: not published to a release channel until
+            # the combination has run a full day on the device (Build/Warm/Dry only).
             if [ "${RUN_MODE}" = "Release" ]; then
-              echo "::error title=Test_Addons cannot be released::Test_Addons (EEVDF + BORE 7.0) is not boot-validated yet. Use run_mode Build/Warm Run/Dry Run."
+              echo "::error title=Optimized_Addons cannot be released yet::Optimized_Addons (EEVDF + BORE 7.0 + MGLRU) is not release-validated. Use Default_Addons or CC_Addons for Release, or run_mode Build/Warm Run/Dry Run."
               exit 1
             fi
           else
             PROFILE_ADDONS="adios"
           fi
-          ADDONS="bbrv3,bbg,${SCHED_ADDON},${PROFILE_ADDONS},ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${ADDON_REKERNEL}droidspaces,${ADDON_KASUMI}lz4zstd,lz4kd,${ADDON_MOUNTLESS}${ADDON_MGLRU}${ADDON_LE9UO}${ADDON_KCOMPRESSD}${ADDON_ZRAM_IR}"
+          # MGLRU once only: the profile adds it, the manual toggle must not duplicate it.
+          [ -n "${PROFILE_MGLRU}" ] && ADDON_MGLRU=""
+          ADDONS="bbrv3,bbg,${SCHED_ADDON},${PROFILE_ADDONS},ntsync,util-avg-fix,unicode-fix,pm-wakelock-blocker,${ADDON_REKERNEL}droidspaces,${ADDON_KASUMI}lz4zstd,lz4kd,${ADDON_MOUNTLESS}${PROFILE_MGLRU}${ADDON_MGLRU}${ADDON_LE9UO}${ADDON_KCOMPRESSD}${ADDON_ZRAM_IR}"
           echo "addons=${ADDONS}" >> $GITHUB_OUTPUT
           # "/" -> "-" so this is safe to use as a filesystem path component
           # (cache asset filenames) wherever ref_name is needed downstream.

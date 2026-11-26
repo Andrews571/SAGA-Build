@@ -101,6 +101,9 @@ O kernel passa a se chamar **SAGA_CC**, cada variante ganha ` - CC` e as hashtag
 ```
 Os zips seguem o mesmo padrão: `SAGA-6.1.190-RESUKISU+SUSFS-R5.zip` (Default) e `SAGA_CC-6.1.190-RESUKISU+SUSFS-R5.zip` (CC).
 
+## Perfil Optimized_Addons
+Não publica Release, então não gera post de canal. Zips e o post por build (tópico de CI) usam o nome **SAGA_OPT**: `SAGA_OPT-6.1.190-RESUKISU+SUSFS-R5.zip`.
+
 ## Como é enviado
 1. `sendMessage` com o texto completo (até 4096 caracteres), prévia do banner **acima** do texto.
 2. Se falhar, `sendPhoto` com o banner e a versão curta (até 1024, sem o bloco Features).

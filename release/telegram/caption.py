@@ -204,7 +204,7 @@ def build_blocks(env):
     run_id          = env.get("GITHUB_RUN_ID", "")
 
     profile = env.get("ADDON_PROFILE", "").strip()
-    kernel_name = "SAGA_TEST" if profile == "Test_Addons" else ("SAGA_CC" if profile == "CC_Addons" else "SAGA")
+    kernel_name = "SAGA_OPT" if profile == "Optimized_Addons" else ("SAGA_CC" if profile == "CC_Addons" else "SAGA")
     block_saga = (
         f"```{kernel_name}\n"
         f"Linux        : {linux_ver}\n"

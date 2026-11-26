@@ -73,6 +73,7 @@ jobs:
             -f sukisu=true \
             -f vanilla=false \
             -f susfs="enable" \
+            -f addon_profile="Default_Addons" \
             -f run_mode="Warm Run" \
             -f test_candidates=true \
             -f update_arsenal="no"
