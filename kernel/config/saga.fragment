@@ -91,6 +91,12 @@ CONFIG_DAMON_PADDR=y
 CONFIG_DAMON_RECLAIM=y
 CONFIG_DAMON_LRU_SORT=y
 
+# Kernel log buffer 128 KB -> 2 MB. With 128 KB the MediaTek display/KernelSU
+# chatter pushed the whole boot out of dmesg within ~15 s, so boot WARNs and
+# addon logs (saga-mglru) could not be read afterwards. Not a debug option;
+# no KMI impact (static buffer only).
+CONFIG_LOG_BUF_SHIFT=21
+
 # Debugs pra teste, (causaram bootloop no malachite comprovado) 
 # CONFIG_DEBUG_KERNEL=y
 # CONFIG_DEBUG_ATOMIC_SLEEP=y

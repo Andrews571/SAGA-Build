@@ -5,6 +5,17 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M15 — buffer de log do kernel de 128 KB para 2 MB
+**Arquivos:** `kernel/config/saga.fragment`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| O quê | Por quê | Como |
+|---|---|---|
+| `CONFIG_LOG_BUF_SHIFT=21` (era 17) | No Poco X7 o `dmesg` guardava só ~16 s: o ruído de troca de modo da tela e do KernelSU empurrava o boot para fora. Um WARN de boot (`tainted` bit 512) e os logs `saga-mglru` não podiam ser lidos depois | Uma linha no fragmento mesclado depois do `gki_defconfig` |
+
+**Sem impacto de KMI** (buffer estático). Não é opção de debug. Vale para todos os perfis; só entra no build seguinte e precisa de teste em aparelho.
+
+---
+
 ## M14 — addon `mm-backports` (PSI ×2 + rmap) no perfil Optimized_Addons
 **Arquivos:** `kernel/addons/mm-backports/{patch.py,mm-backports.sh,addon.meta}`, `.github/workflows/build.yml`, `docs/ADDONS-LISTA.md`, `docs/CHANGELOG-MANUTENCAO.md`
 
