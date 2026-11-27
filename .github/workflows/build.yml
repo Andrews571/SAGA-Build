@@ -273,7 +273,7 @@ jobs:
             PROFILE_ADDONS="bore-warp,clutch-signals,adios-clutch,cc-governor"
           elif [ "${ADDON_PROFILE}" = "Optimized_Addons" ]; then
             SCHED_ADDON="eevdf-bore"
-            PROFILE_ADDONS="adios"
+            PROFILE_ADDONS="adios,mm-backports"
             PROFILE_MGLRU="mglru,"
             # New scheduler core + MGLRU: not published to a release channel until
             # the combination has run a full day on the device (Build/Warm/Dry only).

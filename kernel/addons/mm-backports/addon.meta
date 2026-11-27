@@ -1,0 +1,12 @@
+# Metadados do addon (ver docs/ADDONS.md). Formato chave=valor, uma por linha.
+name=mm-backports
+desc=Backports do mainline: PSI test_states + bail-out irq (6.7/6.11) e rmap skip de processo saindo (6.11)
+mode=local
+upstream=
+license=GPL-2.0
+track=none
+track_ref=
+track_path=
+seen=
+seen_at=
+notes=patch.py local; experimental (branch test-addons-profile)

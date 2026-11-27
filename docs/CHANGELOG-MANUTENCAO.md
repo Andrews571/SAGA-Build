@@ -5,6 +5,22 @@ Mais recente primeiro. Atualizado a cada patch aplicado. Plano completo: 30 tare
 
 ---
 
+## M14 — addon `mm-backports` (PSI ×2 + rmap) no perfil Optimized_Addons
+**Arquivos:** `kernel/addons/mm-backports/{patch.py,mm-backports.sh,addon.meta}`, `.github/workflows/build.yml`, `docs/ADDONS-LISTA.md`, `docs/CHANGELOG-MANUTENCAO.md`
+
+| O quê | Por quê | Como |
+|---|---|---|
+| `psi-states`: `test_state()` em loop vira `test_states()` com máscara (mainline `0ec208ce98`, 6.11) | `psi_group_change` roda em toda troca de contexto; o loop de 7 estados com `switch` era custo fixo por chamada | `patch.py` troca a função e o `for (s...)`, remove a variável `s` |
+| `psi-irq`: sai cedo de `psi_account_irqtime` com PSI desligado (`0c2924079f`, 6.7) | Evita trabalho por tick quando `psi_disabled` | 1 `static_branch_likely(&psi_disabled)` |
+| `rmap-exiting`: pula folio anon não compartilhado de processo saindo/OOM-reaped (`c495b97624`, 6.11) | O reclaim fazia swap-out de página que seria liberada logo em seguida | `folio_referenced_one()` devolve -1 (`FOLIOREF_KEEP`); adaptado ao 6.1 com `folio_estimated_sharers() <= 1` |
+
+**Já presente (não portado):** `3840cbe24c` (picos falsos de PSI) já está no 6.1.190 do SAGA.
+**Não portado:** `bc2ff4cbc3` (liberar folios em lote) depende de `free_unref_folios()` e `mem_cgroup_uncharge_folios()` (série 6.8 em `page_alloc.c`/`memcontrol.c`), que o 6.1 não tem.
+**Sem mudança de struct/KMI.** Idempotente; se a forma do código diferir, avisa e pula.
+**Verificação:** cadeia completa aplicada em árvore limpa sem aviso; `build_utility.o` (inclui `psi.c`) e `rmap.o` compilam sem warnings. Teste em aparelho pendente. `Optimized_Addons` segue sem Release.
+
+---
+
 ## M13 — mglru v2.1: ajuste de memcg offline (e um ajuste descartado)
 **Arquivos:** `kernel/addons/mglru/{patch.py,mglru.sh,addon.meta}`, `docs/ADDONS-LISTA.md`, `docs/CHANGELOG-MANUTENCAO.md`
 
