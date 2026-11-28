@@ -11,7 +11,7 @@
 
 | Componente | Pin (good) | Ruins | Verificado | Run |
 |---|---|---|---|---|
-| `resukisu` | [`4ca505a878`](https://github.com/ReSukiSU/ReSukiSU/commit/4ca505a878d9a3d9584417ef6b7fa443f2e516d5) | 25 | 2026-11-27 | [46066238342](https://github.com/Andrews571/SAGA-Build/actions/runs/46066238342) |
+| `resukisu` | [`99ff0a27ca`](https://github.com/ReSukiSU/ReSukiSU/commit/99ff0a27ca5477180da6d70e7387b91b0a9aa5b7) | 25 | 2026-11-28 | [46118502761](https://github.com/Andrews571/SAGA-Build/actions/runs/46118502761) |
 | `susfs_resukisu` | [`f76b81f2a6`](https://gitlab.com/simonpunk/susfs4ksu/-/commit/f76b81f2a6bf98e4029cc0c823c054edbec29803) | 10 | 2026-11-15 | [43681048288](https://github.com/Andrews571/SAGA-Build/actions/runs/43681048288) |
 | `sukisu` | [`0ca744a888`](https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/0ca744a88835144c58d8256ebb32c279edabfcde) | 0 | — | — |
 | `sukisu_builtin` | [`4bec532dd4`](https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/4bec532dd447e2852aa8932afa768255350c103a) | 20 | 2026-11-15 | [43770130885](https://github.com/Andrews571/SAGA-Build/actions/runs/43770130885) |
